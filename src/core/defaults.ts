@@ -2,6 +2,8 @@ import type { EasingCurve, Expression, Keyframe, KeyValue, Preset, Project, Rig,
 
 export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 
+export const COMP = { width: 720, height: 720 };
+
 export const BONE = { r: 242, g: 239, b: 233, a: 1 };
 export const INK = { r: 20, g: 19, b: 24, a: 1 };
 

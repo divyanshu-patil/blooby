@@ -95,6 +95,8 @@ export function evaluateRig(project: Project, timeMs: number): Rig {
 export interface SceneItem {
   id: string;
   name: string;
+  /** ellipse for the body (squash stays round), pill for features (rx = min/2) */
+  shape: 'ellipse' | 'pill';
   /** rounded rect covers circle (r = w/2 = h/2) and pill alike — never a sharp corner */
   cx: number;
   cy: number;
@@ -141,7 +143,7 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
 
   if (root.visible) {
     out.push({
-      id: root.id, name: root.name, cx, cy, w: rx * 2, h: ry * 2,
+      id: root.id, name: root.name, shape: 'ellipse', cx, cy, w: rx * 2, h: ry * 2,
       r: Math.min(rx, ry), rotation: roll, color: root.color, depth: -2, zIndex: root.zIndex,
     });
   }
@@ -163,9 +165,10 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
       const rot = pr + node.transform.rotation;
 
       if (node.kind === 'svgLayer' && node.svg) {
-        out.push({ id: node.id, name: node.name, cx: ax, cy: ay, w, h, r: 0, rotation: rot, color: node.color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
+        out.push({ id: node.id, name: node.name, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, color: node.color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
       } else if (node.kind !== 'group') {
-        out.push({ id: node.id, name: node.name, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot, color: node.color, depth: p.depth, zIndex: node.zIndex });
+        const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
+        out.push({ id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot, color: node.color, depth: p.depth, zIndex: node.zIndex });
       }
       walk(node, ax, ay, rot, Math.max(w, h) / 2, { x: 0, y: 0 });
     }

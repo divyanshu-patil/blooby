@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "npx esbuild src/core/selfcheck.ts --bundle --format=esm | node --input-type=module"
   },
   "dependencies": {
     "gif.js.optimized": "^1.0.1",
