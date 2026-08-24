@@ -18,6 +18,8 @@ const COLLAPSED = 8;
 interface Pane {
   min?: number;
   max?: number;
+  /** initial size for a fixed pane before any drag/persisted value exists — default 260 */
+  default?: number;
   /** content already manages its own internal scrolling (e.g. a `.rail`) — default true */
   scroll?: boolean;
   content: ReactNode;
@@ -31,19 +33,19 @@ interface SplitProps {
   className?: string;
 }
 
-function load(key: string, ids: number[], fallback: number): Record<number, number> {
+function load(key: string, ids: number[], defaults: Record<number, number>): Record<number, number> {
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
       const obj = JSON.parse(raw);
       if (obj && typeof obj === 'object') {
         const out: Record<number, number> = {};
-        for (const id of ids) out[id] = typeof obj[id] === 'number' ? obj[id] : fallback;
+        for (const id of ids) out[id] = typeof obj[id] === 'number' ? obj[id] : defaults[id];
         return out;
       }
     }
   } catch { /* corrupt or blocked storage — start from the default split */ }
-  return Object.fromEntries(ids.map((id) => [id, fallback]));
+  return { ...defaults };
 }
 
 export function Split({ direction, storageKey, panes, flexIndex, className }: SplitProps) {
@@ -52,7 +54,8 @@ export function Split({ direction, storageKey, panes, flexIndex, className }: Sp
   const fixedIds = useMemo(() => panes.map((_, i) => i).filter((i) => i !== flex), [panes, flex]);
   const key = `blooby.split.${storageKey}.${n}`;
   const restored = useRef<Record<number, number>>({});
-  const [sizes, setSizes] = useState<Record<number, number>>(() => load(key, fixedIds, 260));
+  const [sizes, setSizes] = useState<Record<number, number>>(() =>
+    load(key, fixedIds, Object.fromEntries(fixedIds.map((i) => [i, panes[i].default ?? 260]))));
   const drag = useRef<{ handle: number; startPx: number; target: number; sign: 1 | -1; startSize: number } | null>(null);
 
   useEffect(() => {

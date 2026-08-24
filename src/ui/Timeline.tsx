@@ -204,7 +204,7 @@ export function Timeline() {
         </div>
       </div>
 
-      <div className="panel flush" style={{ minHeight: 172 }}>
+      <div className="panel flush" style={{ minHeight: 172, flex: 1 }}>
         {view === 'graph' ? (
           <GraphEditor tracks={visible} selected={sel} onSelect={setSel} />
         ) : (

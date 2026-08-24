@@ -108,49 +108,54 @@ export default function App() {
         <ExportBar />
       </header>
 
-      <div className="middle-split">
-        <Split direction="row" storageKey="main" flexIndex={1} panes={[
-          { min: 190, max: 460, content: (
-            <div className="rail rail-left">
-              <Layers />
-              <Presets />
-              <Expressions />
-            </div>
+      <div className="body-split">
+        <Split direction="column" storageKey="vertical" flexIndex={0} panes={[
+          { content: (
+            <Split direction="row" storageKey="main" flexIndex={1} panes={[
+              { min: 190, max: 460, content: (
+                <div className="rail rail-left">
+                  <Layers />
+                  <Presets />
+                  <Expressions />
+                </div>
+              ) },
+              { min: 320, content: <div className="stage"><Stage /></div> },
+              { min: 240, max: 560, content: (
+                <div className="rail rail-right">
+                  <div className="tabs">
+                    {(['node', 'eyes', 'fx', 'ai'] as Tab[]).map((t) => (
+                      <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
+                        {t === 'node' ? 'Node' : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : 'Copilot'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="rail-tab-body">
+                    {tab === 'node' && (
+                      <Split direction="column" storageKey="rail-node" panes={[
+                        { min: 160, content: <NodeInspector /> },
+                        { min: 140, content: <CameraPanel /> },
+                      ]} />
+                    )}
+                    {tab === 'eyes' && <EyePanel />}
+                    {tab === 'fx' && (
+                      <Split direction="column" storageKey="rail-fx" panes={[
+                        { min: 160, content: <Effects /> },
+                        { min: 140, content: <CameraPanel /> },
+                      ]} />
+                    )}
+                    {tab === 'ai' && <Copilot />}
+                  </div>
+                </div>
+              ) },
+            ]} />
           ) },
-          { min: 320, content: <div className="stage"><Stage /></div> },
-          { min: 240, max: 560, content: (
-            <div className="rail rail-right">
-              <div className="tabs">
-                {(['node', 'eyes', 'fx', 'ai'] as Tab[]).map((t) => (
-                  <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
-                    {t === 'node' ? 'Node' : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : 'Copilot'}
-                  </button>
-                ))}
-              </div>
-              <div className="rail-tab-body">
-                {tab === 'node' && (
-                  <Split direction="column" storageKey="rail-node" panes={[
-                    { min: 160, content: <NodeInspector /> },
-                    { min: 140, content: <CameraPanel /> },
-                  ]} />
-                )}
-                {tab === 'eyes' && <EyePanel />}
-                {tab === 'fx' && (
-                  <Split direction="column" storageKey="rail-fx" panes={[
-                    { min: 160, content: <Effects /> },
-                    { min: 140, content: <CameraPanel /> },
-                  ]} />
-                )}
-                {tab === 'ai' && <Copilot />}
-              </div>
+          { min: 220, max: 780, default: 420, content: (
+            <div className="timeline-pane">
+              <TimelineTabs />
+              <Timeline />
             </div>
           ) },
         ]} />
-      </div>
-
-      <div className="timeline">
-        <TimelineTabs />
-        <Timeline />
       </div>
       <Gallery />
     </div>
