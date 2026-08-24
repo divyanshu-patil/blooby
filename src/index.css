@@ -275,10 +275,17 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
   padding: 5px; border-radius: 6px; border: 1.5px solid transparent;
   background: var(--field);
   position: relative;
-  transition: border-color .12s;
+  cursor: grab;
+  transition: border-color .12s, opacity .12s;
 }
+.block:active { cursor: grabbing; }
 .block:hover { border-color: var(--line); }
 .block[data-active='true'] { border-color: var(--signal); }
+.block[data-dragging='true'] { opacity: .35; }
+.block-resize {
+  position: absolute; top: 0; right: -4px; bottom: 0; width: 8px;
+  cursor: ew-resize; z-index: 2;
+}
 .block .thumb { width: 100%; height: 48px; border-radius: 4px; background: var(--ink); display: block; }
 .block .dur {
   font: 500 10.5px var(--mono); color: var(--muted);
@@ -313,17 +320,35 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .trow { height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 8px; font: 500 11px var(--ui); border-bottom: 1px solid rgba(206, 198, 182, .35); }
 .trow[aria-selected='true'] { background: var(--signal-soft); }
 .trow .node { color: var(--muted); font-size: 10px; }
+.expand, .expand-spacer { flex: none; width: 12px; height: 12px; }
+.expand {
+  border: 0; background: none; color: var(--muted); font-size: 9px;
+  display: grid; place-items: center; transition: transform .12s, color .12s;
+}
+.expand:hover { color: var(--signal); }
+.expand[aria-pressed='true'] { transform: rotate(90deg); color: var(--signal); }
+.trow-detail { height: 40px; border-bottom: 1px solid rgba(206, 198, 182, .35); background: var(--field); }
+.lane-detail { height: 40px; border-bottom: 1px solid rgba(206, 198, 182, .35); background: var(--field); }
 .lane { height: 24px; position: relative; border-bottom: 1px solid rgba(206, 198, 182, .35); }
 .lane:hover { background: rgba(23, 22, 27, .028); }
 .lane .seg-fill { position: absolute; top: 11px; height: 2px; background: var(--line); border-radius: 1px; }
 
+/* one glyph per easing family — see core/easing.ts easingShape() for the mapping */
 .kfd {
-  position: absolute; top: 6px; width: 11px; height: 11px; margin-left: -5.5px;
-  background: var(--panel); border: 1.5px solid var(--ink); transform: rotate(45deg); border-radius: 2px;
+  position: absolute; top: 6px; width: 12px; height: 12px; margin-left: -6px;
+  background: var(--panel); border: 1.5px solid var(--ink);
   cursor: ew-resize;
 }
+.kfd[data-shape='diamond'] { transform: rotate(45deg); width: 11px; height: 11px; margin-left: -5.5px; border-radius: 2px; }
+.kfd[data-shape='circle'] { border-radius: 50%; }
+.kfd[data-shape='square'] { border-radius: 2px; }
+.kfd[data-shape='triangle-left'] { clip-path: polygon(100% 6%, 100% 94%, 4% 50%); border-color: transparent; background: var(--ink); }
+.kfd[data-shape='triangle-right'] { clip-path: polygon(0% 6%, 0% 94%, 96% 50%); border-color: transparent; background: var(--ink); }
+.kfd[data-shape='spring'] { clip-path: polygon(50% 0%, 90% 22%, 100% 62%, 74% 100%, 26% 100%, 0% 62%, 10% 22%); }
 .kfd[data-sel='true'] { background: var(--signal); border-color: var(--signal); }
+.kfd[data-shape='triangle-left'][data-sel='true'], .kfd[data-shape='triangle-right'][data-sel='true'] { background: var(--signal); }
 .kfd:hover { border-color: var(--signal); }
+.kfd[data-shape='triangle-left']:hover, .kfd[data-shape='triangle-right']:hover { background: var(--signal); }
 
 .playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--signal); pointer-events: none; z-index: 3; }
 .playhead::before { content: ''; position: absolute; top: 0; left: -4px; border: 4.5px solid transparent; border-top-color: var(--signal); border-bottom: 0; }

@@ -149,6 +149,7 @@ export function defaultProject(): Project {
     durationMode: 'custom',
     timelineDurationMs: 4000,
     fps: 30,
+    loop: false,
   };
   for (const id of ['p_idle', 'p_blink', 'p_talk', 'p_happy']) appendPreset(p, id);
   return p;

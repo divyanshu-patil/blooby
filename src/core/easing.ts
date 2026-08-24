@@ -73,3 +73,22 @@ export function namedEasing(name: string): EasingCurve {
 export function easingLabel(c: EasingCurve): string {
   return c.type === 'preset' ? c.name : c.type;
 }
+
+/**
+ * One glyph per easing family, so a busy lane reads at a glance instead of every
+ * keyframe being an identical diamond. CSS (`.kfd[data-shape=...]`) turns these into
+ * clip-path shapes — no icon assets, matches every other hand-drawn marker in the app.
+ */
+export type KeyframeShape = 'circle' | 'triangle-left' | 'triangle-right' | 'diamond' | 'spring' | 'square';
+
+export function easingShape(c: EasingCurve): KeyframeShape {
+  if (c.type === 'linear') return 'circle';
+  if (c.type === 'bezier') return 'square';
+  switch (c.name) {
+    case 'easeIn': return 'triangle-left';
+    case 'easeOut': return 'triangle-right';
+    case 'bounce':
+    case 'elastic': return 'spring';
+    default: return 'diamond'; // easeInOut — the common case keeps the familiar shape
+  }
+}

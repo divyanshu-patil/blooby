@@ -82,7 +82,7 @@ export interface Track {
 export interface Modifier {
   id: string;
   nodeId: string;
-  kind: 'shake' | 'float';
+  kind: 'shake' | 'float' | 'stretch';
   /** 0–200 %, the intensity dial */
   amount: number;
   frequency: number;
@@ -125,6 +125,9 @@ export interface Project {
   durationMode: 'custom' | 'even';
   timelineDurationMs: number;
   fps: number;
+  /** when true, every track eases from its last keyframe back to its t=0 value at the
+   * end of the timeline, so a looped playthrough (or export) has no seam. */
+  loop: boolean;
 }
 
 export const CAMERA_ID = '__camera';

@@ -42,10 +42,20 @@ export function sampleTrack(track: Track, t: number): KeyValue | undefined {
 }
 
 function applyModifier(rig: Rig, m: Modifier, tSec: number) {
-  const node = rig.nodes[m.nodeId];
-  if (!node) return;
   const gain = (m.amount / 100) * m.amplitude;
   if (gain === 0) return;
+
+  // unlike shake/float, stretch is never about one node — it pulses the whole rig
+  // (body and every mapped child) by a shared factor, so it walks all of them instead
+  // of targeting m.nodeId.
+  if (m.kind === 'stretch') {
+    const s = 1 + (gain / 100) * Math.sin(2 * Math.PI * m.frequency * tSec + (m.phase ?? 0));
+    for (const n of Object.values(rig.nodes)) n.transform.scale = { x: n.transform.scale.x * s, y: n.transform.scale.y * s };
+    return;
+  }
+
+  const node = rig.nodes[m.nodeId];
+  if (!node) return;
   const isRoot = node.id === rig.rootId || !node.surface.mapped;
   const bump = (path: string, d: number) => {
     const cur = getProp(node, path);
@@ -70,9 +80,29 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number) {
 }
 
 /** Rig with every track sampled at t and every modifier layered on top. */
+/**
+ * When a project loops, every track eases from wherever it ends back to its own t=0
+ * value by the end of the timeline, so playback (and export) can wrap with no seam.
+ * A pure derivation — never mutates stored keyframes — shared by playback and export so
+ * they can't drift apart, same as everything else in this file.
+ */
+export function resolveTracks(tracks: Track[], loop: boolean, durationMs: number): Track[] {
+  if (!loop) return tracks;
+  return tracks.map((track) => {
+    const ks = track.keyframes;
+    if (ks.length < 2) return track;
+    const last = ks[ks.length - 1];
+    if (last.time >= durationMs - 1) return track;
+    const start = sampleTrack(track, 0);
+    if (start === undefined || JSON.stringify(start) === JSON.stringify(last.value)) return track;
+    return { ...track, keyframes: [...ks, { id: `${last.id}~loop`, time: durationMs, value: start, easingOut: last.easingOut }] };
+  });
+}
+
 export function evaluateRig(project: Project, timeMs: number): Rig {
   const rig: Rig = structuredClone(project.rig);
-  for (const track of project.tracks) {
+  const tracks = resolveTracks(project.tracks, project.loop, project.timelineDurationMs);
+  for (const track of tracks) {
     const v = sampleTrack(track, timeMs);
     if (v !== undefined) writeProp(rig, track.nodeId, track.property, v);
   }

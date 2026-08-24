@@ -6,9 +6,9 @@
 import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
-import { buildScene, evaluateRig, lerpAngle, sampleTrack, valueAt } from './scene';
+import { buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
 import { defaultProject } from './defaults';
-import { derivedDuration } from './timeline';
+import { blockStarts, derivedDuration } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { useEditor, writeKeyframe } from './store';
 import { readProp } from './props';
@@ -315,6 +315,93 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   // writing again on the SAME (now-existing) track must not re-anchor a second time
   writeKeyframe(p, 'eyeL', 'transform.rotation', 3000, 40, { type: 'linear' });
   ok('a second write on an existing track adds one keyframe, not another anchor', track.keyframes.length === 3);
+}
+
+// --- stretch modifier: the whole rig, not one node ------------------------------
+{
+  const proj = defaultProject();
+  const before = buildScene(proj.rig, { width: 720, height: 720 });
+  proj.modifiers.push({ id: 'm', nodeId: proj.rig.rootId, kind: 'stretch', amount: 100, frequency: 1, amplitude: 20 });
+  // t chosen so sin(2*pi*1*t) = 1 exactly, i.e. the modifier is at its full +20% swing
+  const tSec = 0.25;
+  const after = buildScene(evaluateRig(proj, tSec * 1000), { width: 720, height: 720 });
+  const bodyBefore = before.find((s) => s.id === 'body')!, bodyAfter = after.find((s) => s.id === 'body')!;
+  const eyeBefore = before.find((s) => s.id === 'eyeL')!, eyeAfter = after.find((s) => s.id === 'eyeL')!;
+  ok('stretch grows the body', bodyAfter.w > bodyBefore.w * 1.15, `${bodyAfter.w} vs ${bodyBefore.w}`);
+  ok('stretch grows features too, not just the body node', eyeAfter.w > eyeBefore.w * 1.15, `${eyeAfter.w} vs ${eyeBefore.w}`);
+  const ratio = (a: number, b: number) => a / b;
+  ok('body and eye scale by the same factor — one rig-wide pulse', Math.abs(ratio(bodyAfter.w, bodyBefore.w) - ratio(eyeAfter.w, eyeBefore.w)) < 0.02,
+    `${ratio(bodyAfter.w, bodyBefore.w)} vs ${ratio(eyeAfter.w, eyeBefore.w)}`);
+  ok('amount=0 leaves it alone', (() => {
+    // compare against the same evaluated-at-t baseline (the Idle preset's own yaw
+    // track already moves the body a hair via the Stage-1 turn-squash) — isolating
+    // the modifier's own effect, not conflating it with unrelated keyframed motion.
+    const p2 = defaultProject();
+    const baseline = buildScene(evaluateRig(p2, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+    p2.modifiers.push({ id: 'm2', nodeId: p2.rig.rootId, kind: 'stretch', amount: 0, frequency: 1, amplitude: 20 });
+    const b = buildScene(evaluateRig(p2, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+    return Math.abs(b.w - baseline.w) < 1e-6;
+  })());
+}
+
+// --- moveBlock: reordering drags its keyframes along, in one undo step ---------
+{
+  const ed = useEditor.getState();
+  ed.loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const names = () => P().blocks.map((b) => b.name);
+  ok('default order', names().join(',') === 'Idle,Blink,Talk,Happy', names().join(','));
+
+  const blinkId = P().blocks[1].id;
+  const blinkTrackBefore = P().tracks.find((t) => t.blockId === blinkId)!;
+  const blinkKeysBefore = blinkTrackBefore.keyframes.map((k) => k.value);
+
+  useEditor.getState().moveBlock(blinkId, 3); // drag Blink to the very end
+  ok('block moved to the end', names().join(',') === 'Idle,Talk,Happy,Blink', names().join(','));
+  const blinkTrackAfter = P().tracks.find((t) => t.id === blinkTrackBefore.id)!;
+  ok('its keyframe VALUES are untouched by the move', JSON.stringify(blinkTrackAfter.keyframes.map((k) => k.value)) === JSON.stringify(blinkKeysBefore));
+  ok('its keyframe TIMES shifted to its new slot', blinkTrackAfter.keyframes[0].time > blinkTrackBefore.keyframes[0].time);
+  const starts = blockStarts(P());
+  ok('blocks are contiguous with no gap after reordering', starts.every((s, i) => i === 0 || s === starts[i - 1] + P().blocks[i - 1].durationMs));
+
+  useEditor.getState().undo();
+  ok('undo restores the original order', names().join(',') === 'Idle,Blink,Talk,Happy', names().join(','));
+}
+
+// --- resolveTracks: the loop seam is derived, never written into the file ------
+{
+  // a fixture that deliberately does NOT return to its start value — the whole point
+  const openTrack = { id: 't1', nodeId: 'body', property: 'surface.rotation', keyframes: [
+    { id: 'a', time: 0, value: 10, easingOut: { type: 'linear' as const } },
+    { id: 'b', time: 1000, value: 70, easingOut: { type: 'preset' as const, name: 'easeOut' as const } },
+  ] };
+  const off = resolveTracks([openTrack], false, 2000);
+  ok('loop off: tracks pass through completely unchanged', off[0] === openTrack);
+
+  const looped = resolveTracks([openTrack], true, 2000);
+  const src = looped[0];
+  ok('loop on: the original track object is not mutated', openTrack.keyframes.length === 2);
+  ok('loop on: a closing keyframe is appended at the very end', src.keyframes.length === 3 && src.keyframes[2].time === 2000);
+  ok('the closing value matches the track\'s own t=0 value', src.keyframes[2].value === 10);
+  ok('so the last frame and the first frame land on the same pose', sampleTrack(src, 2000) === sampleTrack(src, 0));
+  ok('the seam keeps the outgoing easing, not a fresh default', src.keyframes[2].easingOut.type === 'preset' && (src.keyframes[2].easingOut as { name: string }).name === 'easeOut');
+
+  // a track that already ends exactly on its own start value gets no redundant keyframe
+  const constTrack = { id: 't2', nodeId: 'body', property: 'transform.rotation', keyframes: [
+    { id: 'a', time: 0, value: 5, easingOut: { type: 'linear' as const } },
+    { id: 'b', time: 1000, value: 5, easingOut: { type: 'linear' as const } },
+  ] };
+  const untouched = resolveTracks([constTrack], true, 2000);
+  ok('a track already flat at its start value is left alone', untouched[0] === constTrack);
+
+  // evaluateRig actually uses this — the seam is visible in playback, not just in theory
+  const proj = defaultProject();
+  proj.loop = true;
+  proj.tracks = proj.tracks.filter((t) => !(t.nodeId === 'body' && t.property === 'transform.rotation'));
+  proj.tracks.push({ id: 't3', nodeId: 'body', property: 'transform.rotation', keyframes: openTrack.keyframes });
+  const atEnd = evaluateRig(proj, proj.timelineDurationMs).nodes.body.transform.rotation;
+  const atStart = evaluateRig(proj, 0).nodes.body.transform.rotation;
+  ok('evaluateRig itself loops the pose, not just the raw track helper', atEnd === atStart, `${atEnd} vs ${atStart}`);
 }
 
 // --- the store: block retiming, undo, tool calls -------------------------------
