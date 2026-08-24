@@ -75,7 +75,13 @@ export function Layers() {
       <div>
         {rows.map(({ node, depth }) => (
           <div key={node.id} className="layer" data-depth={depth} aria-selected={selection.includes(node.id)}
-            onPointerDown={() => select([node.id])}>
+            onPointerDown={(e) => {
+              if (e.shiftKey || e.metaKey || e.ctrlKey) {
+                select(selection.includes(node.id) ? selection.filter((id) => id !== node.id) : [...selection, node.id]);
+              } else {
+                select([node.id]);
+              }
+            }}>
             <span className="swatch" style={{ background: cssColor(node.color) }} />
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
             <span className="kind">{KIND_LABEL[node.kind]}</span>

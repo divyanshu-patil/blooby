@@ -102,6 +102,26 @@ export function surfaceNormal(yawDeg: number, pitchDeg: number): V3 {
   return [Math.sin(t) * Math.cos(p), Math.sin(p), Math.cos(t) * Math.cos(p)];
 }
 
+/**
+ * Stylised "the ball is turning" cue for the body's own silhouette.
+ *
+ * A true sphere's outline is a circle from every angle — turning it changes nothing
+ * about its drawn shape, only where features sit on it. That's mathematically correct
+ * and, on its own, reads as broken: two eyes sliding across a perfectly static circle
+ * doesn't parse as a head turning, especially for small-to-moderate yaw where one eye's
+ * own ±offset partly cancels the head rotation. This squashes the DRAWN body (and,
+ * because callers apply it to the same radius used for placement, pulls features in
+ * with it) by up to TURN_K along whichever axis is turning — a cartoon cheat, not
+ * physics, sized to be visible well before 90°.
+ */
+const TURN_K = 0.22;
+export function bodyTurnScale(yawDeg: number, pitchDeg: number): { sx: number; sy: number } {
+  return {
+    sx: 1 - TURN_K * Math.abs(Math.sin(yawDeg * D2R)),
+    sy: 1 - TURN_K * Math.abs(Math.sin(pitchDeg * D2R)),
+  };
+}
+
 /** An eye's friendly "distance from centre" is a signed offset on top of its posed yaw. */
 export function effectiveYaw(node: RigNode): number {
   return node.surface.yaw + (node.eye?.distanceFromCenter ?? 0);

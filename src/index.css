@@ -47,22 +47,37 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .app {
   display: grid;
   height: 100%;
-  grid-template-columns: 238px minmax(0, 1fr) 312px;
+  grid-template-columns: 1fr;
   grid-template-rows: 50px minmax(0, 1fr) auto;
-  grid-template-areas: 'top top top' 'left stage right' 'time time time';
+  grid-template-areas: 'top' 'middle' 'time';
   gap: 8px;
   padding: 8px;
 }
 
 .topbar { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 0 6px 0 10px; }
-.rail-left { grid-area: left; }
-.stage { grid-area: stage; min-width: 0; }
-.rail-right { grid-area: right; }
+.middle-split { grid-area: middle; min-height: 0; min-width: 0; }
+.stage { min-width: 0; height: 100%; }
 .timeline { grid-area: time; }
 
-.rail { display: flex; flex-direction: column; gap: 8px; overflow: hidden auto; scrollbar-width: thin; }
+.rail { display: flex; flex-direction: column; gap: 8px; overflow: hidden auto; scrollbar-width: thin; height: 100%; }
 .rail > * { flex: none; }
 .rail > .grow { flex: 1 1 auto; min-height: 200px; }
+.rail-tab-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+/* ---- resizable splits ---------------------------------------------------- */
+.split-handle { flex: none; position: relative; background: transparent; }
+.split-handle-row { width: 8px; cursor: col-resize; margin: 0 -4px; z-index: 5; }
+.split-handle-column { height: 8px; cursor: row-resize; margin: -4px 0; z-index: 5; }
+.split-handle::after { content: ''; position: absolute; background: var(--line); border-radius: 2px; }
+.split-handle-row::after { left: 3.5px; top: 0; bottom: 0; width: 1px; }
+.split-handle-column::after { top: 3.5px; left: 0; right: 0; height: 1px; }
+.split-handle:hover::after, .split-handle:active::after { background: var(--signal); width: 2px; }
+.split-handle-column:hover::after, .split-handle-column:active::after { width: auto; height: 2px; }
+.split-collapsed {
+  width: 100%; height: 100%; border: 0; background: var(--line-soft);
+  cursor: pointer; transition: background .12s;
+}
+.split-collapsed:hover { background: var(--signal); }
 
 /* ---- wordmark ----------------------------------------------------------- */
 .wordmark {
@@ -328,7 +343,7 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .tabs button[aria-pressed='true'] { background: var(--ink); color: var(--paper); }
 
 .pad {
-  position: relative; width: 100%; aspect-ratio: 1.85; border-radius: 6px;
+  position: relative; width: 100%; aspect-ratio: 2.3; border-radius: 6px;
   background: var(--ink); overflow: hidden; touch-action: none; cursor: crosshair;
 }
 .hint { font: 400 11px var(--ui); color: var(--muted); }
@@ -383,9 +398,6 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-@media (max-width: 1180px) {
-  .app { grid-template-columns: 200px minmax(0, 1fr) 268px; }
-}
 
 /* ---- export popover ----------------------------------------------------- */
 .export { position: relative; }

@@ -45,28 +45,37 @@ export function NumberField({ value, onChange, step = 1, className = 'prop-num' 
 
 const fmtNum = (v: number) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100));
 
-/** Stopwatch + slider + number. The only way a numeric property is ever edited. */
-export function PropRow({ nodeId, property, label }: { nodeId: string; property: string; label?: string }) {
+/**
+ * Stopwatch + slider + number. The only way a numeric property is ever edited.
+ * `nodeId` can be an array — every write applies to every id in it, so selecting both
+ * eyes and dragging one slider moves both, in lock-step, as one undo step.
+ */
+export function PropRow({ nodeId, property, label }: { nodeId: string | string[]; property: string; label?: string }) {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const setValue = useEditor((s) => s.setValue);
   const toggleTrack = useEditor((s) => s.toggleTrack);
   const selectTrack = useEditor((s) => s.selectTrack);
 
-  const track = project.tracks.find((t) => t.nodeId === nodeId && t.property === property);
-  const v = valueAt(project, nodeId, property, playhead);
+  const ids = Array.isArray(nodeId) ? nodeId : [nodeId];
+  const primary = ids[0];
+  const track = project.tracks.find((t) => t.nodeId === primary && t.property === property);
+  const v = valueAt(project, primary, property, playhead);
   if (typeof v !== 'number') return null;
   const [min, max, step] = PROP_RANGE[property] ?? [-100, 100, 1];
+
+  const writeAll = (n: number) => { for (const id of ids) setValue(id, property, n, `multi.${property}`); };
+  const toggleAll = () => { for (const id of ids) toggleTrack(id, property); };
 
   return (
     <div className="prop">
       <button className="stopwatch" aria-pressed={!!track} title={track ? 'Remove keyframes' : 'Animate this property'}
-        onClick={() => { toggleTrack(nodeId, property); if (track) selectTrack(null); else selectTrack(null); }} />
+        onClick={() => { toggleAll(); selectTrack(null); }} />
       <label className="prop-label"><span className="t">{label ?? PROP_LABEL[property] ?? property}</span>
         <input type="range" min={min} max={max} step={step} value={v}
-          onChange={(e) => setValue(nodeId, property, parseFloat(e.target.value))} />
+          onChange={(e) => writeAll(parseFloat(e.target.value))} />
       </label>
-      <NumberField value={v} step={step} onChange={(n) => setValue(nodeId, property, clampTo(n, min, max))} />
+      <NumberField value={v} step={step} onChange={(n) => writeAll(clampTo(n, min, max))} />
     </div>
   );
 }

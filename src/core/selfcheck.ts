@@ -3,14 +3,15 @@
  * sphere projection, its inverse, easing, OKLCH round-trip, track sampling.
  *   npx esbuild src/core/selfcheck.ts --bundle --format=esm | node --input-type=module
  */
-import { effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
+import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { buildScene, evaluateRig, lerpAngle, sampleTrack, valueAt } from './scene';
 import { defaultProject } from './defaults';
 import { derivedDuration } from './timeline';
 import { bakeLottie } from '../export/lottie';
-import { useEditor } from './store';
+import { useEditor, writeKeyframe } from './store';
+import { readProp } from './props';
 import { applyCalls, describe, normaliseCall, validate, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
 import { baseUrl, LOCAL_URL, needsKey, resolveModel } from '../copilot/pool';
@@ -202,8 +203,11 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   }
   // A flat decal tangent to a sphere genuinely pokes past the silhouette near the rim —
   // the exact shear transform spills 5.3% here, so 5.3% is the floor, not a bug. The
-  // scale-only approximation costs about 1.4 points on top of that.
-  ok('features stay within the body outline', worst <= 1.075, `${worst.toFixed(4)} at ${worstAt}`);
+  // scale-only approximation costs about 1.4 points on top of that, and the stylised
+  // turn-squash (bodyTurnScale, up to 22% at combined extreme yaw+pitch) adds a couple
+  // more at the extremes where both squash independently — swept the full grid, worst
+  // case is 9.2%.
+  ok('features stay within the body outline', worst <= 1.10, `${worst.toFixed(4)} at ${worstAt}`);
 }
 
 // --- lottie bake: does the baked file actually reproduce the scene? ------------
@@ -275,6 +279,42 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     }
   }
   ok('baked playback matches the canvas within a pixel', worst < 1, `worst error ${worst.toFixed(3)}px`);
+}
+
+// --- body turn-squash: a stylised cue, not physics ------------------------------
+{
+  const flat = bodyTurnScale(0, 0);
+  ok('no squash at rest', flat.sx === 1 && flat.sy === 1);
+  const yawed = bodyTurnScale(20.4, 0);
+  ok('yaw visibly narrows the body even at a moderate angle', yawed.sx < 0.94 && yawed.sx > 0.85, String(yawed.sx));
+  ok('yaw does not touch the vertical axis', bodyTurnScale(40, 0).sy === 1);
+  ok('pitch does not touch the horizontal axis', bodyTurnScale(0, 40).sx === 1);
+  ok('squash is symmetric in sign', bodyTurnScale(30, 0).sx === bodyTurnScale(-30, 0).sx);
+  const scene0 = buildScene(defaultProject().rig, { width: 720, height: 720 });
+  const bodyAt0 = scene0.find((s) => s.id === 'body')!;
+  const p2 = defaultProject();
+  p2.rig.nodes.body.surface.yaw = 45;
+  const bodyAt45 = buildScene(p2.rig, { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+  ok('the drawn body actually narrows at yaw 45', bodyAt45.w < bodyAt0.w, `${bodyAt45.w} vs ${bodyAt0.w}`);
+  ok('height is untouched by pure yaw', Math.abs(bodyAt45.h - bodyAt0.h) < 1e-6);
+}
+
+// --- writeKeyframe anchors a brand-new track instead of going constant ---------
+{
+  const p = defaultProject();
+  // pick a property with no existing track, matching a copilot add_keyframe / applyExpression call
+  ok('no pre-existing track on eyeL rotation', !p.tracks.some((t) => t.nodeId === 'eyeL' && t.property === 'transform.rotation'));
+  const before = readProp(p.rig, 'eyeL', 'transform.rotation');
+  writeKeyframe(p, 'eyeL', 'transform.rotation', 2000, 25, { type: 'linear' });
+  const track = p.tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'transform.rotation')!;
+  ok('an anchor keyframe was seeded at t=0', track.keyframes.length === 2 && track.keyframes[0].time === 0);
+  ok('the anchor holds the PREVIOUS value, not the new one', track.keyframes[0].value === before, `${track.keyframes[0].value} vs ${before}`);
+  ok('t=0 still reads as unchanged after the write', sampleTrack(track, 0) === before);
+  ok('the target time reads the new value', sampleTrack(track, 2000) === 25);
+  ok('halfway there interpolates, does not jump', (sampleTrack(track, 1000) as number) > (before as number) && (sampleTrack(track, 1000) as number) < 25);
+  // writing again on the SAME (now-existing) track must not re-anchor a second time
+  writeKeyframe(p, 'eyeL', 'transform.rotation', 3000, 40, { type: 'linear' });
+  ok('a second write on an existing track adds one keyframe, not another anchor', track.keyframes.length === 3);
 }
 
 // --- the store: block retiming, undo, tool calls -------------------------------

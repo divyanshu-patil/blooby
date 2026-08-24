@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { COMP } from '../core/defaults';
 import { buildScene, evaluateRig, type SceneItem } from '../core/scene';
-import { screenToSurface } from '../core/curvature';
+import { bodyTurnScale, screenToSurface } from '../core/curvature';
 import { Shapes } from './Mascot';
 import type { Project, Rig } from '../core/types';
 
@@ -19,8 +19,9 @@ interface Drag {
 function bodyFrame(rig: Rig) {
   const root = rig.nodes[rig.rootId];
   const off = root.surface.flatOffset ?? { x: 0, y: 0 };
-  const rx = root.size.x * root.transform.scale.x;
-  const ry = (root.size.y || root.size.x) * root.transform.scale.y;
+  const turn = bodyTurnScale(root.surface.yaw, root.surface.pitch);
+  const rx = root.size.x * root.transform.scale.x * turn.sx;
+  const ry = (root.size.y || root.size.x) * root.transform.scale.y * turn.sy;
   return {
     cx: COMP.width / 2 + rig.camera.offset.x + off.x,
     cy: COMP.height / 2 + rig.camera.offset.y + off.y,
@@ -129,8 +130,9 @@ export function Stage() {
     if (!node) return;
 
     if (d.mode === 'turn') {
-      const yaw = clamp(d.start.yaw + (p.x - d.ox) * 0.28, -89, 89);
-      const pitch = clamp(d.start.pitch + (p.y - d.oy) * 0.28, -89, 89);
+      // gentle enough that a full sweep of the stage doesn't blow straight past ±90°
+      const yaw = clamp(d.start.yaw + (p.x - d.ox) * 0.18, -89, 89);
+      const pitch = clamp(d.start.pitch + (p.y - d.oy) * 0.18, -89, 89);
       setValue(d.id, 'surface.yaw', yaw, `turn.${d.id}`);
       setValue(d.id, 'surface.pitch', pitch, `turn.${d.id}`);
       return;

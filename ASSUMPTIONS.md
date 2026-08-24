@@ -113,11 +113,29 @@ The payload is already-minified JSON going straight into a player, so deflate wo
 little and cost a dependency. CRCs verified against the standard check vector, and the
 output opens with `unzip`.
 
-**The dotLottie state machine follows the published v1 shape and was not verified against
-current tooling** — the spec itself flags this as a moving target and there was no
-running player to test it against here. Every animation in the container is plain
-spec-compliant Lottie, and players ignore manifest keys they do not know, so the file is
-safe either way. *Verify before relying on the state machine.*
+**dotLottie: rewritten against v2.0 and verified against a real player** (this was
+reported broken, and it was — the v1 shape assumed above was wrong on two structural
+points: directories were `animations/`/`states/` instead of the spec's `a/`/`s/`, and the
+state machine's `initial`/`states` were nested under a non-spec `descriptor` object
+instead of sitting flat at the top level, so no conformant player could find either the
+animations or the state machine at all). Fixed against the spec fetched directly from
+`dotlottie.io/spec/2.0/`, then loaded with `@lottiefiles/dotlottie-web` in a real headless
+Chrome session: the file loads, `stateMachineLoad('mascot')` and `stateMachineStart()`
+both return `true`, and the player fires real `stateMachineTransition`/
+`stateMachineStateEntered` events entering the first state. That's the part that was
+reported broken, and it's now confirmed working end to end.
+
+*Residual uncertainty, narrower than before*: the auto-advance-to-the-next-state-on-
+completion wiring (`OnComplete` interaction → `Fire` action → `Event`-type guard) is
+built from the best pattern available — no verbatim spec example was findable, only a
+plausible one from community docs — and in the same live test the state machine started
+and entered its first state correctly but did not visibly advance to the next state
+within a full playthrough. The states, their animations, and manual switching all work;
+whether this *particular* auto-chaining syntax is exactly what current players expect is
+still open. *If auto-advance matters, drive it explicitly instead* — call
+`stateMachineFireEvent`/`stateMachineSetBooleanInput` from host code per state, which
+every version of the spec supports unambiguously, rather than relying on the file to
+self-advance.
 
 **MP4 via `MediaRecorder`, not `ffmpeg.wasm`.** Chrome and Safari both advertise
 `video/mp4;codecs=avc1`; where they do not, the exporter falls back to WebM and the

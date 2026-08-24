@@ -10,6 +10,7 @@ import { Effects } from './ui/Effects';
 import { Timeline, DurationField } from './ui/Timeline';
 import { Copilot } from './ui/Copilot';
 import { ExportBar } from './ui/ExportBar';
+import { Split } from './ui/Resizable';
 import type { Project } from './core/types';
 
 type Tab = 'node' | 'eyes' | 'fx' | 'ai';
@@ -102,26 +103,44 @@ export default function App() {
         <ExportBar />
       </header>
 
-      <div className="rail rail-left">
-        <Layers />
-        <Presets />
-        <Expressions />
-      </div>
-
-      <div className="stage"><Stage /></div>
-
-      <div className="rail rail-right">
-        <div className="tabs">
-          {(['node', 'eyes', 'fx', 'ai'] as Tab[]).map((t) => (
-            <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
-              {t === 'node' ? 'Node' : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : 'Copilot'}
-            </button>
-          ))}
-        </div>
-        {tab === 'node' && <><NodeInspector /><CameraPanel /></>}
-        {tab === 'eyes' && <EyePanel />}
-        {tab === 'fx' && <><Effects /><CameraPanel /></>}
-        {tab === 'ai' && <Copilot />}
+      <div className="middle-split">
+        <Split direction="row" storageKey="main" flexIndex={1} panes={[
+          { min: 190, max: 460, content: (
+            <div className="rail rail-left">
+              <Layers />
+              <Presets />
+              <Expressions />
+            </div>
+          ) },
+          { min: 320, content: <div className="stage"><Stage /></div> },
+          { min: 240, max: 560, content: (
+            <div className="rail rail-right">
+              <div className="tabs">
+                {(['node', 'eyes', 'fx', 'ai'] as Tab[]).map((t) => (
+                  <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
+                    {t === 'node' ? 'Node' : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : 'Copilot'}
+                  </button>
+                ))}
+              </div>
+              <div className="rail-tab-body">
+                {tab === 'node' && (
+                  <Split direction="column" storageKey="rail-node" panes={[
+                    { min: 160, content: <NodeInspector /> },
+                    { min: 140, content: <CameraPanel /> },
+                  ]} />
+                )}
+                {tab === 'eyes' && <EyePanel />}
+                {tab === 'fx' && (
+                  <Split direction="column" storageKey="rail-fx" panes={[
+                    { min: 160, content: <Effects /> },
+                    { min: 140, content: <CameraPanel /> },
+                  ]} />
+                )}
+                {tab === 'ai' && <Copilot />}
+              </div>
+            </div>
+          ) },
+        ]} />
       </div>
 
       <div className="timeline"><Timeline /></div>

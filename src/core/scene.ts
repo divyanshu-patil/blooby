@@ -1,7 +1,7 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
 import { noise1d } from './noise';
-import { projectToScreen, silhouetteScale } from './curvature';
+import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
 import { getProp, readProp, setProp, writeProp } from './props';
 import type { ColorStop, KeyValue, Modifier, Project, Rig, RigNode, Track, Vec2 } from './types';
 
@@ -130,8 +130,9 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   if (!root) return [];
   const out: SceneItem[] = [];
 
-  const rx = root.size.x * root.transform.scale.x;
-  const ry = (root.size.y || root.size.x) * root.transform.scale.y;
+  const turn = bodyTurnScale(root.surface.yaw, root.surface.pitch);
+  const rx = root.size.x * root.transform.scale.x * turn.sx;
+  const ry = (root.size.y || root.size.x) * root.transform.scale.y * turn.sy;
   const off = root.surface.flatOffset ?? { x: 0, y: 0 };
   const cx = view.width / 2 + rig.camera.offset.x + off.x;
   const cy = view.height / 2 + rig.camera.offset.y + off.y;

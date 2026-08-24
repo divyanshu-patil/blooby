@@ -61,6 +61,40 @@ export function ColorField({ value, onChange, onToggleTrack, animated }: {
   );
 }
 
+/** Every node in the selection, batch-edited together — scale, roll, colour, nothing that only makes sense for one. */
+function MultiNodeInspector({ ids }: { ids: string[] }) {
+  const project = useEditor((s) => s.project);
+  const playhead = useEditor((s) => s.playhead);
+  const setValue = useEditor((s) => s.setValue);
+  const toggleTrack = useEditor((s) => s.toggleTrack);
+  const select = useEditor((s) => s.select);
+
+  const nodes = ids.map((i) => project.rig.nodes[i]).filter((n): n is NonNullable<typeof n> => !!n);
+  const names = nodes.map((n) => n.name).join(', ');
+  const colorNow = valueAt(project, ids[0], 'color', playhead) as ColorStop;
+  const colorTrack = project.tracks.some((t) => ids.includes(t.nodeId) && t.property === 'color');
+
+  return (
+    <Panel title={`${nodes.length} layers`} actions={<span className="tag">{names.slice(0, 28)}{names.length > 28 ? '…' : ''}</span>}>
+      <p className="hint">Editing {nodes.length} layers together — every change here applies to all of them, in one undo step.</p>
+      <div className="divider" />
+      <PropRow nodeId={ids} property="transform.scale.x" />
+      <PropRow nodeId={ids} property="transform.scale.y" />
+      <PropRow nodeId={ids} property="transform.rotation" />
+      {nodes.every((n) => n.kind !== 'body') && <PropRow nodeId={ids} property="transform.length" />}
+      {nodes.every((n) => n.kind === 'eye') && <PropRow nodeId={ids} property="eye.openness" />}
+
+      <div className="divider" />
+      <ColorField value={colorNow ?? nodes[0].color} animated={colorTrack}
+        onToggleTrack={() => { for (const i of ids) toggleTrack(i, 'color'); }}
+        onChange={(c) => { for (const i of ids) setValue(i, 'color', c, 'multi.color'); }} />
+
+      <div className="divider" />
+      <button className="btn sm" onClick={() => select([ids[0]])}>Just select {nodes[0]?.name}</button>
+    </Panel>
+  );
+}
+
 export function NodeInspector() {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
@@ -69,9 +103,11 @@ export function NodeInspector() {
   const setValue = useEditor((s) => s.setValue);
   const toggleTrack = useEditor((s) => s.toggleTrack);
 
+  if (selection.length > 1) return <MultiNodeInspector ids={selection} />;
+
   const id = selection[0];
   const node = id ? project.rig.nodes[id] : undefined;
-  if (!node) return <Panel title="Node"><p className="empty-note">Select a layer on the stage or in the list.</p></Panel>;
+  if (!node) return <Panel title="Node"><p className="empty-note">Select a layer on the stage or in the list — shift-click to select more than one.</p></Panel>;
 
   const colorNow = valueAt(project, node.id, 'color', playhead) as ColorStop;
   const colorTrack = project.tracks.some((t) => t.nodeId === node.id && t.property === 'color');

@@ -385,7 +385,18 @@ function upsertKeyframe(track: Track, time: number, value: KeyValue) {
 
 export function writeKeyframe(p: Project, nodeId: string, property: string, time: number, value: KeyValue, easing: EasingCurve) {
   let track = p.tracks.find((t) => t.nodeId === nodeId && t.property === property);
-  if (!track) { track = { id: uid('t'), nodeId, property, keyframes: [] }; p.tracks.push(track); }
+  if (!track) {
+    track = { id: uid('t'), nodeId, property, keyframes: [] };
+    p.tracks.push(track);
+    // A brand-new track with one keyframe is constant *everywhere* (sampleTrack's
+    // length===1 case), so writing a target value at t>0 would retroactively apply it
+    // at t=0 too. Anchor the track to the value it already had, so only the segment
+    // from `time` onward actually changes.
+    if (time > 1) {
+      const base = readProp(p.rig, nodeId, property);
+      if (base !== undefined) track.keyframes.push({ id: uid('k'), time: 0, value: base, easingOut: { type: 'linear' } });
+    }
+  }
   const at = track.keyframes.find((k) => Math.abs(k.time - time) < 1);
   if (at) { at.value = value; at.easingOut = easing; return; }
   track.keyframes.push({ id: uid('k'), time, value, easingOut: easing });
