@@ -4,13 +4,14 @@ import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { blockStarts, characteristicTime, fmtSec } from '../core/timeline';
 import { applyEasing, EASING_NAMES, easingLabel, easingShape, namedEasing } from '../core/easing';
-import { PROP_LABEL, type Track } from '../core/types';
+import { activeTimeline, PROP_LABEL, type Track } from '../core/types';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
 import { NumberField } from './bits';
 
 export function Timeline() {
   const project = useEditor((s) => s.project);
+  const tl = activeTimeline(project);
   const playhead = useEditor((s) => s.playhead);
   const setPlayhead = useEditor((s) => s.setPlayhead);
   const playing = useEditor((s) => s.playing);
@@ -51,25 +52,25 @@ export function Timeline() {
     return () => ro.disconnect();
   }, []);
 
-  const duration = Math.max(project.timelineDurationMs, 1);
+  const duration = Math.max(tl.timelineDurationMs, 1);
   const pxPerMs = ((width - 12) / duration) * zoom;
   const laneW = duration * pxPerMs;
 
   const visible = useMemo(
-    () => (selection.length ? project.tracks.filter((t) => selection.includes(t.nodeId)) : project.tracks),
-    [project.tracks, selection],
+    () => (selection.length ? tl.tracks.filter((t) => selection.includes(t.nodeId)) : tl.tracks),
+    [tl.tracks, selection],
   );
-  const jumps = useMemo(() => keyframeTimes(visible.length ? visible : project.tracks), [visible, project.tracks]);
-  const starts = blockStarts(project);
+  const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
+  const starts = blockStarts(tl);
 
   const thumbs = useMemo(
-    () => project.blocks.map((b, i) => {
+    () => tl.blocks.map((b, i) => {
       const preset = project.presets.find((p) => p.id === b.presetId);
       const rel = preset ? (characteristicTime(preset) / preset.durationMs) * b.durationMs : b.durationMs * 0.45;
       return sceneAt(project, starts[i] + rel, COMP);
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [project.blocks, project.tracks, project.rig, project.modifiers],
+    [tl.blocks, tl.tracks, project.rig, tl.modifiers],
   );
 
   const goto = (dir: -1 | 1) => {
@@ -85,10 +86,10 @@ export function Timeline() {
     setPlayhead(Math.max(0, Math.min(duration, (e.clientX - r.left) / pxPerMs)));
   };
 
-  const selKf = sel && project.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
+  const selKf = sel && tl.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
 
   const tickStep = duration > 12000 ? 2000 : duration > 5000 ? 1000 : 500;
-  const activeBlock = starts.findIndex((s, i) => playhead >= s && playhead < s + project.blocks[i].durationMs);
+  const activeBlock = starts.findIndex((s, i) => playhead >= s && playhead < s + tl.blocks[i].durationMs);
 
   return (
     <div className="timeline">
@@ -131,18 +132,18 @@ export function Timeline() {
       </div>
 
       <div className="strip-wrap">
-        <select className="sel" style={{ alignSelf: 'center' }} value={project.durationMode}
+        <select className="sel" style={{ alignSelf: 'center' }} value={tl.durationMode}
           title="How block durations are decided"
           onChange={(e) => setDurationMode(e.target.value as 'custom' | 'even')}>
           <option value="custom">custom</option>
           <option value="even">even</option>
         </select>
-        <button className="btn sm" aria-pressed={project.loop} style={{ alignSelf: 'center' }}
+        <button className="btn sm" aria-pressed={tl.loop} style={{ alignSelf: 'center' }}
           title="Ease the last moment back to the first, so playback and export loop with no seam"
-          onClick={() => commit((p) => { p.loop = !p.loop; }, 'projloop')}>
-          {project.loop ? 'Loops' : 'Loop'}
+          onClick={() => commit((p) => { const t2 = activeTimeline(p); t2.loop = !t2.loop; }, 'projloop')}>
+          {tl.loop ? 'Loops' : 'Loop'}
         </button>
-        <div className={project.blocks.length ? 'strip' : 'strip empty'}
+        <div className={tl.blocks.length ? 'strip' : 'strip empty'}
           onDragOver={(e) => {
             if (e.dataTransfer.types.includes('text/blooby-preset') || e.dataTransfer.types.includes('text/blooby-block-reorder')) {
               e.preventDefault();
@@ -157,15 +158,15 @@ export function Timeline() {
             const reorderId = e.dataTransfer.getData('text/blooby-block-reorder');
             if (reorderId) {
               e.preventDefault();
-              const from = project.blocks.findIndex((b) => b.id === reorderId);
+              const from = tl.blocks.findIndex((b) => b.id === reorderId);
               moveBlock(reorderId, from >= 0 && target > from ? target - 1 : target);
               return;
             }
             const presetId = e.dataTransfer.getData('text/blooby-preset');
             if (presetId) { e.preventDefault(); addBlock(presetId, target); }
           }}>
-          {!project.blocks.length && 'Drag a preset here, or click one to append it.'}
-          {project.blocks.map((b, i) => {
+          {!tl.blocks.length && 'Drag a preset here, or click one to append it.'}
+          {tl.blocks.map((b, i) => {
             const start = starts[i];
             const within = playhead >= start && playhead < start + b.durationMs;
             return (
@@ -178,9 +179,9 @@ export function Timeline() {
                 <button className="x" title="Remove block" onClick={(e) => { e.stopPropagation(); removeBlock(b.id); }}>✕</button>
                 <MascotThumb className="thumb" scene={thumbs[i]} view={COMP} />
                 <span style={{ font: '600 10.5px var(--ui)', width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
-                <DurInput ms={b.durationMs} label={`${b.name} duration`} locked={project.durationMode === 'even'}
+                <DurInput ms={b.durationMs} label={`${b.name} duration`} locked={tl.durationMode === 'even'}
                   onCommit={(sec) => setBlockDuration(b.id, sec * 1000)} />
-                {project.durationMode === 'custom' && (
+                {tl.durationMode === 'custom' && (
                   <div className="block-resize" title="Drag to change duration"
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -190,7 +191,7 @@ export function Timeline() {
                     onPointerMove={(e) => {
                       const r = resize.current;
                       if (!r || r.id !== b.id) return;
-                      const pxPerMsNow = (width - 12) / Math.max(project.timelineDurationMs, 1) * zoom;
+                      const pxPerMsNow = (width - 12) / Math.max(tl.timelineDurationMs, 1) * zoom;
                       const next = r.startMs + (e.clientX - r.startX) / pxPerMsNow;
                       setBlockDuration(b.id, Math.max(60, next));
                     }}
@@ -211,7 +212,7 @@ export function Timeline() {
             <div className="track-names">
               <div className="ruler" style={{ paddingLeft: 8, display: 'flex', alignItems: 'center' }}>
                 <span style={{ position: 'static', transform: 'none' }}>
-                  {selection.length ? `${visible.length} track${visible.length === 1 ? '' : 's'} · selected` : `${project.tracks.length} tracks`}
+                  {selection.length ? `${visible.length} track${visible.length === 1 ? '' : 's'} · selected` : `${tl.tracks.length} tracks`}
                 </span>
               </div>
               {visible.map((t) => {
@@ -240,7 +241,7 @@ export function Timeline() {
             <div className="track-lanes" ref={lanesRef} style={{ width: laneW }} onPointerDown={scrub} onPointerMove={scrub}>
               <div style={{ position: 'relative' }}>
                 <div className="ruler">
-                  {project.blocks.map((b, i) => (
+                  {tl.blocks.map((b, i) => (
                     <div key={b.id} className="blockband" style={{ left: starts[i] * pxPerMs, width: b.durationMs * pxPerMs }}>{b.name}</div>
                   ))}
                   {Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, i) => i * tickStep).map((t) => (

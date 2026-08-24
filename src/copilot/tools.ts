@@ -3,7 +3,7 @@ import { uid } from '../core/defaults';
 import { namedEasing, EASING_NAMES } from '../core/easing';
 import { blocksEnd } from '../core/timeline';
 import { setProp } from '../core/props';
-import { NODE_PROPS } from '../core/types';
+import { activeTimeline, NODE_PROPS } from '../core/types';
 import type { EasingCurve, Project } from '../core/types';
 
 export type ToolCall = { name: string; args: Record<string, unknown> };
@@ -210,22 +210,23 @@ export function applyCalls(calls: ToolCall[]) {
         }
         case 'add_preset_to_timeline': {
           const preset = findPreset(p, a.preset)!;
-          const at = num(a.index) ?? p.blocks.length;
+          const tl = activeTimeline(p);
+          const index = num(a.index) ?? tl.blocks.length;
           const blockId = uid('b');
-          const start = blocksEnd({ ...p, blocks: p.blocks.slice(0, at) });
-          const shifted = new Set(p.blocks.slice(at).map((b) => b.id));
-          for (const t of p.tracks) if (t.blockId && shifted.has(t.blockId)) for (const k of t.keyframes) k.time += preset.durationMs;
+          const start = blocksEnd({ ...tl, blocks: tl.blocks.slice(0, index) });
+          const shifted = new Set(tl.blocks.slice(index).map((b) => b.id));
+          for (const t of tl.tracks) if (t.blockId && shifted.has(t.blockId)) for (const k of t.keyframes) k.time += preset.durationMs;
           for (const t of preset.tracks) {
-            p.tracks.push({
+            tl.tracks.push({
               id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
               keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
             });
           }
-          p.blocks.splice(at, 0, { id: blockId, presetId: preset.id, name: preset.name, durationMs: preset.durationMs });
+          tl.blocks.splice(index, 0, { id: blockId, presetId: preset.id, name: preset.name, durationMs: preset.durationMs });
           break;
         }
         case 'add_modifier':
-          p.modifiers.push({
+          activeTimeline(p).modifiers.push({
             id: uid('m'), nodeId: String(a.nodeId), kind: a.kind as 'shake',
             amount: num(a.amount) ?? 100, frequency: num(a.frequency) ?? 6,
             amplitude: num(a.amplitude) ?? 6, seed: num(a.seed), phase: num(a.phase),
@@ -249,7 +250,7 @@ export function applyCalls(calls: ToolCall[]) {
 
 /** A property with a track can't be set statically — the track would just mask it. */
 function setBase(p: Project, nodeId: string, property: string, v: number) {
-  const track = p.tracks.find((t) => t.nodeId === nodeId && t.property === property);
+  const track = activeTimeline(p).tracks.find((t) => t.nodeId === nodeId && t.property === property);
   if (track) { writeKeyframe(p, nodeId, property, 0, v, { type: 'preset', name: 'easeInOut' }); return; }
   const node = p.rig.nodes[nodeId];
   if (node) setProp(node, property, v);

@@ -1,49 +1,49 @@
-import type { Block, Preset, Project } from './types';
+import type { Block, Preset, Timeline } from './types';
 
-export function blockStarts(p: Project): number[] {
+export function blockStarts(tl: Timeline): number[] {
   const out: number[] = [];
   let t = 0;
-  for (const b of p.blocks) { out.push(t); t += b.durationMs; }
+  for (const b of tl.blocks) { out.push(t); t += b.durationMs; }
   return out;
 }
 
-export function blocksEnd(p: Project): number {
-  return p.blocks.reduce((s, b) => s + b.durationMs, 0);
+export function blocksEnd(tl: Timeline): number {
+  return tl.blocks.reduce((s, b) => s + b.durationMs, 0);
 }
 
-export function lastKeyframe(p: Project): number {
+export function lastKeyframe(tl: Timeline): number {
   let t = 0;
-  for (const tr of p.tracks) for (const k of tr.keyframes) if (k.time > t) t = k.time;
+  for (const tr of tl.tracks) for (const k of tr.keyframes) if (k.time > t) t = k.time;
   return t;
 }
 
-export function derivedDuration(p: Project): number {
-  return Math.max(1000, blocksEnd(p), lastKeyframe(p) + 200);
+export function derivedDuration(tl: Timeline): number {
+  return Math.max(1000, blocksEnd(tl), lastKeyframe(tl) + 200);
 }
 
 /** Rewrite block durations and drag every block-owned keyframe along with them. */
-export function relayoutBlocks(p: Project, next: Block[]): void {
-  const oldStarts = blockStarts(p);
-  const oldById = new Map(p.blocks.map((b, i) => [b.id, { start: oldStarts[i], dur: b.durationMs }]));
+export function relayoutBlocks(tl: Timeline, next: Block[]): void {
+  const oldStarts = blockStarts(tl);
+  const oldById = new Map(tl.blocks.map((b, i) => [b.id, { start: oldStarts[i], dur: b.durationMs }]));
   let t = 0;
   const newById = new Map<string, { start: number; dur: number }>();
   for (const b of next) { newById.set(b.id, { start: t, dur: b.durationMs }); t += b.durationMs; }
 
-  for (const track of p.tracks) {
+  for (const track of tl.tracks) {
     if (!track.blockId) continue;
     const o = oldById.get(track.blockId), n = newById.get(track.blockId);
     if (!o || !n) continue;
     const k = o.dur === 0 ? 1 : n.dur / o.dur;
     for (const key of track.keyframes) key.time = n.start + (key.time - o.start) * k;
   }
-  p.blocks = next;
-  p.tracks = p.tracks.filter((tr) => !tr.blockId || newById.has(tr.blockId));
-  p.timelineDurationMs = derivedDuration(p);
+  tl.blocks = next;
+  tl.tracks = tl.tracks.filter((tr) => !tr.blockId || newById.has(tr.blockId));
+  tl.timelineDurationMs = derivedDuration(tl);
 }
 
-export function evenDuration(p: Project): number {
-  if (!p.blocks.length) return 1000;
-  return Math.round(blocksEnd(p) / p.blocks.length);
+export function evenDuration(tl: Timeline): number {
+  if (!tl.blocks.length) return 1000;
+  return Math.round(blocksEnd(tl) / tl.blocks.length);
 }
 
 export const fmtSec = (ms: number) => `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)} s`;

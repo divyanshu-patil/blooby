@@ -1,4 +1,5 @@
 import { useEditor } from '../core/store';
+import { activeTimeline } from '../core/types';
 import { NumberField, Panel } from './bits';
 
 const DEFAULTS = {
@@ -15,6 +16,7 @@ export function Effects() {
   const updateModifier = useEditor((s) => s.updateModifier);
   const removeModifier = useEditor((s) => s.removeModifier);
 
+  const tl = activeTimeline(project);
   const target = selection[0] ?? project.rig.rootId;
   const nodeName = (id: string) => project.rig.nodes[id]?.name ?? id;
 
@@ -26,8 +28,8 @@ export function Effects() {
         <button className="btn sm" onClick={() => addModifier({ nodeId: project.rig.rootId, kind: 'stretch', ...DEFAULTS.stretch })}>+ Stretch</button>
       </>
     }>
-      {!project.modifiers.length && <p className="empty-note">Shake jitters with noise, float bobs on a sine, stretch pulses the whole rig's size. All three stack on whatever the keyframes are doing.</p>}
-      {project.modifiers.map((m) => (
+      {!tl.modifiers.length && <p className="empty-note">Shake jitters with noise, float bobs on a sine, stretch pulses the whole rig's size. All three stack on whatever the keyframes are doing.</p>}
+      {tl.modifiers.map((m) => (
         <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, background: 'var(--field)', border: '1px solid var(--line-soft)', borderRadius: 6 }}>
           <div className="row">
             <strong style={{ font: '700 11px var(--display)', letterSpacing: '.1em', textTransform: 'uppercase' }}>{m.kind}</strong>

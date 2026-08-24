@@ -4,6 +4,7 @@ import workerUrl from 'gif.js.optimized/dist/gif.worker.js?url';
 import { COMP } from '../core/defaults';
 import { sceneAt, type SceneItem } from '../core/scene';
 import { Shapes } from '../ui/Mascot';
+import { activeTimeline } from '../core/types';
 import type { Project } from '../core/types';
 
 export interface RasterOptions {
@@ -43,7 +44,7 @@ async function eachFrame(
   onFrame: (canvas: HTMLCanvasElement, index: number, total: number) => void | Promise<void>,
 ) {
   const from = o.from ?? 0;
-  const to = o.to ?? project.timelineDurationMs;
+  const to = o.to ?? activeTimeline(project).timelineDurationMs;
   const total = Math.max(1, Math.round(((to - from) / 1000) * o.fps));
   const canvas = makeCanvas(o.scale);
   const ctx = canvas.getContext('2d')!;
@@ -118,7 +119,7 @@ export async function exportVideo(project: Project, o: RasterOptions, onProgress
   rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
 
   const from = o.from ?? 0;
-  const to = o.to ?? project.timelineDurationMs;
+  const to = o.to ?? activeTimeline(project).timelineDurationMs;
   const total = Math.max(1, Math.round(((to - from) / 1000) * o.fps));
   const step = 1000 / o.fps;
 

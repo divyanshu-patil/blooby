@@ -1,7 +1,7 @@
 import { useEditor } from '../core/store';
 import { cssColor, hexColor, oklchToRgb, parseHex, rgbToOklch } from '../core/color';
 import { valueAt } from '../core/scene';
-import { CAMERA_ID, type ColorStop } from '../core/types';
+import { activeTimeline, CAMERA_ID, type ColorStop } from '../core/types';
 import { NumberField, Panel, PropRow } from './bits';
 import { INK, BONE } from '../core/defaults';
 
@@ -72,7 +72,7 @@ function MultiNodeInspector({ ids }: { ids: string[] }) {
   const nodes = ids.map((i) => project.rig.nodes[i]).filter((n): n is NonNullable<typeof n> => !!n);
   const names = nodes.map((n) => n.name).join(', ');
   const colorNow = valueAt(project, ids[0], 'color', playhead) as ColorStop;
-  const colorTrack = project.tracks.some((t) => ids.includes(t.nodeId) && t.property === 'color');
+  const colorTrack = activeTimeline(project).tracks.some((t) => ids.includes(t.nodeId) && t.property === 'color');
 
   return (
     <Panel title={`${nodes.length} layers`} actions={<span className="tag">{names.slice(0, 28)}{names.length > 28 ? '…' : ''}</span>}>
@@ -110,7 +110,7 @@ export function NodeInspector() {
   if (!node) return <Panel title="Node"><p className="empty-note">Select a layer on the stage or in the list — shift-click to select more than one.</p></Panel>;
 
   const colorNow = valueAt(project, node.id, 'color', playhead) as ColorStop;
-  const colorTrack = project.tracks.some((t) => t.nodeId === node.id && t.property === 'color');
+  const colorTrack = activeTimeline(project).tracks.some((t) => t.nodeId === node.id && t.property === 'color');
   const isRoot = node.id === project.rig.rootId;
   const parents = Object.values(project.rig.nodes).filter((n) => n.id !== node.id && n.kind !== 'svgLayer');
 

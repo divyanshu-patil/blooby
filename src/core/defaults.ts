@@ -1,4 +1,4 @@
-import type { EasingCurve, Expression, Keyframe, KeyValue, Preset, Project, Rig, RigNode, Track } from './types';
+import type { EasingCurve, Expression, Keyframe, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
 
 export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -120,37 +120,38 @@ export function builtinExpressions(): Expression[] {
   ];
 }
 
-/** Appends a preset as a block at the end of the timeline. */
-export function appendPreset(p: Project, presetId: string): void {
+export function makeTimeline(name: string): Timeline {
+  return { id: uid('tl'), name, tracks: [], modifiers: [], blocks: [], durationMode: 'custom', timelineDurationMs: 1000, loop: false };
+}
+
+/** Appends a preset as a block at the end of a timeline. */
+export function appendPreset(p: Project, presetId: string, timeline: Timeline = p.timelines[0]): void {
   const preset = p.presets.find((x) => x.id === presetId);
   if (!preset) return;
-  const start = p.blocks.reduce((s, b) => s + b.durationMs, 0);
+  const start = timeline.blocks.reduce((s, b) => s + b.durationMs, 0);
   const blockId = uid('b');
-  p.blocks.push({ id: blockId, presetId, name: preset.name, durationMs: preset.durationMs });
+  timeline.blocks.push({ id: blockId, presetId, name: preset.name, durationMs: preset.durationMs });
   for (const t of preset.tracks) {
-    p.tracks.push({
+    timeline.tracks.push({
       id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
       keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
     });
   }
-  p.timelineDurationMs = p.blocks.reduce((s, b) => s + b.durationMs, 0);
+  timeline.timelineDurationMs = timeline.blocks.reduce((s, b) => s + b.durationMs, 0);
 }
 
 /** A new file opens on a working four-beat loop, not an empty strip. */
 export function defaultProject(): Project {
+  const idle = makeTimeline('Idle');
   const p: Project = {
     name: 'Untitled mascot',
     rig: defaultRig(),
-    tracks: [],
-    modifiers: [],
     expressions: builtinExpressions(),
     presets: builtinPresets(),
-    blocks: [],
-    durationMode: 'custom',
-    timelineDurationMs: 4000,
+    timelines: [idle],
+    activeTimelineId: idle.id,
     fps: 30,
-    loop: false,
   };
-  for (const id of ['p_idle', 'p_blink', 'p_talk', 'p_happy']) appendPreset(p, id);
+  for (const id of ['p_idle', 'p_blink', 'p_talk', 'p_happy']) appendPreset(p, id, idle);
   return p;
 }

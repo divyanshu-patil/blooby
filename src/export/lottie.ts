@@ -1,5 +1,6 @@
 import { COMP } from '../core/defaults';
 import { sceneAt, type SceneItem } from '../core/scene';
+import { activeTimeline } from '../core/types';
 import type { Project } from '../core/types';
 
 /**
@@ -78,7 +79,7 @@ export interface BakeResult {
 export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
   const fps = project.fps;
   const from = opts.from ?? 0;
-  const to = opts.to ?? project.timelineDurationMs;
+  const to = opts.to ?? activeTimeline(project).timelineDurationMs;
   const total = Math.max(1, Math.round(((to - from) / 1000) * fps));
 
   // sample once, keep everything

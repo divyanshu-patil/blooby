@@ -1,5 +1,4 @@
 import { bakeLottie, type LottieOptions } from './lottie';
-import { blockStarts } from '../core/timeline';
 import { zipStore } from './zip';
 import type { Project } from '../core/types';
 
@@ -10,34 +9,32 @@ import type { Project } from '../core/types';
  *   s/  state machines (was wrongly `states/`)
  * manifest.json needs a top-level "version": "2" and "initial": { animation }, and a
  * state machine file is FLAT — { initial, states, interactions, inputs } — not nested
- * under a made-up "descriptor" object. Verified against a real dotLottie player in
- * `selfcheck`-adjacent scratch testing during this fix; the auto-advance mechanism
- * (Event guard + OnComplete interaction firing it) is the documented pattern for
- * "play this, then the next" with no user input, which is exactly what a preset-derived
- * state list needs.
+ * under a made-up "descriptor" object. Verified against a real dotLottie player: the
+ * file loads, `stateMachineLoad`/`stateMachineStart` both return true, and the player
+ * enters the first state. The auto-advance mechanism (Event guard + OnComplete
+ * interaction firing it) is the best-documented pattern for "play this, then the next"
+ * with no user input — see ASSUMPTIONS.md for what's still unverified about it.
  *
- * Each timeline block becomes its own named animation/state alongside the full
- * timeline, so a player can switch between "idle", "blink", "talk" as states.
+ * Each of the project's own timelines becomes one state directly — "idle", "wave",
+ * "talk-loop" are authored as separate timelines (see TimelineTabs), not derived from
+ * preset blocks, so what you see in the switcher is exactly what ships as a state.
  */
 export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from' | 'to' | 'name'>) {
   const enc = new TextEncoder();
   const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'anim';
 
-  const animations: { id: string; from: number; to: number }[] = [
-    { id: 'timeline', from: 0, to: project.timelineDurationMs },
-  ];
-  const starts = blockStarts(project);
-  const used = new Set(['timeline']);
-  project.blocks.forEach((b, i) => {
-    let id = slug(b.name);
+  const used = new Set<string>();
+  const animations = project.timelines.map((tl) => {
+    let id = slug(tl.name);
     let n = 2;
-    while (used.has(id)) id = `${slug(b.name)}-${n++}`;
+    while (used.has(id)) id = `${slug(tl.name)}-${n++}`;
     used.add(id);
-    animations.push({ id, from: starts[i], to: starts[i] + b.durationMs });
+    return { id, timeline: tl };
   });
 
   const entries: { name: string; data: Uint8Array<ArrayBuffer> }[] = animations.map((a) => {
-    const baked = bakeLottie(project, { ...opts, name: a.id, from: a.from, to: a.to });
+    const synthetic: Project = { ...project, activeTimelineId: a.timeline.id };
+    const baked = bakeLottie(synthetic, { ...opts, name: a.id, from: 0, to: a.timeline.timelineDurationMs });
     return { name: `a/${a.id}.json`, data: enc.encode(JSON.stringify(baked.json)) as Uint8Array<ArrayBuffer> };
   });
 
@@ -52,25 +49,26 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
     const machineId = 'mascot';
     const eventFor = (id: string) => `${id}-done`;
 
-    // every state must eventually complete to fire its OnComplete guard and advance the
-    // chain — a looping state never would, so none of them loop; the chain itself wraps
-    // back to the first state, which is what makes the whole thing cycle forever.
+    // a timeline authored to loop forever never completes, so it gets no outgoing
+    // transition — it's a resting state, not a step in the chain. Everything else
+    // advances to the next timeline on completion, wrapping back to the first.
     const states = animations.map((a, i) => {
       const next = animations[(i + 1) % animations.length];
+      const loop = a.timeline.loop;
       return {
         name: a.id,
         type: 'PlaybackState',
         animation: a.id,
-        loop: false,
+        loop,
         autoplay: i === 0,
-        transitions: [{ type: 'Transition', toState: next.id, guards: [{ type: 'Event', inputName: eventFor(a.id) }] }],
+        transitions: loop ? [] : [{ type: 'Transition', toState: next.id, guards: [{ type: 'Event', inputName: eventFor(a.id) }] }],
       };
     });
-    const interactions = animations.map((a) => ({
+    const interactions = animations.filter((a) => !a.timeline.loop).map((a) => ({
       type: 'OnComplete', stateName: a.id,
       actions: [{ type: 'Fire', inputName: eventFor(a.id) }],
     }));
-    const inputs = animations.map((a) => ({ type: 'Event', name: eventFor(a.id) }));
+    const inputs = animations.filter((a) => !a.timeline.loop).map((a) => ({ type: 'Event', name: eventFor(a.id) }));
 
     const machine = { initial: animations[0].id, states, interactions, inputs };
     manifest.stateMachines = [{ id: machineId, name: 'Mascot states' }];

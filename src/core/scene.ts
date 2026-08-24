@@ -3,6 +3,7 @@ import { lerpColor } from './color';
 import { noise1d } from './noise';
 import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
 import { getProp, readProp, setProp, writeProp } from './props';
+import { activeTimeline } from './types';
 import type { ColorStop, KeyValue, Modifier, Project, Rig, RigNode, Track, Vec2 } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
@@ -79,9 +80,8 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number) {
   }
 }
 
-/** Rig with every track sampled at t and every modifier layered on top. */
 /**
- * When a project loops, every track eases from wherever it ends back to its own t=0
+ * When a timeline loops, every track eases from wherever it ends back to its own t=0
  * value by the end of the timeline, so playback (and export) can wrap with no seam.
  * A pure derivation — never mutates stored keyframes — shared by playback and export so
  * they can't drift apart, same as everything else in this file.
@@ -99,9 +99,11 @@ export function resolveTracks(tracks: Track[], loop: boolean, durationMs: number
   });
 }
 
+/** Rig with the active timeline's tracks sampled at t and every modifier layered on top. */
 export function evaluateRig(project: Project, timeMs: number): Rig {
   const rig: Rig = structuredClone(project.rig);
-  const tracks = resolveTracks(project.tracks, project.loop, project.timelineDurationMs);
+  const tl = activeTimeline(project);
+  const tracks = resolveTracks(tl.tracks, tl.loop, tl.timelineDurationMs);
   for (const track of tracks) {
     const v = sampleTrack(track, timeMs);
     if (v !== undefined) writeProp(rig, track.nodeId, track.property, v);
@@ -117,7 +119,7 @@ export function evaluateRig(project: Project, timeMs: number): Rig {
     node.eye = { ...node.eye, openness: src.eye.openness, distanceFromCenter: -src.eye.distanceFromCenter };
   }
   const tSec = timeMs / 1000;
-  for (const m of project.modifiers) applyModifier(rig, m, tSec);
+  for (const m of tl.modifiers) applyModifier(rig, m, tSec);
   return rig;
 }
 
@@ -219,7 +221,7 @@ export const sceneAt = (project: Project, t: number, view: Viewport) =>
 
 /** Current value of a property, tracks included — what the inspector shows. */
 export function valueAt(project: Project, nodeId: string, path: string, t: number): KeyValue | undefined {
-  const track = project.tracks.find((tr) => tr.nodeId === nodeId && tr.property === path);
+  const track = activeTimeline(project).tracks.find((tr) => tr.nodeId === nodeId && tr.property === path);
   const sampled = track && sampleTrack(track, t);
   return sampled !== undefined ? sampled : readProp(project.rig, nodeId, path);
 }

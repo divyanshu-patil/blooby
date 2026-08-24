@@ -1,9 +1,11 @@
 import { fmtSec } from '../core/timeline';
 import { TOOL_DOCS } from './tools';
+import { activeTimeline } from '../core/types';
 import type { Project } from '../core/types';
 
 /** Compact enough to fit any context window, complete enough to act on. */
 export function systemPrompt(p: Project): string {
+  const tl = activeTimeline(p);
   const nodes = Object.values(p.rig.nodes)
     .map((n) => `  ${n.id} "${n.name}" (${n.kind}${n.eye ? `, openness ${n.eye.openness}, distance ${n.eye.distanceFromCenter}°` : ''})`)
     .join('\n');
@@ -24,7 +26,8 @@ Layers:
 ${nodes}
 Expressions: ${p.expressions.map((e) => `${e.name}`).join(', ') || 'none'}
 Presets: ${p.presets.map((e) => `${e.name} (${fmtSec(e.durationMs)})`).join(', ')}
-Timeline: ${fmtSec(p.timelineDurationMs)} at ${p.fps} fps, ${p.blocks.length} blocks.
+Active timeline: "${tl.name}" — ${fmtSec(tl.timelineDurationMs)} at ${p.fps} fps, ${tl.blocks.length} blocks${tl.loop ? ', loops' : ''}.
+${p.timelines.length > 1 ? `Other timelines (separate states, not shown here): ${p.timelines.filter((t) => t.id !== tl.id).map((t) => t.name).join(', ')}.` : ''}
 
 Answer with one JSON object and nothing else — no prose, no markdown fence:
   { "reply": "<one or two sentences>", "calls": [ { "name": "<tool>", "args": { ... } } ] }

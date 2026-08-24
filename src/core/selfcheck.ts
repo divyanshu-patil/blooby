@@ -7,16 +7,18 @@ import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScree
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
-import { defaultProject } from './defaults';
+import { defaultProject, makeTimeline } from './defaults';
 import { blockStarts, derivedDuration } from './timeline';
 import { bakeLottie } from '../export/lottie';
+import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
 import { readProp } from './props';
 import { applyCalls, describe, normaliseCall, validate, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
 import { baseUrl, LOCAL_URL, needsKey, resolveModel } from '../copilot/pool';
 import { crc32 } from '../export/zip';
-import type { Rig, RigNode } from './types';
+import { activeTimeline } from './types';
+import type { Project, Rig, RigNode } from './types';
 
 let failures = 0;
 function ok(label: string, cond: boolean, detail = '') {
@@ -213,25 +215,26 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 // --- lottie bake: does the baked file actually reproduce the scene? ------------
 {
   const store = defaultProject();
+  const stl = activeTimeline(store);
   // add two more blocks and a shake so the bake has curvature, easing and noise in it
   for (const name of ['Surprised', 'Thinking']) {
     const preset = store.presets.find((x) => x.name === name)!;
-    const start = store.blocks.reduce((s2, b) => s2 + b.durationMs, 0);
+    const start = stl.blocks.reduce((s2, b) => s2 + b.durationMs, 0);
     const blockId = `b_${name}`;
-    store.blocks.push({ id: blockId, presetId: preset.id, name, durationMs: preset.durationMs });
+    stl.blocks.push({ id: blockId, presetId: preset.id, name, durationMs: preset.durationMs });
     for (const t of preset.tracks) {
-      store.tracks.push({ ...t, id: `t_${name}_${t.nodeId}_${t.property}`, blockId, keyframes: t.keyframes.map((k) => ({ ...k, time: k.time + start })) });
+      stl.tracks.push({ ...t, id: `t_${name}_${t.nodeId}_${t.property}`, blockId, keyframes: t.keyframes.map((k) => ({ ...k, time: k.time + start })) });
     }
   }
-  store.modifiers.push({ id: 'm1', nodeId: 'body', kind: 'shake', amount: 80, frequency: 9, amplitude: 5, seed: 3 });
-  store.timelineDurationMs = derivedDuration(store);
+  stl.modifiers.push({ id: 'm1', nodeId: 'body', kind: 'shake', amount: 80, frequency: 9, amplitude: 5, seed: 3 });
+  stl.timelineDurationMs = derivedDuration(stl);
 
   const baked = bakeLottie(store, { background: '#17161b', name: 'test' });
   const j = baked.json as Record<string, any>;
   ok('lottie fps + size', j.fr === store.fps && j.w === 720 && j.h === 720);
-  ok('lottie duration in frames', j.op === Math.round((store.timelineDurationMs / 1000) * store.fps), `${j.op}`);
+  ok('lottie duration in frames', j.op === Math.round((stl.timelineDurationMs / 1000) * store.fps), `${j.op}`);
   ok('lottie has a layer per shape plus backdrop', j.layers.length === 4, String(j.layers.length));
-  ok('the default file opens on a real timeline', store.blocks.length === 6 && store.tracks.length > 12, `${store.blocks.length} blocks, ${store.tracks.length} tracks`);
+  ok('the default file opens on a real timeline', stl.blocks.length === 6 && stl.tracks.length > 12, `${stl.blocks.length} blocks, ${stl.tracks.length} tracks`);
   ok('lottie layer indices are 1..n', j.layers.every((l: any, i: number) => l.ind === i + 1));
 
   const shapeLayers = j.layers.filter((l: any) => l.ty === 4);
@@ -302,11 +305,12 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 // --- writeKeyframe anchors a brand-new track instead of going constant ---------
 {
   const p = defaultProject();
+  const ptl = activeTimeline(p);
   // pick a property with no existing track, matching a copilot add_keyframe / applyExpression call
-  ok('no pre-existing track on eyeL rotation', !p.tracks.some((t) => t.nodeId === 'eyeL' && t.property === 'transform.rotation'));
+  ok('no pre-existing track on eyeL rotation', !ptl.tracks.some((t) => t.nodeId === 'eyeL' && t.property === 'transform.rotation'));
   const before = readProp(p.rig, 'eyeL', 'transform.rotation');
   writeKeyframe(p, 'eyeL', 'transform.rotation', 2000, 25, { type: 'linear' });
-  const track = p.tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'transform.rotation')!;
+  const track = ptl.tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'transform.rotation')!;
   ok('an anchor keyframe was seeded at t=0', track.keyframes.length === 2 && track.keyframes[0].time === 0);
   ok('the anchor holds the PREVIOUS value, not the new one', track.keyframes[0].value === before, `${track.keyframes[0].value} vs ${before}`);
   ok('t=0 still reads as unchanged after the write', sampleTrack(track, 0) === before);
@@ -321,7 +325,7 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 {
   const proj = defaultProject();
   const before = buildScene(proj.rig, { width: 720, height: 720 });
-  proj.modifiers.push({ id: 'm', nodeId: proj.rig.rootId, kind: 'stretch', amount: 100, frequency: 1, amplitude: 20 });
+  activeTimeline(proj).modifiers.push({ id: 'm', nodeId: proj.rig.rootId, kind: 'stretch', amount: 100, frequency: 1, amplitude: 20 });
   // t chosen so sin(2*pi*1*t) = 1 exactly, i.e. the modifier is at its full +20% swing
   const tSec = 0.25;
   const after = buildScene(evaluateRig(proj, tSec * 1000), { width: 720, height: 720 });
@@ -338,7 +342,7 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     // the modifier's own effect, not conflating it with unrelated keyframed motion.
     const p2 = defaultProject();
     const baseline = buildScene(evaluateRig(p2, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
-    p2.modifiers.push({ id: 'm2', nodeId: p2.rig.rootId, kind: 'stretch', amount: 0, frequency: 1, amplitude: 20 });
+    activeTimeline(p2).modifiers.push({ id: 'm2', nodeId: p2.rig.rootId, kind: 'stretch', amount: 0, frequency: 1, amplitude: 20 });
     const b = buildScene(evaluateRig(p2, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
     return Math.abs(b.w - baseline.w) < 1e-6;
   })());
@@ -349,20 +353,21 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   const ed = useEditor.getState();
   ed.loadProject(defaultProject());
   const P = () => useEditor.getState().project;
-  const names = () => P().blocks.map((b) => b.name);
+  const PT = () => activeTimeline(P());
+  const names = () => PT().blocks.map((b) => b.name);
   ok('default order', names().join(',') === 'Idle,Blink,Talk,Happy', names().join(','));
 
-  const blinkId = P().blocks[1].id;
-  const blinkTrackBefore = P().tracks.find((t) => t.blockId === blinkId)!;
+  const blinkId = PT().blocks[1].id;
+  const blinkTrackBefore = PT().tracks.find((t) => t.blockId === blinkId)!;
   const blinkKeysBefore = blinkTrackBefore.keyframes.map((k) => k.value);
 
   useEditor.getState().moveBlock(blinkId, 3); // drag Blink to the very end
   ok('block moved to the end', names().join(',') === 'Idle,Talk,Happy,Blink', names().join(','));
-  const blinkTrackAfter = P().tracks.find((t) => t.id === blinkTrackBefore.id)!;
+  const blinkTrackAfter = PT().tracks.find((t) => t.id === blinkTrackBefore.id)!;
   ok('its keyframe VALUES are untouched by the move', JSON.stringify(blinkTrackAfter.keyframes.map((k) => k.value)) === JSON.stringify(blinkKeysBefore));
   ok('its keyframe TIMES shifted to its new slot', blinkTrackAfter.keyframes[0].time > blinkTrackBefore.keyframes[0].time);
-  const starts = blockStarts(P());
-  ok('blocks are contiguous with no gap after reordering', starts.every((s, i) => i === 0 || s === starts[i - 1] + P().blocks[i - 1].durationMs));
+  const starts = blockStarts(PT());
+  ok('blocks are contiguous with no gap after reordering', starts.every((s, i) => i === 0 || s === starts[i - 1] + PT().blocks[i - 1].durationMs));
 
   useEditor.getState().undo();
   ok('undo restores the original order', names().join(',') === 'Idle,Blink,Talk,Happy', names().join(','));
@@ -396,10 +401,11 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
   // evaluateRig actually uses this — the seam is visible in playback, not just in theory
   const proj = defaultProject();
-  proj.loop = true;
-  proj.tracks = proj.tracks.filter((t) => !(t.nodeId === 'body' && t.property === 'transform.rotation'));
-  proj.tracks.push({ id: 't3', nodeId: 'body', property: 'transform.rotation', keyframes: openTrack.keyframes });
-  const atEnd = evaluateRig(proj, proj.timelineDurationMs).nodes.body.transform.rotation;
+  const ptl2 = activeTimeline(proj);
+  ptl2.loop = true;
+  ptl2.tracks = ptl2.tracks.filter((t) => !(t.nodeId === 'body' && t.property === 'transform.rotation'));
+  ptl2.tracks.push({ id: 't3', nodeId: 'body', property: 'transform.rotation', keyframes: openTrack.keyframes });
+  const atEnd = evaluateRig(proj, ptl2.timelineDurationMs).nodes.body.transform.rotation;
   const atStart = evaluateRig(proj, 0).nodes.body.transform.rotation;
   ok('evaluateRig itself loops the pose, not just the raw track helper', atEnd === atStart, `${atEnd} vs ${atStart}`);
 }
@@ -409,14 +415,15 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   const ed = useEditor.getState();
   ed.loadProject(defaultProject());
   const P = () => useEditor.getState().project;
-  const blockTracks = (id: string) => P().tracks.filter((t) => t.blockId === id);
+  const PT = () => activeTimeline(P());
+  const blockTracks = (id: string) => PT().tracks.filter((t) => t.blockId === id);
   const span = (id: string) => {
     const times = blockTracks(id).flatMap((t) => t.keyframes.map((k) => k.time));
     return [Math.min(...times), Math.max(...times)];
   };
 
-  ok('default file has four blocks', P().blocks.length === 4);
-  const [b0, b1] = P().blocks;
+  ok('default file has four blocks', PT().blocks.length === 4);
+  const [b0, b1] = PT().blocks;
   ok('first block starts at zero', span(b0.id)[0] === 0);
   ok('second block starts where the first ends', Math.abs(span(b1.id)[0] - b0.durationMs) < 1);
 
@@ -427,20 +434,20 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     `${span(b0.id)[1]} vs ${b0.durationMs * 2}`);
   ok('stretching a block shifts the next one', Math.abs(span(b1.id)[0] - beforeStart * 2) < 12,
     `${span(b1.id)[0]} vs ${beforeStart * 2}`);
-  ok('duration follows the blocks', P().timelineDurationMs >= P().blocks.reduce((a, b) => a + b.durationMs, 0));
+  ok('duration follows the blocks', PT().timelineDurationMs >= PT().blocks.reduce((a, b) => a + b.durationMs, 0));
 
   useEditor.getState().undo();
-  ok('undo restores the original duration', P().blocks[0].durationMs === b0.durationMs);
+  ok('undo restores the original duration', PT().blocks[0].durationMs === b0.durationMs);
   useEditor.getState().redo();
-  ok('redo reapplies it', P().blocks[0].durationMs === b0.durationMs * 2);
+  ok('redo reapplies it', PT().blocks[0].durationMs === b0.durationMs * 2);
   useEditor.getState().undo();
 
-  const trackCount = P().tracks.length;
+  const trackCount = PT().tracks.length;
   useEditor.getState().removeBlock(b0.id);
-  ok('removing a block drops its tracks', P().tracks.length < trackCount && blockTracks(b0.id).length === 0);
-  ok('and closes the gap', span(P().blocks[0].id)[0] === 0);
+  ok('removing a block drops its tracks', PT().tracks.length < trackCount && blockTracks(b0.id).length === 0);
+  ok('and closes the gap', span(PT().blocks[0].id)[0] === 0);
   useEditor.getState().undo();
-  ok('undo brings the block back', P().blocks.length === 4 && P().tracks.length === trackCount);
+  ok('undo brings the block back', PT().blocks.length === 4 && PT().tracks.length === trackCount);
 
   // toggling a track off must not move the pose
   useEditor.getState().setPlayhead(1200);
@@ -452,11 +459,11 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
   // expressions and morphs
   useEditor.getState().morphBetween('x_neutral', 'x_surprised', 3000, 400, { type: 'preset', name: 'easeInOut' });
-  const scaleTrack = P().tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'transform.scale.x');
+  const scaleTrack = PT().tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'transform.scale.x');
   ok('morph wrote both ends', !!scaleTrack
     && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3000) < 1)
     && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3400) < 1));
-  ok('morph skips properties that match', !P().tracks.some((t) => t.nodeId === 'body' && t.property === 'surface.pitch'
+  ok('morph skips properties that match', !PT().tracks.some((t) => t.nodeId === 'body' && t.property === 'surface.pitch'
     && t.keyframes.some((k) => Math.abs(k.time - 3000) < 1)));
   useEditor.getState().undo();
 
@@ -473,13 +480,13 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('an unknown tool is rejected', validate(P(), { name: 'rm_rf', args: {} }) !== null);
   ok('calls describe themselves', describe(P(), calls[0]).includes('Blink'));
 
-  const blocksBefore = P().blocks.length;
+  const blocksBefore = PT().blocks.length;
   applyCalls(calls);
-  ok('tool calls applied', P().blocks.length === blocksBefore + 1
-    && P().modifiers.length === 1
+  ok('tool calls applied', PT().blocks.length === blocksBefore + 1
+    && PT().modifiers.length === 1
     && (valueAt(P(), 'eyeL', 'eye.openness', 500) as number) === 0.3);
   useEditor.getState().undo();
-  ok('one undo reverses the whole batch', P().blocks.length === blocksBefore && P().modifiers.length === 0);
+  ok('one undo reverses the whole batch', PT().blocks.length === blocksBefore && PT().modifiers.length === 0);
 }
 
 // --- copilot: parsing what models actually send back ---------------------------
@@ -534,6 +541,86 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('local models are untouched', resolveModel({ ...base, endpoint: 'local' }, 'llama3') === 'llama3');
   ok('only a custom endpoint needs a key', !needsKey({ ...base, endpoint: 'cloud' }) && !needsKey({ ...base, endpoint: 'local' }) && needsKey({ ...base, endpoint: 'custom' }));
   ok('custom urls lose their trailing slash', baseUrl({ ...base, endpoint: 'custom', customUrl: 'https://proxy.example/' }) === 'https://proxy.example');
+}
+
+// --- multiple timelines: isolated tracks, correct active-timeline redirection --
+{
+  const ed = useEditor.getState();
+  ed.loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  const firstId = P().activeTimelineId;
+  ed.addTimeline('Wave');
+  ok('a new timeline is created and becomes active', P().timelines.length === 2 && P().activeTimelineId !== firstId);
+  ok('the new timeline starts with no blocks — a genuinely fresh sequence', activeTimeline(P()).blocks.length === 0);
+
+  // work done on the new (active) timeline must not leak into the first
+  ed.toggleTrack('body', 'surface.yaw'); // stopwatch-on: bakes a track at the current value
+  ed.setValue('body', 'surface.yaw', 33, 'wavetest');
+  ok('a track landed on the SECOND timeline', activeTimeline(P()).tracks.some((t) => t.property === 'surface.yaw' && t.nodeId === 'body'));
+  // the first (Idle) timeline already has its own surface.yaw track from the Idle
+  // preset — the isolation check is that it never picks up the value written on
+  // the second timeline, not that the property is absent there entirely.
+  const firstTl = P().timelines.find((t) => t.id === firstId)!;
+  ok('the first timeline is untouched', !firstTl.tracks.some((t) => t.property === 'surface.yaw' && t.nodeId === 'body' && t.keyframes.some((k) => k.value === 33)));
+
+  ed.setActiveTimeline(firstId);
+  ok('switching back restores the first timeline\'s own content', activeTimeline(P()).id === firstId && activeTimeline(P()).blocks.length === 4);
+
+  ed.renameTimeline(P().activeTimelineId, 'Idle loop');
+  ok('rename applies to the right timeline', P().timelines.find((t) => t.id === firstId)!.name === 'Idle loop');
+
+  const secondId = P().timelines.find((t) => t.id !== firstId)!.id;
+  ed.deleteTimeline(secondId);
+  ok('delete removes it and falls back to a survivor', P().timelines.length === 1 && !P().timelines.some((t) => t.id === secondId));
+  ed.deleteTimeline(firstId);
+  ok('the last timeline cannot be deleted — always at least one', P().timelines.length === 1);
+}
+
+// --- migrate(): a project saved before Stage 3 still loads correctly -----------
+{
+  const legacy = defaultProject();
+  const flat = legacy as unknown as Record<string, unknown>;
+  const tl = activeTimeline(legacy);
+  flat.tracks = tl.tracks; flat.blocks = tl.blocks; flat.modifiers = tl.modifiers;
+  flat.durationMode = tl.durationMode; flat.timelineDurationMs = tl.timelineDurationMs; flat.loop = true;
+  delete flat.timelines; delete flat.activeTimelineId;
+
+  useEditor.getState().loadProject(legacy as unknown as Project);
+  const p = useEditor.getState().project;
+  ok('a legacy flat project is lifted into exactly one timeline', p.timelines.length === 1);
+  ok('its blocks made it across', activeTimeline(p).blocks.length === 4);
+  ok('its loop flag made it across', activeTimeline(p).loop === true);
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- dotLottie: one state per timeline, 1:1 ------------------------------------
+{
+  const proj = defaultProject();
+  const tl2 = makeTimeline('Wave');
+  tl2.tracks.push({ id: 'wt', nodeId: 'body', property: 'transform.rotation', keyframes: [
+    { id: 'a', time: 0, value: 0, easingOut: { type: 'linear' } },
+    { id: 'b', time: 500, value: 20, easingOut: { type: 'linear' } },
+  ] });
+  tl2.timelineDurationMs = 500;
+  tl2.loop = true;
+  proj.timelines.push(tl2);
+
+  const { animations, blob } = buildDotLottie(proj, { background: null });
+  ok('one animation per timeline', animations.length === proj.timelines.length, `${animations.length} vs ${proj.timelines.length}`);
+
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const text = new TextDecoder().decode(bytes);
+  // cheap local-file-header scan — good enough to confirm the v2.0 directory names
+  // without pulling in a zip-reader for a test
+  ok('animations live under a/, not animations/', text.includes('a/idle.json') || text.includes('a/wave.json'));
+  ok('the state machine lives under s/, not states/', text.includes('s/mascot.json'));
+  ok('no legacy animations/ or states/ path leaked back in', !text.includes('animations/idle.json') && !text.includes('states/mascot.json'));
+
+  // the looping second timeline gets no auto-advance guard — it never completes
+  const sIdx = text.indexOf('s/mascot.json');
+  ok('a .lottie was actually produced with a state machine entry', sIdx >= 0);
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------

@@ -114,20 +114,32 @@ export interface Block {
   durationMs: number;
 }
 
-export interface Project {
+/**
+ * One independent animation sequence on the shared rig — "idle", "wave", "talk-loop".
+ * A project can hold several; each becomes its own state in the exported `.lottie`, and
+ * they're switched from the timeline-tabs strip, never mixed together on one strip.
+ */
+export interface Timeline {
+  id: string;
   name: string;
-  rig: Rig;
   tracks: Track[];
   modifiers: Modifier[];
-  expressions: Expression[];
-  presets: Preset[];
   blocks: Block[];
   durationMode: 'custom' | 'even';
   timelineDurationMs: number;
-  fps: number;
   /** when true, every track eases from its last keyframe back to its t=0 value at the
    * end of the timeline, so a looped playthrough (or export) has no seam. */
   loop: boolean;
+}
+
+export interface Project {
+  name: string;
+  rig: Rig;
+  expressions: Expression[];
+  presets: Preset[];
+  timelines: Timeline[];
+  activeTimelineId: string;
+  fps: number;
 }
 
 export const CAMERA_ID = '__camera';
@@ -170,3 +182,8 @@ export const PROP_LABEL: Record<string, string> = {
   'camera.offset.x': 'Pan X',
   'camera.offset.y': 'Pan Y',
 };
+
+/** The one timeline every editor action and every renderer actually reads/writes. */
+export function activeTimeline(p: Project): Timeline {
+  return p.timelines.find((t) => t.id === p.activeTimelineId) ?? p.timelines[0];
+}

@@ -59,7 +59,7 @@ export function ExportBar() {
             <div className="divider" />
             <button className="btn" onClick={lottieJson}>Lottie JSON</button>
             <button className="btn" onClick={dotLottie}>
-              .lottie {project.blocks.length > 1 ? `· ${project.blocks.length + 1} states` : ''}
+              .lottie {project.timelines.length > 1 ? `· ${project.timelines.length} states` : ''}
             </button>
             <button className="btn" disabled={!!busy}
               onClick={() => run('GIF', async (p) => download(await exportGif(project, { fps: Math.min(project.fps, 25), scale, background }, p), `${base}.gif`))}>

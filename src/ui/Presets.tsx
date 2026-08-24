@@ -6,11 +6,13 @@ import { MascotThumb } from './Mascot';
 import { Panel } from './bits';
 import { EASING_NAMES, namedEasing } from '../core/easing';
 import { characteristicTime } from '../core/timeline';
+import { activeTimeline } from '../core/types';
 import type { Preset, Project } from '../core/types';
 
 /** A preset's own pose at its most characteristic moment — the icon *is* the animation. */
 function glyphScene(project: Project, preset: Preset) {
-  const temp: Project = { ...project, tracks: preset.tracks, modifiers: [], blocks: [] };
+  const tl = activeTimeline(project);
+  const temp: Project = { ...project, timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }], activeTimelineId: tl.id };
   return sceneAt(temp, characteristicTime(preset), COMP);
 }
 

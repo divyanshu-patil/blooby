@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useEditor } from '../core/store';
 import { PROP_RANGE } from '../core/props';
-import { PROP_LABEL } from '../core/types';
+import { activeTimeline, PROP_LABEL } from '../core/types';
 import { valueAt } from '../core/scene';
 
 export function Panel({ title, actions, children, flush }: { title: string; actions?: ReactNode; children: ReactNode; flush?: boolean }) {
@@ -59,7 +59,7 @@ export function PropRow({ nodeId, property, label }: { nodeId: string | string[]
 
   const ids = Array.isArray(nodeId) ? nodeId : [nodeId];
   const primary = ids[0];
-  const track = project.tracks.find((t) => t.nodeId === primary && t.property === property);
+  const track = activeTimeline(project).tracks.find((t) => t.nodeId === primary && t.property === property);
   const v = valueAt(project, primary, property, playhead);
   if (typeof v !== 'number') return null;
   const [min, max, step] = PROP_RANGE[property] ?? [-100, 100, 1];

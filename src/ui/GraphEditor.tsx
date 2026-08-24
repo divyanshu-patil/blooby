@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '../core/store';
 import { applyEasing, curveHandles } from '../core/easing';
-import { PROP_LABEL, type Track } from '../core/types';
+import { activeTimeline, PROP_LABEL, type Track } from '../core/types';
 
 const PAD = { l: 40, r: 14, t: 14, b: 20 };
 
@@ -25,7 +25,7 @@ export function GraphEditor({ tracks, selected, onSelect }: {
   const drag = useRef<{ kind: 'kf' | 'h1' | 'h2' | 'scrub'; trackId: string; kfId: string } | null>(null);
 
   const numeric = tracks.filter((t) => t.keyframes.every((k) => typeof k.value === 'number'));
-  const duration = Math.max(project.timelineDurationMs, 1);
+  const duration = Math.max(activeTimeline(project).timelineDurationMs, 1);
 
   // Each track gets its own vertical range. A shared one would flatten openness (0–1)
   // into a hairline next to yaw (degrees) — the same reason After Effects normalises.
@@ -212,7 +212,7 @@ export function GraphEditor({ tracks, selected, onSelect }: {
       moveKeyframe(track.id, k.id, g.T(p.x));
       const v = g.Vin(p.y, ...rangeOf(track.id));
       commit((proj) => {
-        const kk = proj.tracks.find((t) => t.id === track.id)?.keyframes.find((x) => x.id === k.id);
+        const kk = activeTimeline(proj).tracks.find((t) => t.id === track.id)?.keyframes.find((x) => x.id === k.id);
         if (kk) kk.value = Math.round(v * 1000) / 1000;
       }, `gval.${k.id}`);
       return;

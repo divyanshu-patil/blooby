@@ -11,6 +11,9 @@ import { Timeline, DurationField } from './ui/Timeline';
 import { Copilot } from './ui/Copilot';
 import { ExportBar } from './ui/ExportBar';
 import { Split } from './ui/Resizable';
+import { TimelineTabs } from './ui/TimelineTabs';
+import { Gallery, openGallery } from './ui/Gallery';
+import { activeTimeline } from './core/types';
 import type { Project } from './core/types';
 
 type Tab = 'node' | 'eyes' | 'fx' | 'ai';
@@ -37,11 +40,12 @@ export default function App() {
     let last = performance.now();
     const tick = (now: number) => {
       const { playhead, project: p } = useEditor.getState();
+      const duration = activeTimeline(p).timelineDurationMs;
       let t = playhead + (now - last);
       last = now;
-      if (t >= p.timelineDurationMs) {
-        if (loop) t = t % p.timelineDurationMs;
-        else { setPlayhead(p.timelineDurationMs); setPlaying(false); return; }
+      if (t >= duration) {
+        if (loop) t = t % duration;
+        else { setPlayhead(duration); setPlaying(false); return; }
       }
       setPlayhead(t);
       raf = requestAnimationFrame(tick);
@@ -87,8 +91,8 @@ export default function App() {
           onChange={(e) => commit((p) => { p.name = e.target.value; }, 'projname')} />
         <span className="crumb">
           <strong>{Object.keys(project.rig.nodes).length}</strong> layers ·
-          <strong> {project.tracks.length}</strong> tracks ·
-          <strong> {project.blocks.length}</strong> blocks
+          <strong> {activeTimeline(project).tracks.length}</strong> tracks ·
+          <strong> {activeTimeline(project).blocks.length}</strong> blocks
         </span>
         <DurationField />
         <span className="spacer" />
@@ -98,6 +102,7 @@ export default function App() {
         <button className="btn ghost sm" onClick={redo} title="Redo (⇧⌘Z)">Redo</button>
         <button className="btn sm" onClick={() => file.current?.click()}>Open</button>
         <button className="btn sm" onClick={saveProject}>Save</button>
+        <button className="btn sm" onClick={openGallery}>Gallery</button>
         <button className="btn sm" title="Start over from the default mascot"
           onClick={() => confirm('Discard this project and start fresh?') && loadProject(defaultProject())}>New</button>
         <ExportBar />
@@ -143,7 +148,11 @@ export default function App() {
         ]} />
       </div>
 
-      <div className="timeline"><Timeline /></div>
+      <div className="timeline">
+        <TimelineTabs />
+        <Timeline />
+      </div>
+      <Gallery />
     </div>
   );
 }

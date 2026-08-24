@@ -16,6 +16,7 @@ import { RESPONSE_SCHEMA, normaliseCall, validate, describe, applyCalls } from '
 import { parseTurn } from './parse';
 import { resolveModel, type CopilotSettings } from './pool';
 import { blockStarts } from '../core/timeline';
+import { activeTimeline } from '../core/types';
 
 const [, , model, ask] = process.argv;
 const settings: CopilotSettings = { endpoint: 'cloud', customUrl: '', model, keys: [] };
@@ -45,13 +46,14 @@ for (const c of calls) {
   console.log(bad ? `  REJECT ${c.name}: ${bad}` : `  ok  ${describe(P(), c)}`);
 }
 if (calls.length && calls.every((c) => validate(P(), c) === null)) {
-  const before = P().blocks.length;
+  const before = activeTimeline(P()).blocks.length;
   applyCalls(calls);
-  const starts = blockStarts(P());
-  console.log(`\napplied. blocks ${before} -> ${P().blocks.length}, tracks ${P().tracks.length}, modifiers ${P().modifiers.length}`);
-  console.log('timeline:', P().blocks.map((b, i) => `${b.name}@${(starts[i] / 1000).toFixed(2)}s`).join('  '));
+  const tl = activeTimeline(P());
+  const starts = blockStarts(tl);
+  console.log(`\napplied. blocks ${before} -> ${tl.blocks.length}, tracks ${tl.tracks.length}, modifiers ${tl.modifiers.length}`);
+  console.log('timeline:', tl.blocks.map((b, i) => `${b.name}@${(starts[i] / 1000).toFixed(2)}s`).join('  '));
   useEditor.getState().undo();
-  console.log('one undo -> blocks', P().blocks.length);
+  console.log('one undo -> blocks', activeTimeline(P()).blocks.length);
 } else {
   console.log('\nnothing applyable');
 }
