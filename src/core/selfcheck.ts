@@ -6,10 +6,12 @@
 import { effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
-import { buildScene, evaluateRig, lerpAngle, sampleTrack } from './scene';
+import { buildScene, evaluateRig, lerpAngle, sampleTrack, valueAt } from './scene';
 import { defaultProject } from './defaults';
 import { derivedDuration } from './timeline';
 import { bakeLottie } from '../export/lottie';
+import { useEditor } from './store';
+import { applyCalls, describe, validate, type ToolCall } from '../copilot/tools';
 import { crc32 } from '../export/zip';
 import type { Rig, RigNode } from './types';
 
@@ -271,6 +273,84 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     }
   }
   ok('baked playback matches the canvas within a pixel', worst < 1, `worst error ${worst.toFixed(3)}px`);
+}
+
+// --- the store: block retiming, undo, tool calls -------------------------------
+{
+  const ed = useEditor.getState();
+  ed.loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const blockTracks = (id: string) => P().tracks.filter((t) => t.blockId === id);
+  const span = (id: string) => {
+    const times = blockTracks(id).flatMap((t) => t.keyframes.map((k) => k.time));
+    return [Math.min(...times), Math.max(...times)];
+  };
+
+  ok('default file has four blocks', P().blocks.length === 4);
+  const [b0, b1] = P().blocks;
+  ok('first block starts at zero', span(b0.id)[0] === 0);
+  ok('second block starts where the first ends', Math.abs(span(b1.id)[0] - b0.durationMs) < 1);
+
+  // stretching a block must drag everything after it along
+  const beforeStart = span(b1.id)[0];
+  useEditor.getState().setBlockDuration(b0.id, b0.durationMs * 2);
+  ok('stretching a block scales its own keys', Math.abs(span(b0.id)[1] - b0.durationMs * 2) < 12,
+    `${span(b0.id)[1]} vs ${b0.durationMs * 2}`);
+  ok('stretching a block shifts the next one', Math.abs(span(b1.id)[0] - beforeStart * 2) < 12,
+    `${span(b1.id)[0]} vs ${beforeStart * 2}`);
+  ok('duration follows the blocks', P().timelineDurationMs >= P().blocks.reduce((a, b) => a + b.durationMs, 0));
+
+  useEditor.getState().undo();
+  ok('undo restores the original duration', P().blocks[0].durationMs === b0.durationMs);
+  useEditor.getState().redo();
+  ok('redo reapplies it', P().blocks[0].durationMs === b0.durationMs * 2);
+  useEditor.getState().undo();
+
+  const trackCount = P().tracks.length;
+  useEditor.getState().removeBlock(b0.id);
+  ok('removing a block drops its tracks', P().tracks.length < trackCount && blockTracks(b0.id).length === 0);
+  ok('and closes the gap', span(P().blocks[0].id)[0] === 0);
+  useEditor.getState().undo();
+  ok('undo brings the block back', P().blocks.length === 4 && P().tracks.length === trackCount);
+
+  // toggling a track off must not move the pose
+  useEditor.getState().setPlayhead(1200);
+  const yawBefore = valueAt(P(), 'body', 'surface.yaw', 1200) as number;
+  useEditor.getState().toggleTrack('body', 'surface.yaw');
+  ok('un-animating bakes the current value', Math.abs((valueAt(P(), 'body', 'surface.yaw', 1200) as number) - yawBefore) < 1e-6,
+    `${valueAt(P(), 'body', 'surface.yaw', 1200)} vs ${yawBefore}`);
+  useEditor.getState().undo();
+
+  // expressions and morphs
+  useEditor.getState().morphBetween('x_neutral', 'x_surprised', 3000, 400, { type: 'preset', name: 'easeInOut' });
+  const scaleTrack = P().tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'transform.scale.x');
+  ok('morph wrote both ends', !!scaleTrack
+    && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3000) < 1)
+    && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3400) < 1));
+  ok('morph skips properties that match', !P().tracks.some((t) => t.nodeId === 'body' && t.property === 'surface.pitch'
+    && t.keyframes.some((k) => Math.abs(k.time - 3000) < 1)));
+  useEditor.getState().undo();
+
+  // copilot tool calls: validated, then applied as one undo step
+  const calls: ToolCall[] = [
+    { name: 'add_preset_to_timeline', args: { preset: 'Blink' } },
+    { name: 'set_eye_params', args: { nodeId: 'eyeL', openness: 0.3, atMs: 500 } },
+    { name: 'add_modifier', args: { nodeId: 'body', kind: 'float', amount: 80, frequency: 0.5, amplitude: 6 } },
+  ];
+  ok('valid calls pass validation', calls.every((c) => validate(P(), c) === null),
+    calls.map((c) => validate(P(), c)).join('|'));
+  ok('a bad layer is rejected', validate(P(), { name: 'set_eye_params', args: { nodeId: 'nope' } }) !== null);
+  ok('a bad property is rejected', validate(P(), { name: 'set_property', args: { nodeId: 'body', property: 'hack', value: 1 } }) !== null);
+  ok('an unknown tool is rejected', validate(P(), { name: 'rm_rf', args: {} }) !== null);
+  ok('calls describe themselves', describe(P(), calls[0]).includes('Blink'));
+
+  const blocksBefore = P().blocks.length;
+  applyCalls(calls);
+  ok('tool calls applied', P().blocks.length === blocksBefore + 1
+    && P().modifiers.length === 1
+    && (valueAt(P(), 'eyeL', 'eye.openness', 500) as number) === 0.3);
+  useEditor.getState().undo();
+  ok('one undo reverses the whole batch', P().blocks.length === blocksBefore && P().modifiers.length === 0);
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------
