@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useEditor } from '../core/store';
 import { PROP_RANGE } from '../core/props';
 import { PROP_LABEL } from '../core/types';
@@ -43,7 +43,7 @@ export function NumberField({ value, onChange, step = 1, className = 'prop-num' 
   );
 }
 
-export const fmtNum = (v: number) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100));
+const fmtNum = (v: number) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100));
 
 /** Stopwatch + slider + number. The only way a numeric property is ever edited. */
 export function PropRow({ nodeId, property, label }: { nodeId: string; property: string; label?: string }) {
@@ -72,10 +72,3 @@ export function PropRow({ nodeId, property, label }: { nodeId: string; property:
 }
 
 const clampTo = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
-
-/** Debounced local state — for text fields that would otherwise fight the store. */
-export function useDraft<T>(value: T): [T, (v: T) => void, () => T] {
-  const [d, setD] = useState(value);
-  useEffect(() => setD(value), [value]);
-  return [d, setD, () => d];
-}

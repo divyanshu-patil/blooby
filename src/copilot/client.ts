@@ -31,7 +31,8 @@ async function call(
         const body = await res.text().catch(() => '');
         lastError = `${res.status} ${body.slice(0, 160)}`;
         if (key) markKey(key, res.status === 429 ? 'rate-limited' : 'error', `${res.status}`);
-        if (res.status < 400 || res.status === 400 || res.status === 404) throw new PoolError(lastError);
+        // a bad request or a missing model is not going to work on a different key
+        if (res.status === 400 || res.status === 404) throw new PoolError(lastError);
       } catch (e) {
         if (e instanceof PoolError) throw e;
         lastError = e instanceof Error ? e.message : String(e);

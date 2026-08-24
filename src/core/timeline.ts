@@ -1,4 +1,4 @@
-import type { Block, Project } from './types';
+import type { Block, Preset, Project } from './types';
 
 export function blockStarts(p: Project): number[] {
   const out: number[] = [];
@@ -47,3 +47,21 @@ export function evenDuration(p: Project): number {
 }
 
 export const fmtSec = (ms: number) => `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)} s`;
+
+/**
+ * The moment a preset is most itself — the keyframe furthest from where its tracks
+ * start. Sampling the midpoint instead would draw Blink with its eyes open.
+ */
+export function characteristicTime(preset: Preset): number {
+  let best = preset.durationMs * 0.45, score = -1;
+  for (const t of preset.tracks) {
+    const first = t.keyframes[0]?.value;
+    if (typeof first !== 'number') continue;
+    for (const k of t.keyframes) {
+      if (typeof k.value !== 'number') continue;
+      const d = Math.abs(k.value - first) / (Math.abs(first) || 1);
+      if (d > score) { score = d; best = k.time; }
+    }
+  }
+  return best;
+}

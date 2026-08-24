@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { chatJson, listModels, PoolError, type ChatMessage } from '../copilot/client';
-import { DEFAULT_SETTINGS, loadSettings, maskKey, needsKey, saveSettings, type CopilotSettings, type KeyStatus } from '../copilot/pool';
+import { loadSettings, maskKey, needsKey, saveSettings, type CopilotSettings, type KeyStatus } from '../copilot/pool';
 import { applyCalls, describe, RESPONSE_SCHEMA, TOOL_DOCS, validate, type ToolCall } from '../copilot/tools';
 import { Panel } from './bits';
 import { fmtSec } from '../core/timeline';
@@ -45,7 +45,7 @@ Rules:
 
 export function Copilot() {
   const project = useEditor((s) => s.project);
-  const [settings, setSettings] = useState<CopilotSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<CopilotSettings>(loadSettings);
   const [models, setModels] = useState<string[]>([]);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
@@ -55,7 +55,6 @@ export function Copilot() {
   const [status, setStatus] = useState('');
   const thread = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setSettings(loadSettings()); }, []);
   useEffect(() => { thread.current?.scrollTo({ top: 1e6 }); }, [turns]);
 
   const patch = (p: Partial<CopilotSettings>) => setSettings((s) => { const n = { ...s, ...p }; saveSettings(n); return n; });

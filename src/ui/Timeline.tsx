@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor, keyframeTimes } from '../core/store';
 import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
-import { blockStarts, fmtSec } from '../core/timeline';
+import { blockStarts, characteristicTime, fmtSec } from '../core/timeline';
 import { EASING_NAMES, easingLabel, namedEasing } from '../core/easing';
 import { PROP_LABEL } from '../core/types';
 import { MascotThumb } from './Mascot';
-import { characteristicTime } from './Presets';
 import { GraphEditor } from './GraphEditor';
 import { NumberField } from './bits';
 

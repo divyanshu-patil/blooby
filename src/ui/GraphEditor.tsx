@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '../core/store';
 import { applyEasing, curveHandles } from '../core/easing';
-import type { Track } from '../core/types';
+import { PROP_LABEL, type Track } from '../core/types';
 
 const PAD = { l: 40, r: 14, t: 14, b: 20 };
 
@@ -27,13 +27,21 @@ export function GraphEditor({ tracks, selected, onSelect }: {
   const numeric = tracks.filter((t) => t.keyframes.every((k) => typeof k.value === 'number'));
   const duration = Math.max(project.timelineDurationMs, 1);
 
-  // shared value range so tracks are comparable, with a floor so a flat track isn't a wall
-  let lo = Infinity, hi = -Infinity;
-  for (const t of numeric) for (const k of t.keyframes) { lo = Math.min(lo, k.value as number); hi = Math.max(hi, k.value as number); }
-  if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
-  if (hi - lo < 1e-6) { lo -= 0.5; hi += 0.5; }
-  const padV = (hi - lo) * 0.14;
-  lo -= padV; hi += padV;
+  // Each track gets its own vertical range. A shared one would flatten openness (0–1)
+  // into a hairline next to yaw (degrees) — the same reason After Effects normalises.
+  // The axis is labelled for whichever track is selected.
+  const ranges = new Map<string, [number, number]>();
+  for (const t of numeric) {
+    let a = Infinity, b = -Infinity;
+    for (const k of t.keyframes) { a = Math.min(a, k.value as number); b = Math.max(b, k.value as number); }
+    if (!Number.isFinite(a)) { a = 0; b = 1; }
+    if (b - a < 1e-6) { a -= 0.5; b += 0.5; }
+    const pad = (b - a) * 0.16;
+    ranges.set(t.id, [a - pad, b + pad]);
+  }
+  const axisTrack = numeric.find((t) => t.id === selected?.trackId) ?? numeric[0];
+  const [lo, hi] = (axisTrack && ranges.get(axisTrack.id)) ?? [0, 1];
+  const rangeOf = (id: string) => ranges.get(id) ?? [lo, hi];
 
   useEffect(() => {
     const c = canvas.current;
@@ -46,7 +54,8 @@ export function GraphEditor({ tracks, selected, onSelect }: {
     g.clearRect(0, 0, w, h);
 
     const X = (t: number) => PAD.l + (t / duration) * (w - PAD.l - PAD.r);
-    const Y = (v: number) => h - PAD.b - ((v - lo) / (hi - lo)) * (h - PAD.t - PAD.b);
+    const Yin = (v: number, a: number, b: number) => h - PAD.b - ((v - a) / (b - a)) * (h - PAD.t - PAD.b);
+    const Y = (v: number) => Yin(v, lo, hi);
 
     // grid + value axis
     g.font = '10px JetBrains Mono, monospace';
@@ -58,6 +67,10 @@ export function GraphEditor({ tracks, selected, onSelect }: {
       const y = Math.round(Y(v)) + 0.5;
       g.beginPath(); g.moveTo(PAD.l, y); g.lineTo(w - PAD.r, y); g.stroke();
       g.fillText(v.toFixed(Math.abs(hi - lo) < 4 ? 2 : 0), 4, y + 3);
+    }
+    if (axisTrack) {
+      g.fillStyle = '#46423b';
+      g.fillText(`${PROP_LABEL[axisTrack.property] ?? axisTrack.property} · ${project.rig.nodes[axisTrack.nodeId]?.name ?? axisTrack.nodeId}`, PAD.l + 4, 11);
     }
     const secStep = duration > 8000 ? 2000 : 1000;
     for (let t = 0; t <= duration; t += secStep) {
@@ -71,6 +84,10 @@ export function GraphEditor({ tracks, selected, onSelect }: {
       const col = palette[ti % palette.length];
       const keys = track.keyframes;
       if (!keys.length) return;
+      const [ta, tb] = rangeOf(track.id);
+      const TY = (v: number) => Yin(v, ta, tb);
+      const dim = axisTrack && track.id !== axisTrack.id && selected;
+      g.globalAlpha = dim ? 0.32 : 1;
 
       g.strokeStyle = col; g.lineWidth = 1.6; g.beginPath();
       for (let i = 0; i < keys.length - 1; i++) {
@@ -80,10 +97,10 @@ export function GraphEditor({ tracks, selected, onSelect }: {
           const u = s / STEPS;
           const v = (a.value as number) + ((b.value as number) - (a.value as number)) * applyEasing(a.easingOut, u);
           const x = X(a.time + (b.time - a.time) * u);
-          if (i === 0 && s === 0) g.moveTo(x, Y(v)); else g.lineTo(x, Y(v));
+          if (i === 0 && s === 0) g.moveTo(x, TY(v)); else g.lineTo(x, TY(v));
         }
       }
-      if (keys.length === 1) { g.moveTo(PAD.l, Y(keys[0].value as number)); g.lineTo(w - PAD.r, Y(keys[0].value as number)); }
+      if (keys.length === 1) { g.moveTo(PAD.l, TY(keys[0].value as number)); g.lineTo(w - PAD.r, TY(keys[0].value as number)); }
       g.stroke();
 
       // handles of the selected keyframe only — otherwise the graph turns into hair
@@ -94,11 +111,11 @@ export function GraphEditor({ tracks, selected, onSelect }: {
         if (next) {
           const [p1, p2] = curveHandles(selKey.easingOut);
           const dx = next.time - selKey.time, dv = (next.value as number) - (selKey.value as number);
-          const h1 = { x: X(selKey.time + dx * p1.x), y: Y((selKey.value as number) + dv * p1.y) };
-          const h2 = { x: X(selKey.time + dx * p2.x), y: Y((selKey.value as number) + dv * p2.y) };
+          const h1 = { x: X(selKey.time + dx * p1.x), y: TY((selKey.value as number) + dv * p1.y) };
+          const h2 = { x: X(selKey.time + dx * p2.x), y: TY((selKey.value as number) + dv * p2.y) };
           g.strokeStyle = 'rgba(23,22,27,.45)'; g.lineWidth = 1;
-          g.beginPath(); g.moveTo(X(selKey.time), Y(selKey.value as number)); g.lineTo(h1.x, h1.y);
-          g.moveTo(X(next.time), Y(next.value as number)); g.lineTo(h2.x, h2.y); g.stroke();
+          g.beginPath(); g.moveTo(X(selKey.time), TY(selKey.value as number)); g.lineTo(h1.x, h1.y);
+          g.moveTo(X(next.time), TY(next.value as number)); g.lineTo(h2.x, h2.y); g.stroke();
           for (const p of [h1, h2]) {
             g.fillStyle = '#fff'; g.strokeStyle = '#17161b';
             g.beginPath(); g.arc(p.x, p.y, 4.5, 0, 7); g.fill(); g.stroke();
@@ -111,10 +128,11 @@ export function GraphEditor({ tracks, selected, onSelect }: {
         g.fillStyle = on ? col : '#f1eee8';
         g.strokeStyle = col; g.lineWidth = 1.6;
         g.beginPath();
-        const x = X(k.time), y = Y(k.value as number);
+        const x = X(k.time), y = TY(k.value as number);
         g.moveTo(x, y - 4.5); g.lineTo(x + 4.5, y); g.lineTo(x, y + 4.5); g.lineTo(x - 4.5, y);
         g.closePath(); g.fill(); g.stroke();
       }
+      g.globalAlpha = 1;
     });
 
     const px = X(playhead);
@@ -129,8 +147,8 @@ export function GraphEditor({ tracks, selected, onSelect }: {
       w, h,
       X: (t: number) => PAD.l + (t / duration) * (w - PAD.l - PAD.r),
       T: (x: number) => ((x - PAD.l) / (w - PAD.l - PAD.r)) * duration,
-      Y: (v: number) => h - PAD.b - ((v - lo) / (hi - lo)) * (h - PAD.t - PAD.b),
-      V: (y: number) => lo + ((h - PAD.b - y) / (h - PAD.t - PAD.b)) * (hi - lo),
+      Yin: (v: number, a: number, b: number) => h - PAD.b - ((v - a) / (b - a)) * (h - PAD.t - PAD.b),
+      Vin: (y: number, a: number, b: number) => a + ((h - PAD.b - y) / (h - PAD.t - PAD.b)) * (b - a),
     };
   };
 
@@ -141,8 +159,9 @@ export function GraphEditor({ tracks, selected, onSelect }: {
 
   const onDown = (e: React.PointerEvent) => {
     const p = at(e);
-    const { X, Y } = geom();
+    const { X } = geom();
     (e.target as Element).setPointerCapture?.(e.pointerId);
+    const yOf = (track: Track, v: number) => geom().Yin(v, ...rangeOf(track.id));
 
     if (selected) {
       const track = numeric.find((t) => t.id === selected.trackId);
@@ -153,8 +172,8 @@ export function GraphEditor({ tracks, selected, onSelect }: {
         const [p1, p2] = curveHandles(k.easingOut);
         const dx = next.time - k.time, dv = (next.value as number) - (k.value as number);
         const pts: [string, number, number][] = [
-          ['h1', X(k.time + dx * p1.x), Y((k.value as number) + dv * p1.y)],
-          ['h2', X(k.time + dx * p2.x), Y((k.value as number) + dv * p2.y)],
+          ['h1', X(k.time + dx * p1.x), yOf(track!, (k.value as number) + dv * p1.y)],
+          ['h2', X(k.time + dx * p2.x), yOf(track!, (k.value as number) + dv * p2.y)],
         ];
         for (const [kind, hx, hy] of pts) {
           if (Math.hypot(p.x - hx, p.y - hy) < 8) {
@@ -167,7 +186,7 @@ export function GraphEditor({ tracks, selected, onSelect }: {
 
     for (const track of numeric) {
       for (const k of track.keyframes) {
-        if (Math.hypot(p.x - X(k.time), p.y - Y(k.value as number)) < 8) {
+        if (Math.hypot(p.x - X(k.time), p.y - yOf(track, k.value as number)) < 8) {
           onSelect({ trackId: track.id, kfId: k.id });
           drag.current = { kind: 'kf', trackId: track.id, kfId: k.id };
           return;
@@ -191,7 +210,7 @@ export function GraphEditor({ tracks, selected, onSelect }: {
 
     if (d.kind === 'kf') {
       moveKeyframe(track.id, k.id, g.T(p.x));
-      const v = g.V(p.y);
+      const v = g.Vin(p.y, ...rangeOf(track.id));
       commit((proj) => {
         const kk = proj.tracks.find((t) => t.id === track.id)?.keyframes.find((x) => x.id === k.id);
         if (kk) kk.value = Math.round(v * 1000) / 1000;
@@ -205,7 +224,7 @@ export function GraphEditor({ tracks, selected, onSelect }: {
     const dx = next.time - k.time, dv = (next.value as number) - (k.value as number);
     const [p1, p2] = curveHandles(k.easingOut);
     const nx = dx === 0 ? 0 : (g.T(p.x) - k.time) / dx;
-    const ny = dv === 0 ? (d.kind === 'h1' ? p1.y : p2.y) : (g.V(p.y) - (k.value as number)) / dv;
+    const ny = dv === 0 ? (d.kind === 'h1' ? p1.y : p2.y) : (g.Vin(p.y, ...rangeOf(track.id)) - (k.value as number)) / dv;
     const clamped = { x: Math.min(1, Math.max(0, nx)), y: Math.round(ny * 1000) / 1000 };
     setEasing(track.id, k.id, { type: 'bezier', p1: d.kind === 'h1' ? clamped : p1, p2: d.kind === 'h2' ? clamped : p2 });
   };
