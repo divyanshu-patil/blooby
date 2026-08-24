@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check": "npx esbuild src/core/selfcheck.ts --bundle --format=esm | node --input-type=module"
+    "check": "npx esbuild src/core/selfcheck.ts --bundle --format=esm | node --input-type=module",
+    "copilot:test": "npx esbuild src/copilot/live-test.ts --bundle --format=esm --outfile=node_modules/.tmp/live-test.mjs && node node_modules/.tmp/live-test.mjs"
   },
   "dependencies": {
     "gif.js.optimized": "^1.0.1",

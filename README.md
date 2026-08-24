@@ -43,11 +43,19 @@ over the keyframes and baked into literal keyframes on export.
 time on the timeline, or morph A → B over a duration — numbers linearly, colours in
 OKLCH, angles by the shortest arc.
 
-**Copilot.** Talks straight from the browser to local Ollama, Ollama Cloud, or any
-compatible endpoint you point it at. Multiple API keys rotate with per-key health and
-failover on 401/429/5xx. It answers in validated JSON, and every proposed change lands as
-an Apply / Reject card describing what it will do in plain English — nothing touches the
-document until you say so.
+**Copilot.** Three tiers, all client-side: **Local** models, **Ollama Cloud**, or any
+**Custom** Ollama-compatible URL, where a pool of API keys rotates with per-key health and
+failover on 401/429/5xx.
+
+Ollama Cloud goes *through* your local Ollama rather than to `ollama.com` — that host
+serves no CORS headers on any route, so no browser can reach it directly, while the local
+daemon proxies any `-cloud` model using the sign-in it already holds. `ollama signin` once
+and big models work with no key in the page at all.
+
+Replies are parsed tolerantly (cloud models ignore Ollama's JSON-schema `format` and tend
+to fence their output), validated against the rig, and land as an Apply / Reject card
+describing each change in plain English. Nothing touches the document until you say so,
+and applying a batch is a single undo step.
 
 ## Layout
 
@@ -55,7 +63,7 @@ document until you say so.
 src/core/       pure logic, no React — curvature, easing, colour, noise, scene, store
 src/ui/         canvas, layers, inspector, eye panel, timeline, graph editor, copilot
 src/export/     lottie baker, dotLottie container, zip writer, GIF/MP4/PNG rasteriser
-src/copilot/    ollama client, key pool, tool schema and validation
+src/copilot/    ollama client, key pool, prompt, tolerant parser, tool schema, live test
 ```
 
 `core/curvature.ts` and `export/lottie.ts` are pure and independently testable; the SVG
@@ -70,6 +78,11 @@ form `R·D/√(D²−R²)`, easing curves, OKLCH round-trips, angular interpolat
 sampling — and then bakes a six-block project with shake to Lottie, **reads it back the
 way a player would, and compares it against the canvas frame by frame** (worst case under
 a pixel).
+
+`npm run copilot:test -- gpt-oss:120b "make the mascot blink twice then look surprised"`
+runs the copilot end to end against a real Ollama — system prompt, parse, normalise,
+validate, apply — and prints what it would do. Needs a running daemon, so it is kept out
+of `check`.
 
 `pnpm dev` then `/?smoke` runs the browser half — SVG serialisation, canvas raster, the
 zip writer, the GIF worker, MediaRecorder support — and reports in the tab title.

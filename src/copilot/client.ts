@@ -1,4 +1,4 @@
-import { baseUrl, needsKey, rotation, type CopilotSettings, type KeyStatus } from './pool';
+import { baseUrl, CLOUD_CATALOGUE, displayModel, needsKey, resolveModel, rotation, type CopilotSettings, type KeyStatus } from './pool';
 
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
 
@@ -30,6 +30,10 @@ async function call(
 
         const body = await res.text().catch(() => '');
         lastError = `${res.status} ${body.slice(0, 160)}`;
+        // the daemon holds the cloud sign-in, so an auth failure has one fix
+        if (s.endpoint === 'cloud' && (res.status === 401 || res.status === 403)) {
+          throw new PoolError('Ollama is not signed in to Ollama Cloud — run `ollama signin`, then try again.');
+        }
         if (key) markKey(key, res.status === 429 ? 'rate-limited' : 'error', `${res.status}`);
         // a bad request or a missing model is not going to work on a different key
         if (res.status === 400 || res.status === 404) throw new PoolError(lastError);
@@ -45,14 +49,25 @@ async function call(
   throw new PoolError(lastError);
 }
 
+/**
+ * What the daemon actually has. For the cloud tier this is merged with the catalogue,
+ * because the live cloud list at ollama.com is unreachable from a browser.
+ */
 export async function listModels(
   s: CopilotSettings,
   markKey: (key: string, status: KeyStatus, note?: string) => void,
 ): Promise<string[]> {
   const res = await call(s, '/api/tags', { method: 'GET' }, markKey);
   const data = await res.json();
-  const names: string[] = (data.models ?? []).map((m: { name?: string; model?: string }) => m.name ?? m.model).filter(Boolean);
-  return names.sort();
+  const names: string[] = (data.models ?? [])
+    .map((m: { name?: string; model?: string }) => m.name ?? m.model)
+    .filter(Boolean);
+
+  if (s.endpoint !== 'cloud') return [...new Set(names)].sort();
+
+  // pulled cloud models first, then the rest of the catalogue
+  const pulled = names.filter((n) => n.endsWith('-cloud')).map(displayModel);
+  return [...new Set([...pulled, ...CLOUD_CATALOGUE])];
 }
 
 export async function chatJson(
@@ -64,7 +79,7 @@ export async function chatJson(
   const res = await call(s, '/api/chat', {
     method: 'POST',
     body: JSON.stringify({
-      model: s.model,
+      model: resolveModel(s, s.model),
       messages,
       stream: false,
       format: schema,

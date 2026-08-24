@@ -41,6 +41,9 @@ apply_expression      { expression, atMs, easing? }             // expression = 
 create_preset         { name, durationMs, tracks: [{ nodeId, property, keyframes: [{ time, value, easing? }] }] }
 add_preset_to_timeline{ preset, index? }                        // preset = id or name; appended if index omitted
 add_modifier          { nodeId, kind: "shake"|"float", amount, frequency, amplitude, seed?, phase? }
+                      // amount is an intensity percentage, 0-200, where 100 is normal
+                      // frequency in Hz: shake 6-20, float 0.3-1.5
+                      // amplitude is the swing in degrees (or px on the body): 3-15
 morph_between         { from, to, atMs, durationMs, easing? }   // from/to = expression id or name`.trim();
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -58,6 +61,36 @@ function findExpression(p: Project, ref: unknown) {
 function findPreset(p: Project, ref: unknown) {
   const s = str(ref)?.toLowerCase();
   return p.presets.find((e) => e.id === ref || e.name.toLowerCase() === s);
+}
+
+/** Layer id, or a layer name in any casing — models reach for the visible name. */
+function findNode(p: Project, ref: unknown): string | undefined {
+  const s = str(ref);
+  if (!s) return undefined;
+  if (p.rig.nodes[s]) return s;
+  const lower = s.toLowerCase();
+  return Object.values(p.rig.nodes).find((n) => n.name.toLowerCase() === lower)?.id;
+}
+
+/**
+ * Rewrites the forgiving forms of a call into the exact ones before validation:
+ * layer names become ids, and the aliases models reach for become the real argument
+ * names. Anything it cannot resolve is left alone, so `validate` still rejects it.
+ */
+export function normaliseCall(p: Project, call: ToolCall): ToolCall {
+  const a: Record<string, unknown> = { ...(call.args ?? {}) };
+  const alias: Record<string, string> = {
+    node: 'nodeId', layer: 'nodeId', target: 'nodeId',
+    time: 'atMs', at: 'atMs', ms: 'atMs',
+    duration: 'durationMs', expressionId: 'expression', presetId: 'preset',
+    fromExpressionId: 'from', toExpressionId: 'to',
+  };
+  for (const [from, to] of Object.entries(alias)) {
+    if (a[from] !== undefined && a[to] === undefined) { a[to] = a[from]; delete a[from]; }
+  }
+  const id = findNode(p, a.nodeId);
+  if (id) a.nodeId = id;
+  return { name: call.name, args: a };
 }
 
 /** Rejects anything that would corrupt the document. Returns null when the call is fine. */

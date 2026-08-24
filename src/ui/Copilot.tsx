@@ -1,52 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { chatJson, listModels, PoolError, type ChatMessage } from '../copilot/client';
-import { loadSettings, maskKey, needsKey, saveSettings, type CopilotSettings, type KeyStatus } from '../copilot/pool';
-import { applyCalls, describe, RESPONSE_SCHEMA, TOOL_DOCS, validate, type ToolCall } from '../copilot/tools';
+import { baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, needsKey, resolveModel, saveSettings, type CopilotSettings, type KeyStatus } from '../copilot/pool';
+import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate, type ToolCall } from '../copilot/tools';
+import { systemPrompt } from '../copilot/prompt';
+import { parseTurn } from '../copilot/parse';
+import { CLOUD_CATALOGUE } from '../copilot/pool';
 import { Panel } from './bits';
-import { fmtSec } from '../core/timeline';
-import type { Project } from '../core/types';
 
 interface Turn { role: 'user' | 'bot' | 'error'; text: string; calls?: ToolCall[]; done?: boolean }
-
-/** Compact enough to fit any context window, complete enough to act on. */
-function systemPrompt(p: Project): string {
-  const nodes = Object.values(p.rig.nodes)
-    .map((n) => `  ${n.id} "${n.name}" (${n.kind}${n.eye ? `, openness ${n.eye.openness}, distance ${n.eye.distanceFromCenter}°` : ''})`)
-    .join('\n');
-  return `You are the animation copilot inside blooby, a mascot studio.
-
-The mascot is a sphere (the body) with features mapped onto its surface. Mapped features
-are NOT positioned in pixels — they use two angles:
-  surface.yaw   left(-) / right(+), degrees, around the sphere
-  surface.pitch up(-) / down(+), degrees
-A feature near the rim foreshortens automatically; past ~90° it hides behind the silhouette.
-Roll (transform.rotation) is ordinary in-plane 2D rotation.
-
-Animatable properties: surface.yaw, surface.pitch, flatOffset.x, flatOffset.y,
-transform.scale.x, transform.scale.y, transform.rotation, transform.length,
-eye.openness (0 closed, 1 open), eye.distanceFromCenter, size.x, size.y.
-
-Layers:
-${nodes}
-Expressions: ${p.expressions.map((e) => `${e.name}`).join(', ') || 'none'}
-Presets: ${p.presets.map((e) => `${e.name} (${fmtSec(e.durationMs)})`).join(', ')}
-Timeline: ${fmtSec(p.timelineDurationMs)} at ${p.fps} fps, ${p.blocks.length} blocks.
-
-Tools (emit them in "calls"):
-${TOOL_DOCS}
-
-Rules:
-- Prefer existing presets for common beats (Blink, Talk, Happy, Surprised, Thinking, Notify).
-- Times are milliseconds from the start of the timeline.
-- Keep "reply" to one or two sentences. Put every change in "calls" — never describe a change you did not emit.
-- Emit an empty "calls" array when the user is only asking a question.`;
-}
 
 export function Copilot() {
   const project = useEditor((s) => s.project);
   const [settings, setSettings] = useState<CopilotSettings>(loadSettings);
-  const [models, setModels] = useState<string[]>([]);
+  // the cloud catalogue needs no network, so the picker is never empty on the cloud tier
+  const [models, setModels] = useState<string[]>(() => (loadSettings().endpoint === 'cloud' ? [...CLOUD_CATALOGUE] : []));
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -74,8 +42,11 @@ export function Copilot() {
       setStatus(list.length ? `${list.length} models` : 'no models installed');
       if (list.length && !list.includes(s.model)) patch({ model: list[0] });
     } catch (e) {
-      setModels([]);
-      setStatus(e instanceof Error ? e.message.slice(0, 90) : 'unreachable');
+      // the cloud catalogue is still usable when the daemon is simply not running yet
+      setModels(s.endpoint === 'cloud' ? [...CLOUD_CATALOGUE] : []);
+      setStatus(e instanceof Error && /fetch|network/i.test(e.message)
+        ? 'Ollama not reachable — is it running?'
+        : (e instanceof Error ? e.message.slice(0, 90) : 'unreachable'));
     }
   };
 
@@ -95,13 +66,12 @@ export function Copilot() {
     const attempt = async (extra?: string): Promise<Turn> => {
       const msgs = extra ? [...history, { role: 'user' as const, content: extra }] : history;
       const raw = await chatJson(settings, msgs, RESPONSE_SCHEMA, markKey);
-      let parsed: { reply?: string; calls?: ToolCall[] };
-      try { parsed = JSON.parse(raw); }
-      catch { throw new Error(`Model did not return JSON: ${raw.slice(0, 120)}`); }
-      const calls = Array.isArray(parsed.calls) ? parsed.calls : [];
+      const parsed = parseTurn(raw);
+      const calls = parsed.calls.map((c) => normaliseCall(project, c));
       const problems = calls.map((c) => validate(project, c)).filter(Boolean) as string[];
       if (problems.length) throw new ValidationError(problems.join('; '));
-      return { role: 'bot', text: parsed.reply ?? '', calls };
+      if (!parsed.reply && !calls.length) throw new ValidationError('no tool calls and nothing to say');
+      return { role: 'bot', text: parsed.reply || `${calls.length} change${calls.length === 1 ? '' : 's'} ready.`, calls };
     };
 
     try {
@@ -139,15 +109,27 @@ export function Copilot() {
             <div className="row">
               <div className="seg">
                 {(['local', 'cloud', 'custom'] as const).map((e) => (
-                  <button key={e} aria-pressed={settings.endpoint === e} onClick={() => patch({ endpoint: e })}>{e}</button>
+                  <button key={e} aria-pressed={settings.endpoint === e} onClick={() => {
+                    patch({ endpoint: e, model: e === 'cloud' ? DEFAULT_CLOUD_MODEL : '' });
+                    setModels(e === 'cloud' ? [...CLOUD_CATALOGUE] : []);
+                    setStatus('');
+                  }}>{ENDPOINT_INFO[e].label}</button>
                 ))}
               </div>
               <span className="spacer" />
-              <button className="btn sm" onClick={() => refresh()}>Check</button>
+              <button className="btn sm" title="Ask Ollama which models it has" onClick={() => refresh()}>Check</button>
             </div>
+            <p className="hint">{ENDPOINT_INFO[settings.endpoint].hint}</p>
             {settings.endpoint === 'custom' && (
               <input className="txt" placeholder="https://your-ollama-compatible-host" value={settings.customUrl}
                 onChange={(e) => patch({ customUrl: e.target.value })} />
+            )}
+            {settings.endpoint === 'cloud' && (
+              <p className="hint">
+                Requests go to <code>localhost:11434</code>, not <code>ollama.com</code> — ollama.com sends no
+                CORS headers, so no browser can call it directly. Point <em>Custom</em> at a proxy if you need
+                to reach it with an API key.
+              </p>
             )}
             {needsKey(settings) && (
               <>
@@ -185,10 +167,13 @@ export function Copilot() {
         <div className="row">
           <select className="sel" style={{ flex: 1 }} value={settings.model} onChange={(e) => patch({ model: e.target.value })}>
             {!models.length && <option value={settings.model}>{settings.model || 'no model — press Check'}</option>}
-            {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            {models.map((m) => <option key={m} value={m}>{displayModel(m)}</option>)}
           </select>
-          <span className="tag">{status || settings.endpoint}</span>
+          <span className="tag" title={baseUrl(settings)}>{status || ENDPOINT_INFO[settings.endpoint].label}</span>
         </div>
+        {settings.endpoint === 'cloud' && settings.model && (
+          <p className="hint">Runs as <code>{resolveModel(settings, settings.model)}</code> on Ollama Cloud.</p>
+        )}
       </Panel>
 
       <div className="panel flush grow" style={{ minHeight: 260 }}>

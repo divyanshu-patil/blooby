@@ -130,23 +130,42 @@ through Vite's `?url`.
 
 ## Copilot
 
+**Ollama Cloud is routed through the local daemon, not straight to ollama.com.** This is
+forced, not preferred: `ollama.com` sends no `Access-Control-Allow-Origin` on any route
+and answers preflights with `405` — checked against `/api/tags`, `/api/chat` and the
+OpenAI-compatible `/v1/*` endpoints, and confirmed with a real browser fetch, which fails
+every one of them. A page can never call it directly. The local daemon, meanwhile, sends
+correct CORS headers (including `Authorization`) and proxies any `-cloud` model to Ollama
+Cloud using the sign-in it already holds. So the cloud tier keeps the browser talking to
+`localhost:11434`, appends `-cloud` to the model name, and lets Ollama make the
+authenticated hop. One `ollama signin` is the whole setup, and no key touches the page.
+*Revisit if ollama.com ever ships CORS headers.*
+
+**The cloud model catalogue is a hardcoded fallback.** §14 asks for a live list, and
+`https://ollama.com/api/tags` does serve one unauthenticated — but it is CORS-blocked
+like everything else there, so a browser cannot read it. The catalogue in `pool.ts` is
+seeded from that endpoint and merged ahead of any `-cloud` model already pulled locally;
+any model name typed into the picker is passed through untouched. It will drift as
+Ollama's line-up changes. *A proxy on the custom tier restores the live list.*
+
+**`format` is not enforced for cloud models.** Ollama honours the JSON-schema `format`
+field locally, but it does not survive the hop to Ollama Cloud: replies come back wrapped
+in markdown fences, sometimes as a bare array, and often with each call written as
+`{ toolName: args }` rather than `{ name, args }`. `copilot/parse.ts` normalises all of
+those, and `normaliseCall` resolves layer *names* to ids and the argument aliases models
+reach for (`time` → `atMs`, `layer` → `nodeId`). The system prompt also spells out the
+envelope explicitly rather than relying on the schema. Recorded real responses are pinned
+as fixtures in `selfcheck.ts`. The single re-prompt is still there for genuine mistakes.
+
 **No free community gateway is wired in.** The spec asks to verify CORS and terms of a
 specific gateway at implementation time; that could not be verified here, and a hardcoded
-guess would likely be wrong and would send user prompts somewhere unvetted. Instead there
-is a **custom endpoint** field: paste any Ollama-compatible base URL. Local Ollama and
-Ollama Cloud work as specified.
-
-**Structured JSON output is the primary path**, using Ollama's `format` field with a JSON
-schema, because tool-calling support varies by model. Output is validated against the rig
-before it is offered, and one re-prompt carrying the validator's complaint is allowed
-before giving up.
-
-**A `set_property` / `add_keyframe` pair was added to the tool list** beyond the spec's
-seven. Without a general property setter the copilot cannot express anything the preset
-library does not already cover.
+guess would likely be wrong and would send user prompts somewhere unvetted. The **custom**
+tier takes any Ollama-compatible base URL instead — a proxy in front of ollama.com, or a
+remote Ollama — and that is where the API-key pool applies.
 
 **Keys live in `localStorage` and are sent only to the configured endpoint.** The panel
-says so in the UI.
+says so in the UI. Only the custom tier can need one — local and cloud both go to the
+daemon, which owns its own credentials.
 
 ## Interface
 

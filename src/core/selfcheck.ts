@@ -11,7 +11,9 @@ import { defaultProject } from './defaults';
 import { derivedDuration } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { useEditor } from './store';
-import { applyCalls, describe, validate, type ToolCall } from '../copilot/tools';
+import { applyCalls, describe, normaliseCall, validate, type ToolCall } from '../copilot/tools';
+import { parseTurn } from '../copilot/parse';
+import { baseUrl, LOCAL_URL, needsKey, resolveModel } from '../copilot/pool';
 import { crc32 } from '../export/zip';
 import type { Rig, RigNode } from './types';
 
@@ -351,6 +353,60 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     && (valueAt(P(), 'eyeL', 'eye.openness', 500) as number) === 0.3);
   useEditor.getState().undo();
   ok('one undo reverses the whole batch', P().blocks.length === blocksBefore && P().modifiers.length === 0);
+}
+
+// --- copilot: parsing what models actually send back ---------------------------
+{
+  // verbatim replies from gpt-oss:120b via Ollama Cloud, where `format` is not enforced
+  const cloudA = '```json\n[\n  { "add_preset_to_timeline": { "preset": "Blink", "index": 0 } },\n  { "add_preset_to_timeline": { "preset": "Blink", "index": 1 } },\n  { "apply_expression": { "expression": "Surprised", "atMs": 2500 } }\n]\n```';
+  const cloudB = '```json\n{\n  "calls": [\n    { "add_preset_to_timeline": { "preset": "Thinking", "index": 0 } },\n    { "add_modifier": { "nodeId": "Body", "kind": "float", "amount": 10, "frequency": 0.2, "amplitude": 5 } }\n  ]\n}\n```';
+
+  const a = parseTurn(cloudA);
+  ok('fenced bare array parses', a.calls.length === 3, JSON.stringify(a.calls));
+  ok('{tool: args} becomes {name, args}', a.calls[0].name === 'add_preset_to_timeline' && a.calls[0].args.preset === 'Blink');
+  ok('blink twice then surprised', a.calls.filter((c) => c.args.preset === 'Blink').length === 2
+    && a.calls[2].name === 'apply_expression' && a.calls[2].args.expression === 'Surprised');
+
+  const b = parseTurn(cloudB);
+  ok('fenced {calls:[...]} parses', b.calls.length === 2);
+  ok('missing reply is tolerated', b.reply === '');
+
+  // the strict shape must still work
+  const strict = parseTurn('{"reply":"done","calls":[{"name":"add_modifier","args":{"nodeId":"body","kind":"shake","amount":50,"frequency":8,"amplitude":4}}]}');
+  ok('documented shape parses', strict.reply === 'done' && strict.calls[0].name === 'add_modifier');
+  // and the awkward ones
+  ok('prose before the json', parseTurn('Sure! Here you go:\n{"reply":"hi","calls":[]}').reply === 'hi');
+  ok('tool_calls alias', parseTurn('{"tool_calls":[{"tool":"add_keyframe","arguments":{"nodeId":"body","property":"surface.yaw","atMs":100,"value":10}}]}').calls.length === 1);
+  ok('a single unwrapped call', parseTurn('{"name":"apply_expression","args":{"expression":"Happy","atMs":0}}').calls.length === 1);
+  ok('junk is rejected, not guessed', (() => { try { parseTurn('I cannot do that'); return false; } catch { return true; } })());
+  ok('unknown tools are dropped', parseTurn('{"calls":[{"name":"drop_database","args":{}}]}').calls.length === 0);
+
+  // normalisation: layer names and argument aliases become the real thing
+  const proj = defaultProject();
+  const n1 = normaliseCall(proj, { name: 'add_modifier', args: { nodeId: 'Body', kind: 'float', amount: 10, frequency: 0.2, amplitude: 5 } });
+  ok('a layer name resolves to its id', n1.args.nodeId === 'body', String(n1.args.nodeId));
+  ok('and then validates', validate(proj, n1) === null, String(validate(proj, n1)));
+  const n2 = normaliseCall(proj, { name: 'apply_expression', args: { expression: 'Surprised', time: 900 } });
+  ok('time becomes atMs', n2.args.atMs === 900 && validate(proj, n2) === null);
+  const n3 = normaliseCall(proj, { name: 'set_eye_params', args: { layer: 'Left eye', openness: 0.2 } });
+  ok('layer alias resolves', n3.args.nodeId === 'eyeL' && validate(proj, n3) === null);
+  ok('an unresolvable layer still fails', validate(proj, normaliseCall(proj, { name: 'set_eye_params', args: { nodeId: 'Nose' } })) !== null);
+
+  // the whole cloud reply, end to end
+  const applied = a.calls.map((c) => normaliseCall(proj, c));
+  ok('the cloud reply validates end to end', applied.every((c) => validate(proj, c) === null),
+    applied.map((c) => validate(proj, c)).join('|'));
+}
+
+// --- endpoint routing ----------------------------------------------------------
+{
+  const base = { customUrl: '', model: 'gpt-oss:120b', keys: [] };
+  ok('cloud is routed through the local daemon', baseUrl({ ...base, endpoint: 'cloud' }) === LOCAL_URL);
+  ok('cloud models take the -cloud suffix', resolveModel({ ...base, endpoint: 'cloud' }, 'gpt-oss:120b') === 'gpt-oss:120b-cloud');
+  ok('the suffix is not doubled', resolveModel({ ...base, endpoint: 'cloud' }, 'gpt-oss:120b-cloud') === 'gpt-oss:120b-cloud');
+  ok('local models are untouched', resolveModel({ ...base, endpoint: 'local' }, 'llama3') === 'llama3');
+  ok('only a custom endpoint needs a key', !needsKey({ ...base, endpoint: 'cloud' }) && !needsKey({ ...base, endpoint: 'local' }) && needsKey({ ...base, endpoint: 'custom' }));
+  ok('custom urls lose their trailing slash', baseUrl({ ...base, endpoint: 'custom', customUrl: 'https://proxy.example/' }) === 'https://proxy.example');
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------

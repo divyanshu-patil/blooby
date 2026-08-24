@@ -2,6 +2,22 @@ export type KeyStatus = 'ok' | 'rate-limited' | 'error';
 export interface PoolKey { id: string; value: string; status: KeyStatus; note?: string; usedAt?: number }
 export type Endpoint = 'local' | 'cloud' | 'custom';
 
+/** Where a tier's requests actually go, and why. */
+export const ENDPOINT_INFO: Record<Endpoint, { label: string; hint: string }> = {
+  local: {
+    label: 'Local',
+    hint: 'Models installed on this machine, served by Ollama on port 11434.',
+  },
+  cloud: {
+    label: 'Ollama Cloud',
+    hint: 'Big models run on Ollama\u2019s hardware. Routed through your local Ollama, which holds the sign-in \u2014 run `ollama signin` once. No key goes in the browser.',
+  },
+  custom: {
+    label: 'Custom',
+    hint: 'Any Ollama-compatible base URL. Use this for a proxy in front of ollama.com, or a remote Ollama.',
+  },
+};
+
 export interface CopilotSettings {
   endpoint: Endpoint;
   customUrl: string;
@@ -11,10 +27,15 @@ export interface CopilotSettings {
 
 const KEY = 'blooby.copilot.v1';
 
+/** Solid at structured output and available to every signed-in account. */
+export const DEFAULT_CLOUD_MODEL = 'gpt-oss:120b';
+
 export const DEFAULT_SETTINGS: CopilotSettings = {
-  endpoint: 'local',
+  // cloud by default: it is the tier most likely to have a model good enough to be
+  // useful here, and it needs one `ollama signin` rather than a multi-gigabyte pull
+  endpoint: 'cloud',
   customUrl: '',
-  model: '',
+  model: DEFAULT_CLOUD_MODEL,
   keys: [],
 };
 
@@ -30,13 +51,57 @@ export function saveSettings(s: CopilotSettings) {
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* private mode */ }
 }
 
+export const LOCAL_URL = 'http://localhost:11434';
+export const OLLAMA_CLOUD_URL = 'https://ollama.com';
+
+/**
+ * Ollama Cloud goes through the *local* daemon, not straight to ollama.com.
+ *
+ * ollama.com serves no `Access-Control-Allow-Origin` and answers preflights with 405,
+ * so a browser can never call it directly — checked against /api/tags, /api/chat and
+ * the OpenAI-compatible /v1 routes. The local daemon, on the other hand, sends proper
+ * CORS headers (including Authorization) and proxies any `-cloud` model to Ollama Cloud
+ * using the sign-in it already holds. So the cloud tier keeps the browser talking to
+ * localhost and lets Ollama do the authenticated hop.
+ */
 export function baseUrl(s: CopilotSettings): string {
-  if (s.endpoint === 'local') return 'http://localhost:11434';
-  if (s.endpoint === 'cloud') return 'https://ollama.com';
-  return s.customUrl.replace(/\/+$/, '');
+  if (s.endpoint === 'custom') return s.customUrl.replace(/\/+$/, '');
+  return LOCAL_URL;
 }
 
-export const needsKey = (s: CopilotSettings) => s.endpoint !== 'local';
+/** Only a custom endpoint can need a key; the cloud tier borrows the daemon's sign-in. */
+export const needsKey = (s: CopilotSettings) => s.endpoint === 'custom';
+
+/** Cloud models are addressed by a `-cloud` suffix when run through a local daemon. */
+export function resolveModel(s: CopilotSettings, model: string): string {
+  if (s.endpoint !== 'cloud' || !model) return model;
+  return model.endsWith('-cloud') ? model : `${model}-cloud`;
+}
+
+export const displayModel = (m: string) => m.replace(/-cloud$/, '');
+
+/**
+ * Fallback catalogue, used because the live list at ollama.com/api/tags is CORS-blocked
+ * from a browser. Ollama's cloud line-up moves, so treat this as a starting point: any
+ * model name typed into the picker is passed straight through, and any `-cloud` model
+ * already pulled locally is merged in ahead of this list.
+ */
+export const CLOUD_CATALOGUE = [
+  'deepseek-v4-flash:0731',
+  'deepseek-v4-pro:0813',
+  'gemma4:31b',
+  'glm-5.2',
+  'gpt-oss:20b',
+  'gpt-oss:120b',
+  'kimi-k2.7-code',
+  'kimi-k3',
+  'minimax-m3',
+  'mistral-large-3:675b',
+  'nemotron-3-nano:30b',
+  'nemotron-3-super',
+  'nemotron-3-ultra',
+  'qwen3.5:397b',
+];
 
 /** Healthy keys first, then rate-limited ones, so a cooled-off key gets another go. */
 export function rotation(s: CopilotSettings): (string | null)[] {
