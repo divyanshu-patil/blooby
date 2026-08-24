@@ -1,7 +1,7 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
 import { noise1d } from './noise';
-import { projectToScreen } from './curvature';
+import { projectToScreen, silhouetteScale } from './curvature';
 import { getProp, readProp, setProp, writeProp } from './props';
 import type { ColorStop, KeyValue, Modifier, Project, Rig, RigNode, Track, Vec2 } from './types';
 
@@ -141,10 +141,13 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   const head = { x: root.surface.yaw, y: root.surface.pitch };
   const squash = rx === 0 ? 1 : ry / rx;
 
+  // rx is the *sphere* radius that features are placed on; the drawn outline is its
+  // silhouette, which perspective pushes outward. Keep them separate or features escape.
+  const limb = silhouetteScale(rig.camera.fov, rig.camera.distance);
   if (root.visible) {
     out.push({
-      id: root.id, name: root.name, shape: 'ellipse', cx, cy, w: rx * 2, h: ry * 2,
-      r: Math.min(rx, ry), rotation: roll, color: root.color, depth: -2, zIndex: root.zIndex,
+      id: root.id, name: root.name, shape: 'ellipse', cx, cy, w: rx * limb * 2, h: ry * limb * 2,
+      r: Math.min(rx, ry) * limb, rotation: roll, color: root.color, depth: -2, zIndex: root.zIndex,
     });
   }
 
@@ -164,11 +167,12 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
       const h = eyeHeight(node) * node.transform.scale.y * p.sy;
       const rot = pr + node.transform.rotation;
 
+      const color = p.alpha < 1 ? { ...node.color, a: node.color.a * p.alpha } : node.color;
       if (node.kind === 'svgLayer' && node.svg) {
-        out.push({ id: node.id, name: node.name, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, color: node.color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
+        out.push({ id: node.id, name: node.name, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
       } else if (node.kind !== 'group') {
         const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
-        out.push({ id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot, color: node.color, depth: p.depth, zIndex: node.zIndex });
+        out.push({ id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot, color, depth: p.depth, zIndex: node.zIndex });
       }
       walk(node, ax, ay, rot, Math.max(w, h) / 2, { x: 0, y: 0 });
     }

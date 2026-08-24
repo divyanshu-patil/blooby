@@ -184,9 +184,11 @@ export function Stage() {
     <div className="stage-frame">
       <svg ref={svgRef} viewBox={`0 0 ${COMP.width} ${COMP.height}`} preserveAspectRatio="xMidYMid meet"
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
-        <rect x={0} y={0} width={COMP.width} height={COMP.height} fill="none" />
+        <rect x={0.5} y={0.5} width={COMP.width - 1} height={COMP.height - 1}
+          fill="none" stroke="rgba(255,255,255,.07)" pointerEvents="none" />
         {showGuides && (
           <ellipse cx={frame.cx} cy={frame.cy} rx={frame.R} ry={frame.R * frame.squash}
+            transform={`rotate(${frame.roll} ${frame.cx} ${frame.cy})`}
             fill="none" stroke="rgba(255,255,255,.1)" strokeDasharray="4 6" pointerEvents="none" />
         )}
         <Shapes scene={scene} />

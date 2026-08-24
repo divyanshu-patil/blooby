@@ -24,10 +24,15 @@ export interface Projected {
   sy: number;
   /** n.z in -1..1 — z-order and rim clipping */
   depth: number;
+  /** 0..1 — fades out over the last few degrees before the limb */
+  alpha: number;
   visible: boolean;
 }
 
-export const FLAT: Projected = { x: 0, y: 0, sx: 1, sy: 1, depth: 1, visible: true };
+export const FLAT: Projected = { x: 0, y: 0, sx: 1, sy: 1, depth: 1, alpha: 1, visible: true };
+
+/** Width of the fade band at the limb, in units of n.z. */
+const RIM_FADE = 0.14;
 
 type V3 = [number, number, number];
 
@@ -66,6 +71,32 @@ export function limbThreshold(fov: number, distance: number): number {
   return w / Math.max(distance, 1.2);
 }
 
+/**
+ * How large the sphere's silhouette actually is on screen, in units of R.
+ *
+ * Orthographically it is exactly R. Under perspective the visible limb sits at
+ * n.z = R/D and projects *outside* R — the classic result that a sphere at distance D
+ * subtends R·D/√(D²−R²). Draw the body at plain R and features near the rim spill past
+ * its outline, which is what makes a 2D fake read as broken. Scanning the projected
+ * radius over the visible cap is exact for the blended divide too, and it is a handful
+ * of multiplies once per frame.
+ */
+const silhouetteCache = new Map<string, number>();
+export function silhouetteScale(fov: number, distance: number): number {
+  const key = `${fov}|${distance}`;
+  const hit = silhouetteCache.get(key);
+  if (hit !== undefined) return hit;
+  const lo = limbThreshold(fov, distance);
+  let max = 1;
+  for (let i = 0; i <= 96; i++) {
+    const nz = lo + ((1 - lo) * i) / 96;
+    max = Math.max(max, perspective(nz, fov, distance) * Math.sqrt(Math.max(0, 1 - nz * nz)));
+  }
+  if (silhouetteCache.size > 512) silhouetteCache.clear();
+  silhouetteCache.set(key, max);
+  return max;
+}
+
 export function surfaceNormal(yawDeg: number, pitchDeg: number): V3 {
   const t = yawDeg * D2R, p = pitchDeg * D2R;
   return [Math.sin(t) * Math.cos(p), Math.sin(p), Math.cos(t) * Math.cos(p)];
@@ -101,20 +132,36 @@ export function projectToScreen(
   const y = R * n[1] * m;
 
   // Compression is radial: a feature near the rim squashes *along* the line to the
-  // centre, not uniformly. Expressed in the node's own rolled frame so it collapses
-  // into a plain scale vector — which is all Lottie's transform can carry.
-  // ponytail: drops the shear off-diagonal; exact at 0°/90°, sub-pixel between.
+  // centre, not uniformly. Expressed in the node's own rolled frame it collapses into a
+  // plain scale vector — which is all a Lottie transform can carry, so preview and
+  // export stay bit-identical instead of drifting apart.
+  //
+  // Dropping the shear off-diagonal is exact when the shape's axes line up with the
+  // radius (α = 0° or 90°). At 45° it is not, and the uncorrected form lets an eye
+  // spill ~11% past the silhouette. Fading the anisotropy out with cos²2α makes 45°
+  // exact too — there the shape is equally radial and tangential, so uniform f is the
+  // right answer — and holds the worst case in between to a couple of percent.
+  // ponytail: 2% too-small near the rim at 30°/60°; the exact fix needs Lottie's skew
+  // decomposition, which is not worth a preview/export divergence.
   const f = Math.max(n[2], 0);
   const alpha = Math.atan2(y, x) - node.transform.rotation * D2R;
-  const ca = Math.cos(alpha) ** 2, sa = Math.sin(alpha) ** 2;
+  const g = Math.cos(2 * alpha) ** 2;
+  const ca = Math.cos(alpha) ** 2 * g, sa = Math.sin(alpha) ** 2 * g;
+
+  // A feature does not pop out of existence at the limb — real occlusion would eat it
+  // gradually, and the fade also covers the last percent of scale-only approximation
+  // error, which lives in exactly this band.
+  const limb = limbThreshold(rig.camera.fov, rig.camera.distance);
+  const u = Math.min(1, Math.max(0, (n[2] - limb) / RIM_FADE));
 
   return {
     x,
     y,
-    sx: (f * ca + sa) * m,
-    sy: (f * sa + ca) * m,
+    sx: (f + (1 - f) * sa) * m,
+    sy: (f + (1 - f) * ca) * m,
     depth: n[2],
-    visible: n[2] > limbThreshold(rig.camera.fov, rig.camera.distance) + 1e-9,
+    alpha: u * u * (3 - 2 * u),
+    visible: n[2] > limb + 1e-9,
   };
 }
 

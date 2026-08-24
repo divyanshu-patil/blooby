@@ -7,10 +7,28 @@ import { Panel } from './bits';
 import { EASING_NAMES, namedEasing } from '../core/easing';
 import type { Preset, Project } from '../core/types';
 
-/** A preset's own pose, rendered live — the icon *is* the animation. */
+/**
+ * A preset's own pose, rendered live — the icon *is* the animation.
+ * Sampled at its most characteristic moment (the keyframe furthest from where the
+ * track starts), not the midpoint, or Blink and Idle would both show open eyes.
+ */
+export function characteristicTime(preset: Preset): number {
+  let best = preset.durationMs * 0.45, score = -1;
+  for (const t of preset.tracks) {
+    const first = t.keyframes[0]?.value;
+    if (typeof first !== 'number') continue;
+    for (const k of t.keyframes) {
+      if (typeof k.value !== 'number') continue;
+      const d = Math.abs(k.value - first) / (Math.abs(first) || 1);
+      if (d > score) { score = d; best = k.time; }
+    }
+  }
+  return best;
+}
+
 function glyphScene(project: Project, preset: Preset) {
   const temp: Project = { ...project, tracks: preset.tracks, modifiers: [], blocks: [] };
-  return sceneAt(temp, preset.durationMs * 0.45, COMP);
+  return sceneAt(temp, characteristicTime(preset), COMP);
 }
 
 export function Presets() {

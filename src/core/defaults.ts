@@ -120,8 +120,25 @@ export function builtinExpressions(): Expression[] {
   ];
 }
 
+/** Appends a preset as a block at the end of the timeline. */
+export function appendPreset(p: Project, presetId: string): void {
+  const preset = p.presets.find((x) => x.id === presetId);
+  if (!preset) return;
+  const start = p.blocks.reduce((s, b) => s + b.durationMs, 0);
+  const blockId = uid('b');
+  p.blocks.push({ id: blockId, presetId, name: preset.name, durationMs: preset.durationMs });
+  for (const t of preset.tracks) {
+    p.tracks.push({
+      id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
+      keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
+    });
+  }
+  p.timelineDurationMs = p.blocks.reduce((s, b) => s + b.durationMs, 0);
+}
+
+/** A new file opens on a working four-beat loop, not an empty strip. */
 export function defaultProject(): Project {
-  return {
+  const p: Project = {
     name: 'Untitled mascot',
     rig: defaultRig(),
     tracks: [],
@@ -133,4 +150,6 @@ export function defaultProject(): Project {
     timelineDurationMs: 4000,
     fps: 30,
   };
+  for (const id of ['p_idle', 'p_blink', 'p_talk', 'p_happy']) appendPreset(p, id);
+  return p;
 }

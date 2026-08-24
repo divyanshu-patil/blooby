@@ -62,8 +62,7 @@ export function PropRow({ nodeId, property, label }: { nodeId: string; property:
     <div className="prop">
       <button className="stopwatch" aria-pressed={!!track} title={track ? 'Remove keyframes' : 'Animate this property'}
         onClick={() => { toggleTrack(nodeId, property); if (track) selectTrack(null); else selectTrack(null); }} />
-      <label className="prop-label">
-        {label ?? PROP_LABEL[property] ?? property}
+      <label className="prop-label"><span className="t">{label ?? PROP_LABEL[property] ?? property}</span>
         <input type="range" min={min} max={max} step={step} value={v}
           onChange={(e) => setValue(nodeId, property, parseFloat(e.target.value))} />
       </label>

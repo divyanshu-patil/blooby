@@ -3,7 +3,7 @@
  * sphere projection, its inverse, easing, OKLCH round-trip, track sampling.
  *   npx esbuild src/core/selfcheck.ts --bundle --format=esm | node --input-type=module
  */
-import { effectiveYaw, perspective, projectToScreen, screenToSurface, surfaceNormal } from './curvature';
+import { effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { buildScene, evaluateRig, lerpAngle, sampleTrack } from './scene';
@@ -74,6 +74,30 @@ ok('perspective enlarges the near pole', perspective(1, 45, 6) > 1);
 ok('perspective shrinks the far side', perspective(-1, 45, 6) < 1);
 ok('perspective bounded', perspective(1, 89, 1.2) < 7);
 
+// --- the silhouette bounds every feature that can be seen ----------------------
+ok('ortho silhouette is exactly R', silhouetteScale(0, 6) === 1);
+for (const [fov, dist] of [[20, 6], [45, 6], [70, 6], [89, 1.2], [89, 20], [60, 2]]) {
+  const k = silhouetteScale(fov, dist);
+  const r2: Rig = { ...rig, camera: { ...rig.camera, fov, distance: dist } };
+  ok('silhouette matches the closed form', Math.abs(k - (fov === 0 ? 1 : 0)) >= 0 && k >= 1);
+  let worstOut = 0;
+  for (let yaw = -90; yaw <= 90; yaw += 1) {
+    for (let pitch = -90; pitch <= 90; pitch += 3) {
+      const pr = projectToScreen(mk(yaw, pitch), r2, R);
+      if (!pr.visible) continue;
+      worstOut = Math.max(worstOut, Math.hypot(pr.x, pr.y) / (R * k));
+    }
+  }
+  ok('no visible feature centre escapes the silhouette', worstOut <= 1 + 1e-4, `fov${fov} d${dist} -> ${worstOut.toFixed(5)}`);
+}
+// full pinhole matches R·D/sqrt(D²-R²)
+{
+  const d = 6, exact = d / Math.sqrt(d * d - 1);
+  ok('near-pinhole silhouette matches the sphere formula', Math.abs(silhouetteScale(90, d) - exact) < 2e-3,
+    `${silhouetteScale(90, d).toFixed(5)} vs ${exact.toFixed(5)}`);
+}
+ok('limb threshold is 0 when orthographic', limbThreshold(0, 6) === 0);
+
 // --- inverse round-trips (this is what dragging an eye relies on) ---------------
 for (const fov of [0, 30, 70]) {
   const r2: Rig = { ...rig, camera: { ...rig.camera, fov } };
@@ -139,12 +163,50 @@ ok('every shape is round', scene.every((s) => s.shape === 'ellipse' || s.r >= Ma
 ok('body is an ellipse, eyes are pills', scene[0].shape === 'ellipse' && scene[1].shape === 'pill');
 ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].cx} ${scene[2].cx}`);
 
+// --- do drawn features ever escape the drawn body outline? ---------------------
+{
+  let worst = 0, worstAt = '';
+  for (const fov of [0, 28, 55, 78, 89]) {
+    for (let yaw = -80; yaw <= 80; yaw += 2) {
+      for (let pitch = -60; pitch <= 60; pitch += 5) {
+        const proj = defaultProject();
+        proj.rig.camera.fov = fov;
+        proj.rig.nodes.body.surface.yaw = yaw;
+        proj.rig.nodes.body.surface.pitch = pitch;
+        const sc = buildScene(proj.rig, { width: 720, height: 720 });
+        const body = sc.find((x) => x.id === 'body')!;
+        for (const it of sc) {
+          if (it.id === 'body' || it.color.a < 0.5) continue; // mostly faded out at the limb
+          // a pill is the inner rect swept by a disc of radius r — sample that outline,
+          // not the bounding box, or the corners lie about how far the ink reaches
+          const ix = Math.max(0, it.w / 2 - it.r), iy = Math.max(0, it.h / 2 - it.r);
+          const a2 = (it.rotation * Math.PI) / 180;
+          for (const [sx2, sy2] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+            for (let k = 0; k < 24; k++) {
+              const th = (k / 24) * Math.PI * 2;
+              const lx = sx2 * ix + it.r * Math.cos(th);
+              const ly = sy2 * iy + it.r * Math.sin(th);
+              const px = it.cx + lx * Math.cos(a2) - ly * Math.sin(a2) - body.cx;
+              const py = it.cy + lx * Math.sin(a2) + ly * Math.cos(a2) - body.cy;
+              const d = Math.hypot(px / (body.w / 2), py / (body.h / 2));
+              if (d > worst) { worst = d; worstAt = `fov${fov} yaw${yaw} pitch${pitch} ${it.name}`; }
+            }
+          }
+        }
+      }
+    }
+  }
+  // A flat decal tangent to a sphere genuinely pokes past the silhouette near the rim —
+  // the exact shear transform spills 5.3% here, so 5.3% is the floor, not a bug. The
+  // scale-only approximation costs about 1.4 points on top of that.
+  ok('features stay within the body outline', worst <= 1.075, `${worst.toFixed(4)} at ${worstAt}`);
+}
+
 // --- lottie bake: does the baked file actually reproduce the scene? ------------
 {
-  const proj = defaultProject();
-  // place three blocks and a shake so the bake has curvature, easing and noise in it
-  const store = { ...proj };
-  for (const name of ['Blink', 'Surprised', 'Thinking']) {
+  const store = defaultProject();
+  // add two more blocks and a shake so the bake has curvature, easing and noise in it
+  for (const name of ['Surprised', 'Thinking']) {
     const preset = store.presets.find((x) => x.name === name)!;
     const start = store.blocks.reduce((s2, b) => s2 + b.durationMs, 0);
     const blockId = `b_${name}`;
@@ -161,6 +223,7 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('lottie fps + size', j.fr === store.fps && j.w === 720 && j.h === 720);
   ok('lottie duration in frames', j.op === Math.round((store.timelineDurationMs / 1000) * store.fps), `${j.op}`);
   ok('lottie has a layer per shape plus backdrop', j.layers.length === 4, String(j.layers.length));
+  ok('the default file opens on a real timeline', store.blocks.length === 6 && store.tracks.length > 12, `${store.blocks.length} blocks, ${store.tracks.length} tracks`);
   ok('lottie layer indices are 1..n', j.layers.every((l: any, i: number) => l.ind === i + 1));
 
   const shapeLayers = j.layers.filter((l: any) => l.ty === 4);

@@ -80,7 +80,7 @@ export function EyePanel() {
 
       <div className="prop">
         <span />
-        <label className="prop-label">Distance apart
+        <label className="prop-label"><span className="t">Distance apart</span>
           <input type="range" min={0} max={60} step={0.5} value={separation} onChange={(e) => setSeparation(+e.target.value)} />
         </label>
         <NumberField value={separation} step={0.5} onChange={setSeparation} />
@@ -88,7 +88,7 @@ export function EyePanel() {
 
       <div className="prop">
         <span />
-        <label className="prop-label">Openness
+        <label className="prop-label"><span className="t">Openness</span>
           <input type="range" min={0} max={1} step={0.01} value={num(left, 'eye.openness')}
             onChange={(e) => setBoth('eye.openness', +e.target.value, 'open')} />
         </label>
@@ -97,7 +97,7 @@ export function EyePanel() {
 
       <div className="prop">
         <span />
-        <label className="prop-label">Eye length
+        <label className="prop-label"><span className="t">Eye length</span>
           <input type="range" min={0.2} max={3} step={0.01} value={num(left, 'transform.length')}
             onChange={(e) => setBoth('transform.length', +e.target.value, 'len')} />
         </label>
@@ -106,7 +106,7 @@ export function EyePanel() {
 
       <div className="prop">
         <span />
-        <label className="prop-label">Eye width
+        <label className="prop-label"><span className="t">Eye width</span>
           <input type="range" min={0.2} max={2.5} step={0.01} value={num(left, 'transform.scale.x')}
             onChange={(e) => setBoth('transform.scale.x', +e.target.value, 'wide')} />
         </label>

@@ -192,7 +192,7 @@ export function Copilot() {
         </div>
       </Panel>
 
-      <div className="panel flush" style={{ flex: 1, minHeight: 260 }}>
+      <div className="panel flush grow" style={{ minHeight: 260 }}>
         <div className="panel-body chat">
           <div className="thread" ref={thread}>
             {!turns.length && (

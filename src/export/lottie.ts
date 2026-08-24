@@ -160,14 +160,15 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
   });
 
   if (opts.background) {
-    layers.push({
-      ddd: 0, ind: layers.length + 1, ty: 1, nm: 'Backdrop', sr: 1, ao: 0, bm: 0,
+    // painter's order so far is bottom-first; the backdrop belongs under all of it
+    layers.unshift({
+      ddd: 0, ind: 0, ty: 1, nm: 'Backdrop', sr: 1, ao: 0, bm: 0,
       sc: opts.background, sw: COMP.width, sh: COMP.height,
       ks: { o: { a: 0, k: 100 }, r: { a: 0, k: 0 }, p: { a: 0, k: [COMP.width / 2, COMP.height / 2] }, a: { a: 0, k: [COMP.width / 2, COMP.height / 2] }, s: { a: 0, k: [100, 100] } },
       ip: 0, op: total + 1, st: 0,
     });
   }
-  // Lottie paints the last layer first
+  // lottie-web paints index 1 on top, so flip painter's order and renumber
   layers.reverse().forEach((l, i) => { l.ind = i + 1; });
 
   return {

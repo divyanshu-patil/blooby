@@ -61,6 +61,8 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .timeline { grid-area: time; }
 
 .rail { display: flex; flex-direction: column; gap: 8px; overflow: hidden auto; scrollbar-width: thin; }
+.rail > * { flex: none; }
+.rail > .grow { flex: 1 1 auto; min-height: 200px; }
 
 /* ---- wordmark ----------------------------------------------------------- */
 .wordmark {
@@ -80,6 +82,8 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 
 .crumb { font: 500 12px var(--ui); color: var(--muted); }
 .crumb strong { color: var(--ink-2); font-weight: 600; }
+.fps { display: flex; align-items: center; gap: 5px; }
+.fps .prop-num { width: 44px; }
 .spacer { flex: 1; }
 
 /* ---- panels ------------------------------------------------------------- */
@@ -150,7 +154,8 @@ input.txt:focus { border-color: var(--signal); outline: none; }
 
 /* ---- property row ------------------------------------------------------- */
 .prop { display: grid; grid-template-columns: 15px 1fr 60px; align-items: center; gap: 7px; }
-.prop-label { font: 500 11.5px var(--ui); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prop-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; font: 500 11.5px var(--ui); color: var(--ink-2); }
+.prop-label > .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prop-num {
   height: 23px; width: 100%; text-align: right; padding: 0 5px;
   border: 1px solid transparent; border-radius: 5px; background: var(--field);
@@ -232,7 +237,7 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 }
 .chip:hover { border-color: var(--signal); transform: translateY(-1px); }
 .chip:active { cursor: grabbing; }
-.chip .glyph { width: 100%; height: 30px; border-radius: 4px; background: var(--ink); display: block; }
+.chip .glyph { width: 100%; height: 42px; border-radius: 4px; background: var(--ink); display: block; }
 
 /* ---- timeline ----------------------------------------------------------- */
 .timeline { display: flex; flex-direction: column; gap: 8px; }
@@ -275,10 +280,18 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .block .tick { position: absolute; top: -8px; left: 50%; width: 2px; height: 5px; background: var(--signal); border-radius: 1px; }
 
 /* ---- tracks ------------------------------------------------------------- */
-.tracks { display: flex; min-height: 148px; max-height: 240px; }
-.track-names { width: 168px; flex: none; border-right: 1px solid var(--line-soft); overflow: hidden auto; scrollbar-width: none; }
-.track-lanes { flex: 1; position: relative; overflow: auto hidden; scrollbar-width: thin; }
-.ruler { height: 21px; border-bottom: 1px solid var(--line-soft); position: relative; font: 500 9.5px var(--mono); color: var(--muted); }
+.tracks { display: flex; min-height: 150px; max-height: 262px; overflow: auto; scrollbar-width: thin; }
+.track-names {
+  width: 168px; flex: none; border-right: 1px solid var(--line-soft);
+  position: sticky; left: 0; z-index: 2; background: var(--panel);
+}
+.track-lanes { flex: none; position: relative; }
+.ruler {
+  height: 21px; border-bottom: 1px solid var(--line-soft); position: relative;
+  font: 500 9.5px var(--mono); color: var(--muted);
+  position: sticky; top: 0; z-index: 1; background: var(--panel);
+}
+.track-names .ruler { z-index: 3; }
 .ruler span { position: absolute; top: 5px; transform: translateX(3px); }
 .ruler i { position: absolute; top: 0; width: 1px; height: 5px; background: var(--line); }
 

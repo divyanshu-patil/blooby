@@ -6,6 +6,7 @@ import { blockStarts, fmtSec } from '../core/timeline';
 import { EASING_NAMES, easingLabel, namedEasing } from '../core/easing';
 import { PROP_LABEL } from '../core/types';
 import { MascotThumb } from './Mascot';
+import { characteristicTime } from './Presets';
 import { GraphEditor } from './GraphEditor';
 import { NumberField } from './bits';
 
@@ -32,14 +33,16 @@ export function Timeline() {
   const [view, setView] = useState<'tracks' | 'graph'>('tracks');
   const [zoom, setZoom] = useState(1);
   const [sel, setSel] = useState<{ trackId: string; kfId: string } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(760);
   const kfDrag = useRef<{ trackId: string; kfId: string } | null>(null);
 
   useEffect(() => {
-    const el = lanesRef.current;
+    const el = scrollRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setWidth(Math.max(240, e.contentRect.width)));
+    // the lanes are as wide as the content, so measure the viewport that holds them
+    const ro = new ResizeObserver(([e]) => setWidth(Math.max(240, e.contentRect.width - 168)));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -56,7 +59,11 @@ export function Timeline() {
   const starts = blockStarts(project);
 
   const thumbs = useMemo(
-    () => project.blocks.map((b, i) => sceneAt(project, starts[i] + b.durationMs * 0.45, COMP)),
+    () => project.blocks.map((b, i) => {
+      const preset = project.presets.find((p) => p.id === b.presetId);
+      const rel = preset ? (characteristicTime(preset) / preset.durationMs) * b.durationMs : b.durationMs * 0.45;
+      return sceneAt(project, starts[i] + rel, COMP);
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [project.blocks, project.tracks, project.rig, project.modifiers],
   );
@@ -69,9 +76,9 @@ export function Timeline() {
 
   const scrub = (e: React.PointerEvent) => {
     if (e.type === 'pointermove' && e.buttons === 0) return;
-    const r = e.currentTarget.getBoundingClientRect();
+    const r = lanesRef.current!.getBoundingClientRect();
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    setPlayhead(Math.max(0, Math.min(duration, (e.clientX - r.left + e.currentTarget.scrollLeft) / pxPerMs)));
+    setPlayhead(Math.max(0, Math.min(duration, (e.clientX - r.left) / pxPerMs)));
   };
 
   const selKf = sel && project.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
@@ -159,7 +166,7 @@ export function Timeline() {
         {view === 'graph' ? (
           <GraphEditor tracks={visible} selected={sel} onSelect={setSel} />
         ) : (
-          <div className="tracks">
+          <div className="tracks" ref={scrollRef}>
             <div className="track-names">
               <div className="ruler" style={{ paddingLeft: 8, display: 'flex', alignItems: 'center' }}>
                 <span style={{ position: 'static', transform: 'none' }}>
@@ -177,8 +184,8 @@ export function Timeline() {
               {!visible.length && <div className="empty-note" style={{ padding: 10 }}>Click a stopwatch to animate a property.</div>}
             </div>
 
-            <div className="track-lanes" ref={lanesRef} onPointerDown={scrub} onPointerMove={scrub}>
-              <div style={{ width: laneW, position: 'relative' }}>
+            <div className="track-lanes" ref={lanesRef} style={{ width: laneW }} onPointerDown={scrub} onPointerMove={scrub}>
+              <div style={{ position: 'relative' }}>
                 <div className="ruler">
                   {project.blocks.map((b, i) => (
                     <div key={b.id} className="blockband" style={{ left: starts[i] * pxPerMs, width: b.durationMs * pxPerMs }}>{b.name}</div>
@@ -206,7 +213,7 @@ export function Timeline() {
                           if (!kfDrag.current) return;
                           e.stopPropagation();
                           const r = lanesRef.current!.getBoundingClientRect();
-                          const raw = (e.clientX - r.left + lanesRef.current!.scrollLeft) / pxPerMs;
+                          const raw = (e.clientX - r.left) / pxPerMs;
                           const snap = [...jumps, playhead].find((j) => Math.abs(j - raw) < 6 / pxPerMs && Math.abs(j - k.time) > 0.5);
                           moveKeyframe(t.id, k.id, snap ?? raw);
                         }}
@@ -249,8 +256,8 @@ export function DurationField() {
   const project = useEditor((s) => s.project);
   const commit = useEditor((s) => s.commit);
   return (
-    <div className="row">
-      <span className="prop-label">fps</span>
+    <div className="fps" title="Frames per second — the rate every export bakes at">
+      <span className="prop-label"><span className="t">fps</span></span>
       <NumberField value={project.fps} onChange={(v) => commit((p) => { p.fps = Math.min(60, Math.max(6, Math.round(v))); })} />
     </div>
   );

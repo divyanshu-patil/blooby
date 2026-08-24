@@ -26,28 +26,28 @@ export function ColorField({ value, onChange, onToggleTrack, animated }: {
         {onToggleTrack
           ? <button className="stopwatch" aria-pressed={!!animated} title="Animate colour" onClick={onToggleTrack} />
           : <span />}
-        <label className="prop-label">Fill</label>
+        <label className="prop-label"><span className="t">Fill</span></label>
         <input type="color" value={hexColor(value)} aria-label="Fill colour"
           onChange={(e) => onChange({ ...parseHex(e.target.value), a: value.a })}
           style={{ width: '100%', height: 23, border: '1px solid var(--line)', borderRadius: 5, background: 'none', padding: 1 }} />
       </div>
       <div className="prop">
-        <span /><label className="prop-label">Lightness
+        <span /><label className="prop-label"><span className="t">Lightness</span>
           <input type="range" min={0} max={1} step={0.005} value={lch.l} onChange={(e) => set({ l: +e.target.value })} />
         </label><NumberField value={Math.round(lch.l * 100)} step={1} onChange={(v) => set({ l: v / 100 })} />
       </div>
       <div className="prop">
-        <span /><label className="prop-label">Chroma
+        <span /><label className="prop-label"><span className="t">Chroma</span>
           <input type="range" min={0} max={0.37} step={0.002} value={lch.c} onChange={(e) => set({ c: +e.target.value })} />
         </label><NumberField value={Math.round(lch.c * 1000) / 10} step={1} onChange={(v) => set({ c: v / 100 })} />
       </div>
       <div className="prop">
-        <span /><label className="prop-label">Hue
+        <span /><label className="prop-label"><span className="t">Hue</span>
           <input type="range" min={0} max={360} step={1} value={(lch.h + 360) % 360} onChange={(e) => set({ h: +e.target.value })} />
         </label><NumberField value={Math.round((lch.h + 360) % 360)} step={1} onChange={(v) => set({ h: v })} />
       </div>
       <div className="prop">
-        <span /><label className="prop-label">Opacity
+        <span /><label className="prop-label"><span className="t">Opacity</span>
           <input type="range" min={0} max={1} step={0.01} value={value.a} onChange={(e) => onChange({ ...value, a: +e.target.value })} />
         </label><NumberField value={Math.round(value.a * 100)} step={1} onChange={(v) => onChange({ ...value, a: Math.min(1, Math.max(0, v / 100)) })} />
       </div>

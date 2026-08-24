@@ -34,28 +34,28 @@ export function Effects() {
             <button className="btn ghost sm icon" title="Remove" onClick={() => removeModifier(m.id)}>✕</button>
           </div>
           <div className="prop">
-            <span /><label className="prop-label">Amount
+            <span /><label className="prop-label"><span className="t">Amount</span>
               <input type="range" min={0} max={200} step={1} value={m.amount} onChange={(e) => updateModifier(m.id, (x) => { x.amount = +e.target.value; })} />
             </label><NumberField value={m.amount} onChange={(v) => updateModifier(m.id, (x) => { x.amount = v; })} />
           </div>
           <div className="prop">
-            <span /><label className="prop-label">Frequency
+            <span /><label className="prop-label"><span className="t">Frequency</span>
               <input type="range" min={0.05} max={m.kind === 'shake' ? 30 : 6} step={0.05} value={m.frequency} onChange={(e) => updateModifier(m.id, (x) => { x.frequency = +e.target.value; })} />
             </label><NumberField value={m.frequency} step={0.1} onChange={(v) => updateModifier(m.id, (x) => { x.frequency = v; })} />
           </div>
           <div className="prop">
-            <span /><label className="prop-label">Amplitude
+            <span /><label className="prop-label"><span className="t">Amplitude</span>
               <input type="range" min={0} max={40} step={0.5} value={m.amplitude} onChange={(e) => updateModifier(m.id, (x) => { x.amplitude = +e.target.value; })} />
             </label><NumberField value={m.amplitude} step={0.5} onChange={(v) => updateModifier(m.id, (x) => { x.amplitude = v; })} />
           </div>
           {m.kind === 'shake' ? (
             <div className="prop">
-              <span /><label className="prop-label">Seed</label>
+              <span /><label className="prop-label"><span className="t">Seed</span></label>
               <NumberField value={m.seed ?? 0} onChange={(v) => updateModifier(m.id, (x) => { x.seed = Math.round(v); })} />
             </div>
           ) : (
             <div className="prop">
-              <span /><label className="prop-label">Phase
+              <span /><label className="prop-label"><span className="t">Phase</span>
                 <input type="range" min={0} max={6.28} step={0.05} value={m.phase ?? 0} onChange={(e) => updateModifier(m.id, (x) => { x.phase = +e.target.value; })} />
               </label><NumberField value={m.phase ?? 0} step={0.1} onChange={(v) => updateModifier(m.id, (x) => { x.phase = v; })} />
             </div>
