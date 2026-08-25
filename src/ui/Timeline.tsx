@@ -3,10 +3,11 @@ import { useEditor, keyframeTimes } from '../core/store';
 import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { blockStarts, characteristicTime, fmtSec } from '../core/timeline';
-import { applyEasing, EASING_NAMES, easingLabel, easingShape, namedEasing } from '../core/easing';
+import { applyEasing, easingLabel, easingShape } from '../core/easing';
 import { activeTimeline, PROP_LABEL, type Track } from '../core/types';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
+import { CurveEditor } from './CurveEditor';
 import { NumberField } from './bits';
 
 export function Timeline() {
@@ -38,6 +39,8 @@ export function Timeline() {
   const [view, setView] = useState<'tracks' | 'graph'>('tracks');
   const [zoom, setZoom] = useState(1);
   const [sel, setSel] = useState<{ trackId: string; kfId: string } | null>(null);
+  const [curveOpen, setCurveOpen] = useState(false);
+  useEffect(() => { if (!sel) setCurveOpen(false); }, [sel]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(760);
@@ -134,11 +137,17 @@ export function Timeline() {
         {selKf && (
           <>
             <span className="hint">easing</span>
-            <select className="sel" value={easingLabel(selKf.easingOut)}
-              onChange={(e) => setEasing(sel!.trackId, sel!.kfId, namedEasing(e.target.value))}>
-              {EASING_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
-              {selKf.easingOut.type === 'bezier' && <option value="bezier">custom</option>}
-            </select>
+            <div style={{ position: 'relative' }}>
+              <button className="btn sm" aria-pressed={curveOpen} onClick={() => setCurveOpen((v) => !v)}
+                title="Edit this keyframe's curve">
+                {easingLabel(selKf.easingOut)} ⌃
+              </button>
+              {curveOpen && (
+                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 20 }}>
+                  <CurveEditor value={selKf.easingOut} onChange={(c) => setEasing(sel!.trackId, sel!.kfId, c)} />
+                </div>
+              )}
+            </div>
             <button className="btn sm" onClick={() => { deleteKeyframe(sel!.trackId, sel!.kfId); setSel(null); }}>Delete key</button>
           </>
         )}
