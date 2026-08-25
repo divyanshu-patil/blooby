@@ -4,16 +4,23 @@ import { applyEasing, curveHandles } from '../core/easing';
 import { activeTimeline, PROP_LABEL, type Track } from '../core/types';
 
 const PAD = { l: 40, r: 14, t: 14, b: 20 };
+const PALETTE = ['#2233e0', '#d9401f', '#2f9e57', '#a24bd6', '#c98a12', '#0f8ea3'];
 
 /**
  * Value-vs-time graph, After Effects style: keyframe points sit on the curve and the
  * bezier handles between two keys are the easing itself. Canvas, because 200 sampled
  * points per track per frame is not a job for the DOM.
  */
-export function GraphEditor({ tracks, selected, onSelect }: {
+export function GraphEditor({ tracks, selected, onSelect, focus, onToggleFocus, onClearFocus }: {
   tracks: Track[];
   selected: { trackId: string; kfId: string } | null;
   onSelect: (s: { trackId: string; kfId: string } | null) => void;
+  /** track ids to draw at full strength; every other track fades — empty set means "show
+   * all equally". Set (not derived from `selected`) so a property stays focused across
+   * keyframe picks, and survives switching between Tracks and Graph view. */
+  focus: Set<string>;
+  onToggleFocus: (id: string, additive: boolean) => void;
+  onClearFocus: () => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const project = useEditor((s) => s.project);
@@ -39,7 +46,7 @@ export function GraphEditor({ tracks, selected, onSelect }: {
     const pad = (b - a) * 0.16;
     ranges.set(t.id, [a - pad, b + pad]);
   }
-  const axisTrack = numeric.find((t) => t.id === selected?.trackId) ?? numeric[0];
+  const axisTrack = numeric.find((t) => t.id === selected?.trackId) ?? numeric.find((t) => focus.has(t.id)) ?? numeric[0];
   const [lo, hi] = (axisTrack && ranges.get(axisTrack.id)) ?? [0, 1];
   const rangeOf = (id: string) => ranges.get(id) ?? [lo, hi];
 
@@ -79,15 +86,16 @@ export function GraphEditor({ tracks, selected, onSelect }: {
       g.fillText(`${(t / 1000).toFixed(0)}s`, x + 3, h - 6);
     }
 
-    const palette = ['#2233e0', '#d9401f', '#2f9e57', '#a24bd6', '#c98a12', '#0f8ea3'];
     numeric.forEach((track, ti) => {
-      const col = palette[ti % palette.length];
+      const col = PALETTE[ti % PALETTE.length];
       const keys = track.keyframes;
       if (!keys.length) return;
       const [ta, tb] = rangeOf(track.id);
       const TY = (v: number) => Yin(v, ta, tb);
-      const dim = axisTrack && track.id !== axisTrack.id && selected;
-      g.globalAlpha = dim ? 0.32 : 1;
+      // two independent reasons to fade a line: an explicit focus set says "just these",
+      // or (with no focus set) picking a keyframe already implies interest in its track.
+      const dim = focus.size > 0 ? !focus.has(track.id) : (axisTrack && track.id !== axisTrack.id && selected);
+      g.globalAlpha = dim ? 0.28 : 1;
 
       g.strokeStyle = col; g.lineWidth = 1.6; g.beginPath();
       for (let i = 0; i < keys.length - 1; i++) {
@@ -231,6 +239,21 @@ export function GraphEditor({ tracks, selected, onSelect }: {
 
   return (
     <div className="graph-wrap">
+      {numeric.length > 1 && (
+        <div className="graph-legend">
+          {numeric.map((t, ti) => (
+            <button key={t.id} className="graph-legend-item" data-dim={focus.size > 0 && !focus.has(t.id)}
+              style={{ '--dot': PALETTE[ti % PALETTE.length] } as React.CSSProperties}
+              title="Click to focus this curve · shift-click to focus several"
+              onClick={(e) => onToggleFocus(t.id, e.shiftKey)}>
+              <span className="dot" />
+              {PROP_LABEL[t.property] ?? t.property} <span className="dim">· {project.rig.nodes[t.nodeId]?.name ?? t.nodeId}</span>
+            </button>
+          ))}
+          {focus.size > 0 && <button className="btn ghost sm" style={{ height: 20, padding: '0 6px', fontSize: 10.5 }}
+            onClick={onClearFocus}>show all</button>}
+        </div>
+      )}
       <canvas ref={canvas} className="graph"
         onPointerDown={onDown} onPointerMove={onMove}
         onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} />

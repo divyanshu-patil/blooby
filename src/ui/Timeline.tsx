@@ -45,6 +45,15 @@ export function Timeline() {
   const resizing = useRef(false);
   const durDrag = useRef<{ startX: number; startMs: number } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // property-level focus, independent of (and layered on top of) the layer selection
+  // that already narrows `visible` — click a track row to solo it, shift-click to build
+  // up a multi-focus set. Local to the timeline: it's a view concern, not project data.
+  const [focus, setFocus] = useState<Set<string>>(new Set());
+  const toggleFocus = (id: string, additive: boolean) => setFocus((f) => {
+    if (additive) { const n = new Set(f); n.has(id) ? n.delete(id) : n.add(id); return n; }
+    return f.size === 1 && f.has(id) ? new Set() : new Set([id]);
+  });
+  const dimmed = (id: string) => focus.size > 0 && !focus.has(id);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -65,6 +74,17 @@ export function Timeline() {
   );
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
   const starts = blockStarts(tl);
+
+  // a focused track can fall out of `visible` (layer selection changed, track deleted) —
+  // an orphaned focus set would just dim every remaining track with nothing emphasized,
+  // so drop whatever no longer applies instead of leaving a confusing all-dim view.
+  useEffect(() => {
+    setFocus((f) => {
+      if (!f.size) return f;
+      const next = new Set([...f].filter((id) => visible.some((t) => t.id === id)));
+      return next.size === f.size ? f : next;
+    });
+  }, [visible]);
 
   const thumbs = useMemo(
     () => tl.blocks.map((b, i) => {
@@ -223,23 +243,33 @@ export function Timeline() {
 
       <div className="panel flush" style={{ minHeight: 172, flex: 1 }}>
         {view === 'graph' ? (
-          <GraphEditor tracks={visible} selected={sel} onSelect={setSel} />
+          <GraphEditor tracks={visible} selected={sel} onSelect={setSel}
+            focus={focus} onToggleFocus={toggleFocus} onClearFocus={() => setFocus(new Set())} />
         ) : (
           <div className="tracks" ref={scrollRef}>
             <div className="track-names">
-              <div className="ruler" style={{ paddingLeft: 8, display: 'flex', alignItems: 'center' }}>
+              <div className="ruler" style={{ paddingLeft: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ position: 'static', transform: 'none' }}>
                   {selection.length ? `${visible.length} track${visible.length === 1 ? '' : 's'} · selected` : `${tl.tracks.length} tracks`}
                 </span>
+                {focus.size > 0 && (
+                  <button className="btn ghost sm" style={{ height: 18, padding: '0 6px', fontSize: 10 }}
+                    title="Clear property focus" onClick={() => setFocus(new Set())}>
+                    {focus.size} focused · show all
+                  </button>
+                )}
               </div>
               {visible.map((t) => {
                 const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                 return (
                   <div key={t.id} style={{ display: 'contents' }}>
-                    <div className="trow" aria-selected={sel?.trackId === t.id}>
+                    <div className="trow" aria-selected={sel?.trackId === t.id}
+                      data-focused={focus.has(t.id)} data-dim={dimmed(t.id)}
+                      title="Click to focus this property in Tracks and Graph · shift-click to focus several"
+                      onClick={(e) => toggleFocus(t.id, e.shiftKey)}>
                       {numeric ? (
                         <button className="expand" aria-pressed={expanded.has(t.id)} title="Show the value curve"
-                          onClick={() => setExpanded((s) => { const n = new Set(s); if (n.has(t.id)) n.delete(t.id); else n.add(t.id); return n; })}>
+                          onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); if (n.has(t.id)) n.delete(t.id); else n.add(t.id); return n; }); }}>
                           ▸
                         </button>
                       ) : <span className="expand-spacer" />}
@@ -269,7 +299,7 @@ export function Timeline() {
                   const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                   return (
                     <div key={t.id} style={{ display: 'contents' }}>
-                      <div className="lane">
+                      <div className="lane" data-focused={focus.has(t.id)} data-dim={dimmed(t.id)}>
                         {t.keyframes.length > 1 && (
                           <span className="seg-fill" style={{ left: t.keyframes[0].time * pxPerMs, width: (t.keyframes[t.keyframes.length - 1].time - t.keyframes[0].time) * pxPerMs }} />
                         )}
