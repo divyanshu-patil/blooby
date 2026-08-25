@@ -57,6 +57,8 @@ export function Stage() {
   const setValue = useEditor((s) => s.setValue);
   const [tool, setTool] = useState<'select' | 'turn'>('select');
   const [showGuides, setShowGuides] = useState(true);
+  const [bg, setBg] = useState(() => { try { return localStorage.getItem('blooby.stageBg') || '#17161b'; } catch { return '#17161b'; } });
+  const setBgPersist = (v: string) => { setBg(v); try { localStorage.setItem('blooby.stageBg', v); } catch { /* private mode */ } };
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
 
@@ -182,16 +184,18 @@ export function Stage() {
     root.surface.yaw = 0; root.surface.pitch = 0; root.surface.flatOffset = { x: 0, y: 0 };
   });
 
+  const transparent = bg === 'transparent';
   return (
-    <div className="stage-frame">
+    <div className={`stage-frame${transparent ? ' checker' : ''}${!transparent && isLight(bg) ? ' on-light' : ''}`}
+      style={transparent ? undefined : { background: bg }}>
       <svg ref={svgRef} viewBox={`0 0 ${COMP.width} ${COMP.height}`} preserveAspectRatio="xMidYMid meet"
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <rect x={0.5} y={0.5} width={COMP.width - 1} height={COMP.height - 1}
-          fill="none" stroke="rgba(255,255,255,.07)" pointerEvents="none" />
+          fill="none" style={{ stroke: 'rgba(var(--stage-ink), .1)' }} pointerEvents="none" />
         {showGuides && (
           <ellipse cx={frame.cx} cy={frame.cy} rx={frame.R} ry={frame.R * frame.squash}
             transform={`rotate(${frame.roll} ${frame.cx} ${frame.cy})`}
-            fill="none" stroke="rgba(255,255,255,.1)" strokeDasharray="4 6" pointerEvents="none" />
+            fill="none" style={{ stroke: 'rgba(var(--stage-ink), .14)' }} strokeDasharray="4 6" pointerEvents="none" />
         )}
         <Shapes scene={scene} />
 
@@ -216,6 +220,16 @@ export function Stage() {
         <button className="btn icon sm" aria-pressed={tool === 'turn'} title="Turn the head (T)" onClick={() => setTool('turn')}>◍</button>
         <button className="btn icon sm" aria-pressed={showGuides} title="Guides (G)" onClick={() => setShowGuides((v) => !v)}>⌗</button>
         <button className="btn icon sm" title="Recentre" onClick={reset}>⌂</button>
+        <div className="stage-bg" title="Preview background only — exports stay transparent">
+          {BG_SWATCHES.map((c) => (
+            <button key={c} className={`sw${c === 'transparent' ? ' checker' : ''}`} aria-pressed={bg === c}
+              title={c === 'transparent' ? 'Transparent (as exported)' : c}
+              style={c === 'transparent' ? undefined : { background: c }}
+              onClick={() => setBgPersist(c)} />
+          ))}
+          <input type="color" aria-label="Custom preview background"
+            value={transparent ? '#17161b' : bg} onChange={(e) => setBgPersist(e.target.value)} />
+        </div>
       </div>
       <div className="stage-meta">
         <span>{COMP.width}×{COMP.height}</span>
@@ -224,6 +238,16 @@ export function Stage() {
       </div>
     </div>
   );
+}
+
+const BG_SWATCHES = ['transparent', '#17161b', '#2b2a31', '#8b8794', '#f4f2ee', '#ffffff'];
+
+/** sRGB luma — good enough to decide whether stage overlays should be dark or light. */
+function isLight(hex: string): boolean {
+  const m = /^#?([\da-f]{6})$/i.exec(hex.trim());
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.58;
 }
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { defaultProject, makeTimeline, uid } from './defaults';
 import { readProp, writeProp } from './props';
-import { evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
+import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
 import { derivedDuration, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery } from './gallery';
 import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, RigNode, Timeline, Track } from './types';
@@ -172,14 +172,15 @@ export const useEditor = create<Editor>((set, get) => ({
   selectTrack: (selectedTrackId) => set({ selectedTrackId }),
 
   trackFor(nodeId, property) {
-    return at(get().project).tracks.find((t) => t.nodeId === nodeId && t.property === property);
+    const { project, playhead } = get();
+    return activeTrackFor(at(project), nodeId, property, playhead);
   },
 
   setValue(nodeId, property, value, label) {
     const { autoKey, playhead } = get();
     const existing = get().trackFor(nodeId, property);
     get().commit((p) => {
-      const track = at(p).tracks.find((t) => t.nodeId === nodeId && t.property === property);
+      const track = existing && at(p).tracks.find((t) => t.id === existing.id);
       if (track) {
         upsertKeyframe(track, playhead, value);
       } else if (autoKey) {
@@ -457,7 +458,7 @@ function upsertKeyframe(track: Track, time: number, value: KeyValue) {
 
 export function writeKeyframe(p: Project, nodeId: string, property: string, time: number, value: KeyValue, easing: EasingCurve) {
   const tl = at(p);
-  let track = tl.tracks.find((t) => t.nodeId === nodeId && t.property === property);
+  let track = activeTrackFor(tl, nodeId, property, time);
   if (!track) {
     track = { id: uid('t'), nodeId, property, keyframes: [] };
     tl.tracks.push(track);

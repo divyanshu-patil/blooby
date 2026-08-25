@@ -41,6 +41,7 @@ export function Timeline() {
   const kfDrag = useRef<{ trackId: string; kfId: string } | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const resize = useRef<{ id: string; startX: number; startMs: number } | null>(null);
+  const resizing = useRef(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -172,7 +173,14 @@ export function Timeline() {
             return (
               <div key={b.id} className="block" data-active={activeBlock === i} data-dragging={dragging === b.id}
                 draggable title="Drag to reorder"
-                onDragStart={(e) => { e.dataTransfer.setData('text/blooby-block-reorder', b.id); e.dataTransfer.effectAllowed = 'move'; setDragging(b.id); }}
+                onDragStart={(e) => {
+                  // a resize just starting on the child handle still targets this
+                  // element for native dragstart (per spec, the ancestor draggable
+                  // element is always the drag source) — refuse it in that case, or
+                  // dragging the resize handle silently reorders the block instead.
+                  if (resizing.current) { e.preventDefault(); return; }
+                  e.dataTransfer.setData('text/blooby-block-reorder', b.id); e.dataTransfer.effectAllowed = 'move'; setDragging(b.id);
+                }}
                 onDragEnd={() => setDragging(null)}
                 onClick={() => setPlayhead(start)}>
                 {within && <span className="tick" style={{ left: `${((playhead - start) / b.durationMs) * 100}%` }} />}
@@ -186,6 +194,7 @@ export function Timeline() {
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       (e.target as Element).setPointerCapture?.(e.pointerId);
+                      resizing.current = true;
                       resize.current = { id: b.id, startX: e.clientX, startMs: b.durationMs };
                     }}
                     onPointerMove={(e) => {
@@ -195,8 +204,8 @@ export function Timeline() {
                       const next = r.startMs + (e.clientX - r.startX) / pxPerMsNow;
                       setBlockDuration(b.id, Math.max(60, next));
                     }}
-                    onPointerUp={() => { resize.current = null; }}
-                    onPointerCancel={() => { resize.current = null; }} />
+                    onPointerUp={() => { resize.current = null; resizing.current = false; }}
+                    onPointerCancel={() => { resize.current = null; resizing.current = false; }} />
                 )}
               </div>
             );

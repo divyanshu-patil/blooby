@@ -1,9 +1,36 @@
+@layer theme, blooby, utilities;
 /* ============================================================================
    blooby — a light tool wrapped around one dark stage.
    Every motion editor is dark; this one puts the ink only where the mascot is.
    ========================================================================= */
 
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* Tailwind speaks the same tokens as the hand-rolled sheet, so new UI can use
+ * `bg-panel border-line text-muted` instead of re-declaring the palette. */
+@theme {
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-field: var(--field);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-signal: var(--signal);
+  --color-signal-soft: var(--signal-soft);
+  --color-hot: var(--hot);
+  --font-display: 'Bricolage Grotesque', 'Inter Tight', system-ui, sans-serif;
+  --font-ui: 'Inter Tight', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --radius-panel: 7px;
+}
+
+/* The hand-rolled stylesheet lives in its own layer *below* Tailwind utilities, so a
+ * utility class on an existing element wins instead of losing to an element selector. */
+@layer blooby {
 
 :root {
   --paper: #e4dfd5;
@@ -194,6 +221,10 @@ input.txt:focus { border-color: var(--signal); outline: none; }
 .stopwatch:hover { border-color: var(--muted); }
 .stopwatch[aria-pressed='true'] { border-color: var(--signal); background: var(--signal-soft); }
 .stopwatch[aria-pressed='true']::after { content: ''; width: 5px; height: 5px; background: var(--signal); transform: rotate(45deg); }
+/* a clip-owned track drives this property right now — different colour from a manually
+ * keyframed one, since detaching it (the stopwatch click) means something different. */
+.prop[data-driver='clip'] .stopwatch[aria-pressed='true'] { border-color: var(--hot); background: color-mix(in oklab, var(--hot) 16%, transparent); }
+.prop[data-driver='clip'] .stopwatch[aria-pressed='true']::after { background: var(--hot); }
 
 /* range: a hairline track with a solid ink thumb */
 input[type='range'] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: none; }
@@ -209,24 +240,50 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 /* ---- stage -------------------------------------------------------------- */
 .stage-frame {
   position: relative; height: 100%;
-  background: var(--ink);
+  /* --stage-ink flips every overlay (grid, meta, tools) when the user picks a light
+   * preview background — one variable instead of a light-mode copy of each rule. */
+  --stage-ink: 255, 255, 255;
   border-radius: 10px;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06), 0 6px 24px -12px rgba(23, 22, 27, .5);
 }
+.stage-frame.on-light { --stage-ink: 23, 22, 27; }
+/* transparent preview: the checker *is* the "nothing here" cue, matching the export */
+.stage-frame.checker {
+  background-color: #d9d7dd;
+  background-image:
+    linear-gradient(45deg, #b9b6bf 25%, transparent 25% 75%, #b9b6bf 75%),
+    linear-gradient(45deg, #b9b6bf 25%, transparent 25% 75%, #b9b6bf 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 9px 9px;
+}
 .stage-frame svg { display: block; width: 100%; height: 100%; touch-action: none; }
 .stage-grid { position: absolute; inset: 0; pointer-events: none; opacity: .5;
-  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, .09) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, rgba(var(--stage-ink), .09) 1px, transparent 0);
   background-size: 26px 26px; }
 .stage-meta {
   position: absolute; left: 12px; bottom: 10px;
-  font: 500 10.5px var(--mono); color: rgba(255, 255, 255, .34);
+  font: 500 10.5px var(--mono); color: rgba(var(--stage-ink), .38);
   letter-spacing: .05em; display: flex; gap: 14px; pointer-events: none;
 }
-.stage-tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
-.stage-tools .btn { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .14); color: rgba(255, 255, 255, .8); backdrop-filter: blur(6px); }
-.stage-tools .btn:hover { background: rgba(255, 255, 255, .16); border-color: rgba(255, 255, 255, .3); }
+.stage-tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; align-items: center; }
+.stage-tools .btn { background: rgba(var(--stage-ink), .08); border-color: rgba(var(--stage-ink), .18); color: rgba(var(--stage-ink), .8); backdrop-filter: blur(6px); }
+.stage-tools .btn:hover { background: rgba(var(--stage-ink), .16); border-color: rgba(var(--stage-ink), .34); }
 .stage-tools .btn[aria-pressed='true'] { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+.stage-bg { display: flex; gap: 4px; align-items: center; padding: 3px 5px; border-radius: 7px;
+  background: rgba(var(--stage-ink), .08); border: 1px solid rgba(var(--stage-ink), .18); backdrop-filter: blur(6px); }
+.stage-bg .sw { width: 15px; height: 15px; border-radius: 4px; padding: 0; cursor: pointer;
+  border: 1px solid rgba(var(--stage-ink), .28); background-clip: padding-box; }
+.stage-bg .sw[aria-pressed='true'] { outline: 1.5px solid var(--signal); outline-offset: 1.5px; }
+.stage-bg .sw.checker {
+  background-color: #d9d7dd;
+  background-image: linear-gradient(45deg, #b9b6bf 25%, transparent 25% 75%, #b9b6bf 75%),
+    linear-gradient(45deg, #b9b6bf 25%, transparent 25% 75%, #b9b6bf 75%);
+  background-size: 8px 8px; background-position: 0 0, 4px 4px;
+}
+.stage-bg input[type='color'] { width: 19px; height: 19px; padding: 0; border: none; background: none; cursor: pointer; }
+.stage-bg input[type='color']::-webkit-color-swatch-wrapper { padding: 0; }
+.stage-bg input[type='color']::-webkit-color-swatch { border: 1px solid rgba(var(--stage-ink), .28); border-radius: 4px; }
 
 .handle { fill: #fff; stroke: var(--signal); stroke-width: 1.5; cursor: grab; }
 .handle:active { cursor: grabbing; }
@@ -477,3 +534,5 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   box-shadow: 0 12px 32px -12px rgba(23, 22, 27, .4);
 }
 .export-pop .btn { justify-content: center; }
+
+}

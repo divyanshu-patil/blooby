@@ -6,7 +6,7 @@
 import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
-import { buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
+import { activeTrackFor, buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
 import { defaultProject, makeTimeline } from './defaults';
 import { blockStarts, derivedDuration } from './timeline';
 import { bakeLottie } from '../export/lottie';
@@ -459,7 +459,10 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
   // expressions and morphs
   useEditor.getState().morphBetween('x_neutral', 'x_surprised', 3000, 400, { type: 'preset', name: 'easeInOut' });
-  const scaleTrack = PT().tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'transform.scale.x');
+  // several tracks can share a nodeId+property (one per preset block already on the
+  // timeline) — the one the morph actually wrote into is whichever is active at 3000/3400,
+  // never just the first array match (that's the exact bug this refactor fixes).
+  const scaleTrack = activeTrackFor(PT(), 'eyeL', 'transform.scale.x', 3000);
   ok('morph wrote both ends', !!scaleTrack
     && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3000) < 1)
     && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3400) < 1));

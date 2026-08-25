@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useEditor } from '../core/store';
 import { PROP_RANGE } from '../core/props';
 import { activeTimeline, PROP_LABEL } from '../core/types';
-import { valueAt } from '../core/scene';
+import { activeTrackFor, valueAt } from '../core/scene';
 
 export function Panel({ title, actions, children, flush }: { title: string; actions?: ReactNode; children: ReactNode; flush?: boolean }) {
   return (
@@ -59,17 +59,19 @@ export function PropRow({ nodeId, property, label }: { nodeId: string | string[]
 
   const ids = Array.isArray(nodeId) ? nodeId : [nodeId];
   const primary = ids[0];
-  const track = activeTimeline(project).tracks.find((t) => t.nodeId === primary && t.property === property);
+  const track = activeTrackFor(activeTimeline(project), primary, property, playhead);
   const v = valueAt(project, primary, property, playhead);
   if (typeof v !== 'number') return null;
   const [min, max, step] = PROP_RANGE[property] ?? [-100, 100, 1];
+  const driver = track ? (track.blockId ? 'clip' : 'keyframes') : 'base';
 
   const writeAll = (n: number) => { for (const id of ids) setValue(id, property, n, `multi.${property}`); };
   const toggleAll = () => { for (const id of ids) toggleTrack(id, property); };
 
   return (
-    <div className="prop">
-      <button className="stopwatch" aria-pressed={!!track} title={track ? 'Remove keyframes' : 'Animate this property'}
+    <div className="prop" data-driver={driver}>
+      <button className="stopwatch" aria-pressed={!!track}
+        title={track ? (track.blockId ? 'Driven by a clip on this timeline — click to detach and take manual control here' : 'Remove keyframes') : 'Animate this property'}
         onClick={() => { toggleAll(); selectTrack(null); }} />
       <label className="prop-label"><span className="t">{label ?? PROP_LABEL[property] ?? property}</span>
         <input type="range" min={min} max={max} step={step} value={v}
