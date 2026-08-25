@@ -2,8 +2,8 @@ import { create } from 'zustand';
 import { defaultProject, makeTimeline, uid } from './defaults';
 import { readProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
-import { blocksEnd, derivedDuration, relayoutBlocks } from './timeline';
-import { getActiveId, putEntry, setActiveId, uidGallery } from './gallery';
+import { blocksEnd, blockStarts, derivedDuration, relayoutBlocks } from './timeline';
+import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, RigNode, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
@@ -54,6 +54,12 @@ export interface Editor {
   updateNode: (id: string, fn: (n: RigNode) => void, label?: string) => void;
 
   addBlock: (presetId: string, index?: number) => void;
+  /** the shared engine behind "another timeline from this project" and "a gallery
+   * animation" as a clip source (§8/§12/§13) — one copy-tracks-in-as-a-block routine.
+   * Only tracks whose nodeId exists in *this* project's rig are ever copied in, which is
+   * always every track for a same-project timeline and a safety filter for a gallery one. */
+  addClipFrom: (source: { label: string; timeline: Timeline; gallerySource?: Block['gallerySource'] }, index?: number) => void;
+  setClipGalleryTimeline: (blockId: string, entry: GalleryEntry, timelineId: string) => void;
   duplicateBlock: (id: string) => void;
   removeBlock: (id: string) => void;
   setBlockDuration: (id: string, ms: number) => void;
@@ -319,6 +325,66 @@ export const useEditor = create<Editor>((set, get) => ({
       }
       tl.blocks = next;
       tl.timelineDurationMs = derivedDuration(tl);
+    });
+  },
+
+  addClipFrom(source, index) {
+    const { project } = get();
+    const blockId = uid('b');
+    const at0 = index ?? at(project).blocks.length;
+    const durationMs = Math.max(200, Math.round(source.timeline.timelineDurationMs));
+    // a same-project timeline is trivially all-valid (same rig); a gallery timeline's rig
+    // can differ, so this doubles as that safety filter — tracks for a node this rig
+    // doesn't have just don't come along, rather than referencing nothing.
+    const validIds = new Set(Object.keys(project.rig.nodes));
+    get().commit((p) => {
+      const tl = at(p);
+      const block: Block = { id: blockId, presetId: '', name: source.label, durationMs, gallerySource: source.gallerySource };
+      const next = [...tl.blocks];
+      next.splice(at0, 0, block);
+      let start = 0;
+      for (let i = 0; i < at0; i++) start += next[i].durationMs;
+      for (const t of source.timeline.tracks) {
+        if (!validIds.has(t.nodeId)) continue;
+        tl.tracks.push({
+          id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
+          keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
+        });
+      }
+      const shifted = tl.blocks.slice(at0).map((b) => b.id);
+      if (shifted.length) {
+        const set2 = new Set(shifted);
+        for (const t of tl.tracks) if (t.blockId && set2.has(t.blockId)) for (const k of t.keyframes) k.time += durationMs;
+      }
+      tl.blocks = next;
+      tl.timelineDurationMs = derivedDuration(tl);
+    });
+    set({ selectedBlockId: blockId });
+  },
+
+  setClipGalleryTimeline(blockId, entry, timelineId) {
+    const timeline = entry.project.timelines.find((t) => t.id === timelineId);
+    if (!timeline) return;
+    const { project } = get();
+    const validIds = new Set(Object.keys(project.rig.nodes));
+    get().commit((p) => {
+      const tl = at(p);
+      const block = tl.blocks.find((b) => b.id === blockId);
+      if (!block?.gallerySource) return;
+      block.gallerySource = { ...block.gallerySource, timelineId, timelineName: timeline.name };
+      // replace this clip's tracks wholesale — same "instance, not a live link" contract
+      // as everything else here: re-pointing to a different source timeline re-copies it,
+      // it doesn't start following that timeline's future edits.
+      tl.tracks = tl.tracks.filter((t) => t.blockId !== blockId);
+      const idx = tl.blocks.findIndex((b) => b.id === blockId);
+      const start = blockStarts(tl)[idx];
+      for (const t of timeline.tracks) {
+        if (!validIds.has(t.nodeId)) continue;
+        tl.tracks.push({
+          id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
+          keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
+        });
+      }
     });
   },
 

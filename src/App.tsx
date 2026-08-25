@@ -3,7 +3,7 @@ import { useEditor } from './core/store';
 import { defaultProject } from './core/defaults';
 import { Stage } from './ui/Stage';
 import { Layers } from './ui/Layers';
-import { Presets, Expressions } from './ui/Presets';
+import { Presets, Expressions, OtherTimelines } from './ui/Presets';
 import { NodeInspector, CameraPanel, ClipInspector } from './ui/Inspector';
 import { EyePanel } from './ui/EyePanel';
 import { Effects } from './ui/Effects';
@@ -117,6 +117,7 @@ export default function App() {
                 <div className="rail rail-left">
                   <Layers />
                   <Presets />
+                  <OtherTimelines />
                   <Expressions />
                 </div>
               ) },

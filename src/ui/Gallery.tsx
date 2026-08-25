@@ -7,6 +7,9 @@ import { sceneAt } from '../core/scene';
 import { MascotThumb } from './Mascot';
 import type { Project } from '../core/types';
 
+/** Whichever timeline within an entry was last active — the sensible default to add. */
+const defaultTimelineId = (e: GalleryEntry) => e.project.activeTimelineId;
+
 /**
  * Every project you've built, as independent documents. "New clip" never touches the
  * one open now — it saves where you are (autosave already mirrors into the gallery),
@@ -17,8 +20,10 @@ export function Gallery() {
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<GalleryEntry[]>([]);
   const loadProject = useEditor((s) => s.loadProject);
+  const addClipFrom = useEditor((s) => s.addClipFrom);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [pickedTimeline, setPickedTimeline] = useState<Record<string, string>>({});
   const file = useRef<HTMLInputElement>(null);
 
   const refresh = () => listEntries().then(setEntries).catch(() => setEntries([]));
@@ -35,6 +40,20 @@ export function Gallery() {
 
   const openEntry = async (e: GalleryEntry) => {
     loadProject(e.project, e.id);
+    setOpen(false);
+  };
+
+  // §12/§13: a gallery animation becomes one clip in the *current* sequence, referencing
+  // exactly one of its timelines — the item itself is only ever read here, never written.
+  const addAsClip = (e: GalleryEntry) => {
+    const timelineId = pickedTimeline[e.id] ?? defaultTimelineId(e);
+    const timeline = e.project.timelines.find((t) => t.id === timelineId);
+    if (!timeline) return;
+    addClipFrom({
+      label: `${e.name} · ${timeline.name}`,
+      timeline,
+      gallerySource: { galleryId: e.id, galleryName: e.name, timelineId: timeline.id, timelineName: timeline.name },
+    });
     setOpen(false);
   };
 
@@ -110,6 +129,17 @@ export function Gallery() {
                     {e.name}{isActive && ' (current)'}
                   </span>
                 )}
+                {e.project.timelines.length > 1 && (
+                  <select className="sel" value={pickedTimeline[e.id] ?? defaultTimelineId(e)}
+                    title="Which timeline to add as a clip"
+                    onChange={(ev) => setPickedTimeline((s) => ({ ...s, [e.id]: ev.target.value }))}>
+                    {e.project.timelines.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                )}
+                <button className="btn sm" title="Insert this animation as one clip in the sequence you're currently editing"
+                  onClick={() => addAsClip(e)}>
+                  + Add as clip
+                </button>
                 <div className="row">
                   <button className="btn ghost sm" onClick={() => { setRenaming(e.id); setDraft(e.name); }}>Rename</button>
                   <button className="btn ghost sm" onClick={() => exportEntry(e)}>Export</button>

@@ -125,6 +125,13 @@ export interface Block {
   /** when true, this clip's own animation repeats to fill `durationMs` instead of holding
    * its last pose once it runs out — useful once a short clip (Blink) is stretched long. */
   loop?: boolean;
+  /** set when this clip's tracks were copied from a *different* saved project's timeline
+   * (§12/§13) rather than a local preset — presetId is unused ('') for these. Only tracks
+   * whose nodeId exists in this project's own rig are copied in; a gallery mascot with an
+   * incompatible rig (custom layers this rig doesn't have) just contributes fewer tracks,
+   * never a crash. Changing `timelineId` (via the clip inspector) re-copies from that
+   * timeline instead — the gallery project itself is only ever read, never modified. */
+  gallerySource?: { galleryId: string; galleryName: string; timelineId: string; timelineName: string };
 }
 
 /** How one clip blends into the next. Lives on the *incoming* clip's side of the seam —

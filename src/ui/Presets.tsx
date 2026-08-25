@@ -45,6 +45,33 @@ export function Presets() {
   );
 }
 
+/**
+ * "Another timeline from the current project" as a clip source (spec §8 step 1) — every
+ * other timeline in this same project, one click appends its full content as a new clip
+ * on the timeline being edited. Same rig, so nothing here needs the gallery's node-id
+ * compatibility filter (addClipFrom applies it anyway; it's just always a no-op here).
+ */
+export function OtherTimelines() {
+  const project = useEditor((s) => s.project);
+  const addClipFrom = useEditor((s) => s.addClipFrom);
+  const others = project.timelines.filter((t) => t.id !== project.activeTimelineId);
+  if (!others.length) return null;
+
+  return (
+    <Panel title="Other timelines">
+      <div className="chips">
+        {others.map((t) => (
+          <button key={t.id} className="chip" title={`Add all of "${t.name}" as one clip · ${(t.timelineDurationMs / 1000).toFixed(1)}s`}
+            onClick={() => addClipFrom({ label: t.name, timeline: t })}>
+            <MascotThumb className="glyph" scene={sceneAt({ ...project, activeTimelineId: t.id }, t.timelineDurationMs * 0.45, COMP)} view={COMP} />
+            {t.name}
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 export function Expressions() {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);

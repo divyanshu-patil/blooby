@@ -504,6 +504,47 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     blocksEndAfter === PT().blocks.filter((b) => b.id !== dup.id).reduce((s, b) => s + b.durationMs, 0) + idle.durationMs);
 }
 
+// --- addClipFrom: "another timeline" and gallery animations as a clip source -----------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const PT = () => activeTimeline(P());
+  const blocksBefore = PT().blocks.length;
+
+  // a same-project source timeline — every track is trivially rig-compatible
+  const source = makeTimeline('Wave');
+  source.tracks = [{ id: 'wt', nodeId: 'body', property: 'transform.rotation', keyframes: [{ id: 'wk1', time: 0, value: 0, easingOut: { type: 'linear' } }, { id: 'wk2', time: 500, value: 20, easingOut: { type: 'linear' } }] }];
+  source.timelineDurationMs = 500;
+  useEditor.getState().addClipFrom({ label: 'Wave', timeline: source });
+  ok('addClipFrom appends a new clip built from another timeline\'s tracks',
+    PT().blocks.length === blocksBefore + 1 && PT().blocks.at(-1)!.name === 'Wave'
+    && PT().tracks.some((t) => t.blockId === PT().blocks.at(-1)!.id && t.nodeId === 'body' && t.property === 'transform.rotation'));
+  ok('the new clip is selected', useEditor.getState().selectedBlockId === PT().blocks.at(-1)!.id);
+
+  // a "gallery" timeline whose rig doesn't fully match this one — one track on a real
+  // node (body), one on a node this rig has no idea about (a custom layer from some
+  // other mascot). Only the compatible one should ever make it into the sequence.
+  const incompatible = makeTimeline('Foreign');
+  incompatible.tracks = [
+    { id: 'ft1', nodeId: 'body', property: 'surface.yaw', keyframes: [{ id: 'fk1', time: 0, value: 10, easingOut: { type: 'linear' } }] },
+    { id: 'ft2', nodeId: 'tentacle_9', property: 'transform.rotation', keyframes: [{ id: 'fk2', time: 0, value: 5, easingOut: { type: 'linear' } }] },
+  ];
+  incompatible.timelineDurationMs = 300;
+  const blocksBefore2 = PT().blocks.length;
+  useEditor.getState().addClipFrom({
+    label: 'Foreign', timeline: incompatible,
+    gallerySource: { galleryId: 'g1', galleryName: 'Some Other Mascot', timelineId: incompatible.id, timelineName: 'Foreign' },
+  });
+  const added = PT().blocks.at(-1)!;
+  ok('a rig-incompatible track is silently skipped, not copied in',
+    PT().blocks.length === blocksBefore2 + 1
+    && !PT().tracks.some((t) => t.blockId === added.id && t.nodeId === 'tentacle_9'));
+  ok('a rig-compatible track from the same source still comes along',
+    PT().tracks.some((t) => t.blockId === added.id && t.nodeId === 'body' && t.property === 'surface.yaw'));
+  ok('the clip remembers it came from a gallery item, for the inspector\'s source label',
+    added.gallerySource?.galleryName === 'Some Other Mascot');
+}
+
 // --- moveBlock: reordering drags its keyframes along, in one undo step ---------
 {
   const ed = useEditor.getState();

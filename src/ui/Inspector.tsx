@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useEditor } from '../core/store';
 import { cssColor, hexColor, oklchToRgb, parseHex, rgbToOklch } from '../core/color';
 import { valueAt } from '../core/scene';
@@ -6,6 +7,7 @@ import { NumberField, Panel, PropRow } from './bits';
 import { INK, BONE } from '../core/defaults';
 import { blockStarts, fmtSec } from '../core/timeline';
 import { easingLabel } from '../core/easing';
+import { getEntry, type GalleryEntry } from '../core/gallery';
 
 const SWATCHES: ColorStop[] = [
   BONE, INK,
@@ -193,10 +195,20 @@ export function ClipInspector() {
   const removeBlock = useEditor((s) => s.removeBlock);
   const duplicateBlock = useEditor((s) => s.duplicateBlock);
   const selectBlock = useEditor((s) => s.selectBlock);
+  const setClipGalleryTimeline = useEditor((s) => s.setClipGalleryTimeline);
 
   const tl = activeTimeline(project);
   const index = tl.blocks.findIndex((b) => b.id === selectedBlockId);
   const block = tl.blocks[index];
+
+  // for a gallery-sourced clip, the timeline picker's options come from the gallery entry
+  // itself — fetched once per clip selection, not carried in the (lightweight) block data.
+  const [galleryEntry, setGalleryEntry] = useState<GalleryEntry | null>(null);
+  useEffect(() => {
+    setGalleryEntry(null);
+    if (block?.gallerySource) getEntry(block.gallerySource.galleryId).then((e) => setGalleryEntry(e ?? null));
+  }, [block?.gallerySource?.galleryId, block?.id]);
+
   if (!block) return null;
 
   const preset = project.presets.find((p) => p.id === block.presetId);
@@ -212,10 +224,24 @@ export function ClipInspector() {
 
       <div className="divider" />
       <div className="row"><span className="prop-label" style={{ flex: 1 }}>Source</span>
-        <span className="tag" title="The reusable preset this clip is an instance of — editing this clip never changes it">
-          {preset?.name ?? block.presetId}
-        </span>
+        {block.gallerySource ? (
+          <span className="tag" title="A gallery animation's timeline, copied in as this clip's own instance — editing this clip never touches the gallery item">
+            {block.gallerySource.galleryName} · {block.gallerySource.timelineName}
+          </span>
+        ) : (
+          <span className="tag" title="The reusable preset this clip is an instance of — editing this clip never changes it">
+            {preset?.name ?? (block.presetId || 'clip')}
+          </span>
+        )}
       </div>
+      {block.gallerySource && galleryEntry && galleryEntry.project.timelines.length > 1 && (
+        <div className="row"><span className="prop-label" style={{ flex: 1 }}>Timeline</span>
+          <select className="sel" value={block.gallerySource.timelineId}
+            onChange={(e) => setClipGalleryTimeline(block.id, galleryEntry, e.target.value)}>
+            {galleryEntry.project.timelines.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
       <div className="row"><span className="prop-label" style={{ flex: 1 }}>Start</span>
         <span className="hint">{fmtSec(startMs)} — set by clip order, drag to reorder</span>
       </div>
