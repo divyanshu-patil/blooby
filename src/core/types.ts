@@ -127,6 +127,11 @@ export interface Timeline {
   blocks: Block[];
   durationMode: 'custom' | 'even';
   timelineDurationMs: number;
+  /** explicit user-set duration floor — lets the timeline hold trailing dead space past
+   * its last block/keyframe (a pause on the final pose). Undefined means fully derived,
+   * exactly like every project before this field existed. Never lets timelineDurationMs
+   * shrink below the tiled blocks or a clamped keyframe, only extend past them. */
+  durationOverrideMs?: number;
   /** when true, every track eases from its last keyframe back to its t=0 value at the
    * end of the timeline, so a looped playthrough (or export) has no seam. */
   loop: boolean;

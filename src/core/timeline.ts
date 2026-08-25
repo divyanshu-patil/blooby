@@ -18,7 +18,7 @@ export function lastKeyframe(tl: Timeline): number {
 }
 
 export function derivedDuration(tl: Timeline): number {
-  return Math.max(1000, blocksEnd(tl), lastKeyframe(tl) + 200);
+  return Math.max(1000, blocksEnd(tl), lastKeyframe(tl) + 200, tl.durationOverrideMs ?? 0);
 }
 
 /** Rewrite block durations and drag every block-owned keyframe along with them. */

@@ -1,4 +1,5 @@
 import type { EasingCurve, Expression, Keyframe, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
+import { derivedDuration } from './timeline';
 
 export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -54,6 +55,13 @@ const bothEyes = (property: string, keys: Keyframe[]): Track[] => [
 
 export function builtinPresets(): Preset[] {
   return [
+    {
+      // no tracks at all — dropped into a sequence it just holds whatever pose already
+      // precedes it (the rig's own rest pose if it's first). The "base state" clip §8
+      // asks for, for free: addBlock() already no-ops its track-copy loop on an empty
+      // preset, so this needs no new machinery, just an entry that says so.
+      id: 'p_neutral', name: 'Neutral', source: 'builtin', durationMs: 800, tracks: [],
+    },
     {
       id: 'p_idle', name: 'Idle', source: 'builtin', durationMs: 2400,
       tracks: [
@@ -137,7 +145,9 @@ export function appendPreset(p: Project, presetId: string, timeline: Timeline = 
       keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
     });
   }
-  timeline.timelineDurationMs = timeline.blocks.reduce((s, b) => s + b.durationMs, 0);
+  // same formula store.commit() uses after every edit — otherwise a freshly-built
+  // project reads a different duration than the very first edit would settle it to.
+  timeline.timelineDurationMs = derivedDuration(timeline);
 }
 
 /** A new file opens on a working four-beat loop, not an empty strip. */

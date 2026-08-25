@@ -26,6 +26,7 @@ export function Timeline() {
   const moveBlock = useEditor((s) => s.moveBlock);
   const setBlockDuration = useEditor((s) => s.setBlockDuration);
   const setDurationMode = useEditor((s) => s.setDurationMode);
+  const setTimelineDuration = useEditor((s) => s.setTimelineDuration);
   const moveKeyframe = useEditor((s) => s.moveKeyframe);
   const deleteKeyframe = useEditor((s) => s.deleteKeyframe);
   const setEasing = useEditor((s) => s.setEasing);
@@ -42,6 +43,7 @@ export function Timeline() {
   const [dragging, setDragging] = useState<string | null>(null);
   const resize = useRef<{ id: string; startX: number; startMs: number } | null>(null);
   const resizing = useRef(false);
+  const durDrag = useRef<{ startX: number; startMs: number } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -133,6 +135,12 @@ export function Timeline() {
       </div>
 
       <div className="strip-wrap">
+        <label className="dur-field" title="Total timeline length. Shrinking it clamps any keyframe past the new end onto it — nothing is deleted. It can never go shorter than the blocks tiled below.">
+          <span className="t">Duration</span>
+          <NumberField className="prop-num" value={Math.round(duration) / 1000} step={0.1}
+            onChange={(sec) => setTimelineDuration(Math.max(0.2, sec) * 1000)} />
+          <span className="t">s</span>
+        </label>
         <select className="sel" style={{ alignSelf: 'center' }} value={tl.durationMode}
           title="How block durations are decided"
           onChange={(e) => setDurationMode(e.target.value as 'custom' | 'even')}>
@@ -296,6 +304,20 @@ export function Timeline() {
                   );
                 })}
                 <div className="playhead" style={{ left: playhead * pxPerMs }} />
+                <div className="dur-end" style={{ left: duration * pxPerMs }} title="Drag to change the timeline's total duration"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    (e.target as Element).setPointerCapture?.(e.pointerId);
+                    durDrag.current = { startX: e.clientX, startMs: duration };
+                  }}
+                  onPointerMove={(e) => {
+                    const d = durDrag.current;
+                    if (!d) return;
+                    e.stopPropagation();
+                    setTimelineDuration(d.startMs + (e.clientX - d.startX) / pxPerMs);
+                  }}
+                  onPointerUp={() => { durDrag.current = null; }}
+                  onPointerCancel={() => { durDrag.current = null; }} />
               </div>
             </div>
           </div>

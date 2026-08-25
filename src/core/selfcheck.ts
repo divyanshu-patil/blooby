@@ -470,6 +470,29 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     && t.keyframes.some((k) => Math.abs(k.time - 3000) < 1)));
   useEditor.getState().undo();
 
+  // duration: can extend past content (a trailing hold), shrinking clamps keyframes onto
+  // the new end instead of dropping them, and it can never shrink below the tiled blocks.
+  const blocksLen = PT().blocks.reduce((s, b) => s + b.durationMs, 0);
+  useEditor.getState().setTimelineDuration(blocksLen + 5000);
+  ok('duration can extend past the blocks', Math.abs(PT().timelineDurationMs - (blocksLen + 5000)) < 1);
+  useEditor.getState().setTimelineDuration(1); // coalesces with the extend above — one edit
+  // the floor is blocksLen OR later (a block's own final keyframe can sit right at its
+  // block's end, which the pre-existing lastKeyframe+200 padding then pushes past it) —
+  // the invariant setTimelineDuration actually owns is just "never *below* the blocks".
+  ok('duration cannot shrink below the tiled blocks', PT().timelineDurationMs >= blocksLen - 1,
+    `${PT().timelineDurationMs} vs ${blocksLen}`);
+  useEditor.getState().undo();
+
+  // a free (blockless) keyframe out past the blocks — the only kind shrinking can reach,
+  // since every block-owned keyframe already lives inside its own block's window.
+  useEditor.getState().commit((p) => { writeKeyframe(p, 'body', 'transform.rotation', blocksLen + 3000, 40, { type: 'linear' }); });
+  useEditor.getState().setTimelineDuration(blocksLen + 500);
+  ok('shrinking clamps an out-of-range keyframe onto the new end instead of dropping it',
+    PT().tracks.find((t) => t.nodeId === 'body' && t.property === 'transform.rotation')!
+      .keyframes.some((k) => Math.abs(k.time - (blocksLen + 500)) < 1));
+  useEditor.getState().undo();
+  useEditor.getState().undo();
+
   // copilot tool calls: validated, then applied as one undo step
   const calls: ToolCall[] = [
     { name: 'add_preset_to_timeline', args: { preset: 'Blink' } },

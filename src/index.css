@@ -363,6 +363,9 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .gallery-name { font: 600 12px var(--ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .strip-wrap { display: flex; align-items: stretch; gap: 8px; }
+.dur-field { display: flex; align-items: center; gap: 5px; align-self: center; }
+.dur-field .t { font: 500 11px var(--ui); color: var(--muted); }
+.dur-field .prop-num { width: 52px; }
 .strip {
   display: flex; gap: 7px; padding: 8px; overflow-x: auto; overflow-y: hidden;
   flex: 1; min-width: 0; scrollbar-width: thin;
@@ -395,9 +398,19 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .block .dur:hover { background: rgba(23, 22, 27, .06); }
 .block .dur:focus { outline: none; background: #fff; color: var(--ink); }
 .block .x {
-  position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--ink); color: var(--paper); font-size: 10px; line-height: 1;
-  display: none; place-items: center;
+  /* the visible dot stays ~15px (background-clip keeps padding out of the fill), but the
+   * actual hit target is 24px — a 16px corner dot hanging half off the block's edge was
+   * too small to land a click on reliably, especially since it only appears on hover.
+   * Inset (not overhung off the corner like before): .strip clips overflow-y, so anything
+   * that protrudes above the block's own box falls into that clipped dead zone the moment
+   * it exceeds .strip's padding — sitting fully inside the block's box sidesteps that
+   * entirely instead of trying to thread a padding budget. z-index beats .block-resize
+   * (2): that handle's hit strip runs the block's full height at the same corner and was
+   * swallowing clicks meant for this button even before it had a real hit area to lose. */
+  position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; padding: 4.5px;
+  border-radius: 50%; background: var(--ink); background-clip: content-box;
+  color: var(--paper); font-size: 10px; line-height: 1;
+  display: none; place-items: center; z-index: 3;
 }
 .block:hover .x { display: grid; }
 .block .tick { position: absolute; top: -8px; left: 50%; width: 2px; height: 5px; background: var(--signal); border-radius: 1px; }
@@ -453,6 +466,11 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 
 .playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--signal); pointer-events: none; z-index: 3; }
 .playhead::before { content: ''; position: absolute; top: 0; left: -4px; border: 4.5px solid transparent; border-top-color: var(--signal); border-bottom: 0; }
+/* the timeline-end handle: a hairline at the true edge, but an 18px invisible strip to
+ * actually grab it with — a 1px line is not a usable drag target on its own. */
+.dur-end { position: absolute; top: 0; bottom: 0; width: 18px; margin-left: -9px; cursor: ew-resize; z-index: 4; }
+.dur-end::after { content: ''; position: absolute; top: 0; bottom: 0; left: 8px; width: 2px; background: var(--hot); opacity: .55; border-radius: 1px; }
+.dur-end:hover::after, .dur-end:active::after { opacity: 1; }
 .blockband { position: absolute; top: 0; height: 21px; border-left: 1px solid var(--line); font: 500 9px var(--mono); color: var(--muted); padding-left: 3px; overflow: hidden; }
 
 /* ---- graph editor ------------------------------------------------------- */

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { defaultProject, makeTimeline, uid } from './defaults';
 import { readProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
-import { derivedDuration, relayoutBlocks } from './timeline';
+import { blocksEnd, derivedDuration, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery } from './gallery';
 import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, RigNode, Timeline, Track } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
@@ -54,6 +54,7 @@ export interface Editor {
   moveBlock: (id: string, index: number) => void;
   setDurationMode: (m: 'custom' | 'even') => void;
   setTimelineLoop: (v: boolean) => void;
+  setTimelineDuration: (ms: number) => void;
 
   addTimeline: (name?: string) => void;
   renameTimeline: (id: string, name: string) => void;
@@ -347,6 +348,23 @@ export const useEditor = create<Editor>((set, get) => ({
 
   setTimelineLoop(v) {
     get().commit((p) => { at(p).loop = v; }, 'timelineloop');
+  },
+
+  setTimelineDuration(ms) {
+    get().commit((p) => {
+      const tl = at(p);
+      // never shorter than the blocks actually tiled on the strip — they'd overlap or
+      // get clipped, and block duration already has its own explicit control.
+      const floor = blocksEnd(tl);
+      const next = Math.max(200, floor, Math.round(ms));
+      // shrinking must not silently drop animation: clamp every keyframe past the new
+      // end back onto it instead (keeps the keyframe, just moves it — nothing deleted).
+      for (const track of tl.tracks) {
+        for (const k of track.keyframes) if (k.time > next) k.time = next;
+        track.keyframes.sort((a, b) => a.time - b.time);
+      }
+      tl.durationOverrideMs = next;
+    }, 'tldur');
   },
 
   addTimeline(name) {
