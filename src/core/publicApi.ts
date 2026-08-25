@@ -5,6 +5,9 @@ import type { EasingCurve } from './types';
  * The application-level integration surface spec §14 asks for — a host page (or the
  * browser console, for testing) drives mascot state without touching editor internals.
  * "Enabling states through external events" means: some other system calls these.
+ *
+ * setState/enableState morph by default (captures the current pose, blends it into the
+ * new state's own animation) — pass `{ duration: 0 }` for an instant cut instead.
  */
 export interface BloobyStateMachine {
   setState(nameOrId: string, opts?: { at?: number; duration?: number; easing?: EasingCurve }): void;

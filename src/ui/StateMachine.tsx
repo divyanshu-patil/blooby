@@ -20,7 +20,7 @@ export function StateMachine() {
   const cancelScheduledState = useEditor((s) => s.cancelScheduledState);
   const returnToPreviousState = useEditor((s) => s.returnToPreviousState);
 
-  const [duration, setDuration] = useState(400);
+  const [duration, setDuration] = useState(300); // matches the store's own default
   const [easing, setEasing] = useState<EasingCurve>({ type: 'preset', name: 'easeInOut' });
   const [curveOpen, setCurveOpen] = useState(false);
   const [atSec, setAtSec] = useState('');

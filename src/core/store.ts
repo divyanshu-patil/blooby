@@ -9,6 +9,10 @@ import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
 const HISTORY_LIMIT = 80;
+// a state switch morphs by default (spec: "it should morph") — pass { duration: 0 } to
+// opt into an instant cut instead, not the other way around.
+const DEFAULT_STATE_TRANSITION_MS = 300;
+const DEFAULT_STATE_EASING: EasingCurve = { type: 'preset', name: 'easeInOut' };
 
 /** The active timeline — every editor action reads/writes through this, never `p.timelines[i]` directly. */
 const at = (p: Project): Timeline => activeTimeline(p);
@@ -92,11 +96,13 @@ export interface Editor {
   /**
    * Programmatic state-machine control (spec §14) — each Timeline is a "state" (matching
    * the dotLottie export, where every timeline already becomes one exported state). The
-   * intended public surface: setState for an immediate or blended switch, enableState as
-   * the scheduled-at-a-future-moment alias, returnToPreviousState, cancelScheduledState.
-   * Matched by name (case-insensitive) or id, so `setState("happy")` reads the way the
-   * spec's own examples do. Also mirrored onto window.blooby for host-app / console use —
-   * see main.tsx — so runtime control never requires reaching into editor internals.
+   * intended public surface: setState for an immediate-or-scheduled switch, enableState as
+   * its alias, returnToPreviousState, cancelScheduledState. Matched by name (case-
+   * insensitive) or id, so `setState("happy")` reads the way the spec's own examples do.
+   * Morphs by default (DEFAULT_STATE_TRANSITION_MS) — pass `{ duration: 0 }` for an
+   * instant cut instead; that's the opt-in direction, not the other way around. Also
+   * mirrored onto window.blooby for host-app / console use — see main.tsx — so runtime
+   * control never requires reaching into editor internals.
    */
   setState: (nameOrId: string, opts?: { at?: number; duration?: number; easing?: EasingCurve }) => void;
   enableState: (nameOrId: string, opts?: { at?: number; duration?: number; easing?: EasingCurve }) => void;
@@ -583,11 +589,11 @@ export const useEditor = create<Editor>((set, get) => ({
     // "at" in the future schedules it — App.tsx's playback tick fires it the instant the
     // playhead reaches that point. "at" already passed (or omitted) switches right now.
     if (opts?.at !== undefined && opts.at > playhead) {
-      set({ pendingStateChange: { timelineId: target.id, atMs: opts.at, durationMs: opts.duration ?? 0, easing: opts.easing ?? { type: 'preset', name: 'easeInOut' } } });
+      set({ pendingStateChange: { timelineId: target.id, atMs: opts.at, durationMs: opts.duration ?? DEFAULT_STATE_TRANSITION_MS, easing: opts.easing ?? DEFAULT_STATE_EASING } });
       return;
     }
-    const durationMs = opts?.duration ?? 0;
-    const easing = opts?.easing ?? { type: 'preset', name: 'easeInOut' };
+    const durationMs = opts?.duration ?? DEFAULT_STATE_TRANSITION_MS;
+    const easing = opts?.easing ?? DEFAULT_STATE_EASING;
     // capture the *actually evaluated* outgoing pose before switching — not just its last
     // raw keyframe — same principle the clip-transition blend uses one level down.
     const fromRig = durationMs > 0 ? evaluateRig(project, playhead) : null;

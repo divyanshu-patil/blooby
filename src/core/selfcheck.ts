@@ -709,13 +709,16 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     ok('setState switches the active timeline by name, case-insensitively', P().activeTimelineId === blinkTl.id);
     ok('setState resets the playhead for the new state', useEditor.getState().playhead === 0);
     ok('setState records what was active before it', useEditor.getState().previousTimelineId === idleId);
-    ok('an instant setState (no duration) sets up no blend to preview', useEditor.getState().stateTransition === null);
+    ok('setState morphs by default — no opts still sets up a blend to preview, not an instant cut',
+      useEditor.getState().stateTransition !== null && useEditor.getState().stateTransition!.durationMs > 0);
+    useEditor.getState().clearStateTransition();
 
-    useEditor.getState().returnToPreviousState();
+    useEditor.getState().returnToPreviousState({ duration: 0 });
     ok('returnToPreviousState switches back', P().activeTimelineId === idleId);
+    ok('{ duration: 0 } opts out of the morph for an instant cut', useEditor.getState().stateTransition === null);
 
     useEditor.getState().setState(happyTl.id, { duration: 250, easing: { type: 'linear' } });
-    ok('a blended setState captures a snapshot to preview-blend from', useEditor.getState().stateTransition?.durationMs === 250);
+    ok('an explicit duration overrides the default', useEditor.getState().stateTransition?.durationMs === 250);
     useEditor.getState().clearStateTransition();
 
     useEditor.getState().setPlayhead(0);
