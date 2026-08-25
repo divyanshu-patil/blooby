@@ -4,6 +4,8 @@ import { valueAt } from '../core/scene';
 import { activeTimeline, CAMERA_ID, type ColorStop } from '../core/types';
 import { NumberField, Panel, PropRow } from './bits';
 import { INK, BONE } from '../core/defaults';
+import { blockStarts, fmtSec } from '../core/timeline';
+import { easingLabel } from '../core/easing';
 
 const SWATCHES: ColorStop[] = [
   BONE, INK,
@@ -171,6 +173,92 @@ export function NodeInspector() {
       <div className="row">
         <span className="prop-label" style={{ flex: 1 }}>Stacking order</span>
         <NumberField value={node.zIndex} onChange={(v) => updateNode(node.id, (n) => { n.zIndex = Math.round(v); })} />
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * "Select a clip → inspector shows clip controls" (spec §17) — the same Node-tab slot
+ * NodeInspector occupies, switched by App.tsx whenever a clip is selected on the timeline
+ * instead of a layer. Source/duration/start/speed/loop/effects/transition, per §8 step 3.
+ */
+export function ClipInspector() {
+  const project = useEditor((s) => s.project);
+  const selectedBlockId = useEditor((s) => s.selectedBlockId);
+  const renameBlock = useEditor((s) => s.renameBlock);
+  const setBlockDuration = useEditor((s) => s.setBlockDuration);
+  const setBlockSpeed = useEditor((s) => s.setBlockSpeed);
+  const setBlockLoop = useEditor((s) => s.setBlockLoop);
+  const removeBlock = useEditor((s) => s.removeBlock);
+  const selectBlock = useEditor((s) => s.selectBlock);
+
+  const tl = activeTimeline(project);
+  const index = tl.blocks.findIndex((b) => b.id === selectedBlockId);
+  const block = tl.blocks[index];
+  if (!block) return null;
+
+  const preset = project.presets.find((p) => p.id === block.presetId);
+  const startMs = blockStarts(tl)[index];
+  const effectCount = tl.modifiers.filter((m) => m.blockId === block.id).length;
+  const transitionIn = tl.transitions?.find((x) => x.afterBlockId === tl.blocks[index - 1]?.id);
+  const transitionOut = tl.transitions?.find((x) => x.afterBlockId === block.id);
+
+  return (
+    <Panel title="Clip" actions={<span className="tag">clip {index + 1} of {tl.blocks.length}</span>}>
+      <input className="txt" value={block.name} aria-label="Clip name"
+        onChange={(e) => renameBlock(block.id, e.target.value)} />
+
+      <div className="divider" />
+      <div className="row"><span className="prop-label" style={{ flex: 1 }}>Source</span>
+        <span className="tag" title="The reusable preset this clip is an instance of — editing this clip never changes it">
+          {preset?.name ?? block.presetId}
+        </span>
+      </div>
+      <div className="row"><span className="prop-label" style={{ flex: 1 }}>Start</span>
+        <span className="hint">{fmtSec(startMs)} — set by clip order, drag to reorder</span>
+      </div>
+      <div className="prop">
+        <span /><label className="prop-label"><span className="t">Duration</span>
+          <input type="range" min={0.06} max={8} step={0.02} value={block.durationMs / 1000}
+            onChange={(e) => setBlockDuration(block.id, +e.target.value * 1000)} />
+        </label>
+        <NumberField value={block.durationMs / 1000} step={0.1} onChange={(v) => setBlockDuration(block.id, Math.max(60, v * 1000))} />
+      </div>
+      <div className="prop">
+        <span /><label className="prop-label"><span className="t">Speed</span>
+          <input type="range" min={0.1} max={4} step={0.05} value={block.speed ?? 1}
+            onChange={(e) => setBlockSpeed(block.id, +e.target.value)} />
+        </label>
+        <NumberField value={block.speed ?? 1} step={0.1} onChange={(v) => setBlockSpeed(block.id, v)} />
+      </div>
+      <div className="row">
+        <span className="prop-label" style={{ flex: 1 }} title="Repeats this clip's own animation to fill its duration, instead of holding the last pose">Loop</span>
+        <button className="btn sm" aria-pressed={!!block.loop} onClick={() => setBlockLoop(block.id, !block.loop)}>
+          {block.loop ? 'Loops' : 'Once'}
+        </button>
+      </div>
+
+      <div className="divider" />
+      <div className="row">
+        <span className="prop-label" style={{ flex: 1 }}>Effects</span>
+        <span className="hint">{effectCount ? `${effectCount} on this clip — see Effects tab` : 'none — add from the Effects tab'}</span>
+      </div>
+      <div className="row">
+        <span className="prop-label" style={{ flex: 1 }}>Transition in</span>
+        <span className="hint">{transitionIn ? `${easingLabel(transitionIn.easing)} · ${(transitionIn.durationMs / 1000).toFixed(2)}s` : 'none'}</span>
+      </div>
+      <div className="row">
+        <span className="prop-label" style={{ flex: 1 }}>Transition out</span>
+        <span className="hint">{transitionOut ? `${easingLabel(transitionOut.easing)} · ${(transitionOut.durationMs / 1000).toFixed(2)}s` : 'none'}</span>
+      </div>
+      <p className="hint">Edit transitions from the ◆ / › connector between clips on the strip.</p>
+
+      <div className="divider" />
+      <div className="row">
+        <button className="btn sm" onClick={() => selectBlock(null)}>Done editing this clip</button>
+        <span className="spacer" />
+        <button className="btn ghost sm" onClick={() => removeBlock(block.id)}>Remove clip</button>
       </div>
     </Panel>
   );

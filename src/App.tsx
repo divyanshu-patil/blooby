@@ -4,7 +4,7 @@ import { defaultProject } from './core/defaults';
 import { Stage } from './ui/Stage';
 import { Layers } from './ui/Layers';
 import { Presets, Expressions } from './ui/Presets';
-import { NodeInspector, CameraPanel } from './ui/Inspector';
+import { NodeInspector, CameraPanel, ClipInspector } from './ui/Inspector';
 import { EyePanel } from './ui/EyePanel';
 import { Effects } from './ui/Effects';
 import { Timeline, DurationField } from './ui/Timeline';
@@ -27,6 +27,7 @@ export default function App() {
   const undo = useEditor((s) => s.undo);
   const redo = useEditor((s) => s.redo);
   const selection = useEditor((s) => s.selection);
+  const selectedBlockId = useEditor((s) => s.selectedBlockId);
   const deleteNode = useEditor((s) => s.deleteNode);
   const commit = useEditor((s) => s.commit);
   const loadProject = useEditor((s) => s.loadProject);
@@ -125,16 +126,18 @@ export default function App() {
                   <div className="tabs">
                     {(['node', 'eyes', 'fx', 'ai'] as Tab[]).map((t) => (
                       <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
-                        {t === 'node' ? 'Node' : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : 'Copilot'}
+                        {t === 'node' ? (selectedBlockId ? 'Clip' : 'Node') : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : 'Copilot'}
                       </button>
                     ))}
                   </div>
                   <div className="rail-tab-body">
                     {tab === 'node' && (
-                      <Split direction="column" storageKey="rail-node" panes={[
-                        { min: 160, content: <NodeInspector /> },
-                        { min: 140, content: <CameraPanel /> },
-                      ]} />
+                      selectedBlockId ? <ClipInspector /> : (
+                        <Split direction="column" storageKey="rail-node" panes={[
+                          { min: 160, content: <NodeInspector /> },
+                          { min: 140, content: <CameraPanel /> },
+                        ]} />
+                      )
                     )}
                     {tab === 'eyes' && <EyePanel />}
                     {tab === 'fx' && (

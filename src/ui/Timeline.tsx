@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useEditor, keyframeTimes } from '../core/store';
 import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { blockStarts, characteristicTime, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
-import { activeTimeline, PROP_LABEL, type Track } from '../core/types';
+import { activeTimeline, PROP_LABEL, type Track, type Transition } from '../core/types';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
@@ -28,6 +29,8 @@ export function Timeline() {
   const selectBlock = useEditor((s) => s.selectBlock);
   const moveBlock = useEditor((s) => s.moveBlock);
   const setBlockDuration = useEditor((s) => s.setBlockDuration);
+  const setTransition = useEditor((s) => s.setTransition);
+  const removeTransition = useEditor((s) => s.removeTransition);
   const setDurationMode = useEditor((s) => s.setDurationMode);
   const setTimelineDuration = useEditor((s) => s.setTimelineDuration);
   const moveKeyframe = useEditor((s) => s.moveKeyframe);
@@ -210,7 +213,8 @@ export function Timeline() {
             const start = starts[i];
             const within = playhead >= start && playhead < start + b.durationMs;
             return (
-              <div key={b.id} className="block" data-active={activeBlock === i} data-dragging={dragging === b.id}
+              <Fragment key={b.id}>
+              <div className="block" data-active={activeBlock === i} data-dragging={dragging === b.id}
                 data-selected={selectedBlockId === b.id}
                 draggable title="Drag to reorder · click to select for editing (effects, inspector)"
                 onDragStart={(e) => {
@@ -248,6 +252,13 @@ export function Timeline() {
                     onPointerCancel={() => { resize.current = null; resizing.current = false; }} />
                 )}
               </div>
+              {i < tl.blocks.length - 1 && (
+                <TransitionConnector
+                  transition={tl.transitions?.find((x) => x.afterBlockId === b.id)}
+                  onChange={(patch) => setTransition(b.id, patch)}
+                  onRemove={() => removeTransition(b.id)} />
+              )}
+              </Fragment>
             );
           })}
         </div>
@@ -386,6 +397,79 @@ function DurInput({ ms, label, locked, onCommit }: { ms: number; label: string; 
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         if (e.key === 'Escape') { setDraft(null); (e.target as HTMLInputElement).blur(); }
       }} />
+  );
+}
+
+/**
+ * The visible, editable seam between two clips (spec §9) — never invisible metadata.
+ * A faint "›" means no transition; click it to create a default one and open the editor.
+ * A filled diamond means one exists; click to reopen, edit duration/easing, or remove it.
+ */
+function TransitionConnector({ transition, onChange, onRemove }: {
+  transition: Transition | undefined;
+  onChange: (patch: Partial<Pick<Transition, 'durationMs' | 'easing'>>) => void;
+  onRemove: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btn = useRef<HTMLButtonElement>(null);
+  const popover = useRef<HTMLDivElement>(null);
+
+  // .strip clips overflow-y (the same reason the cut-button hit area had to move inline
+  // rather than hang off the block's edge) — an absolutely-positioned popover here would
+  // be invisible, not just clipped at the corner. Portal it to <body> as position:fixed
+  // instead, computed from the trigger's real screen position, and close on scroll/outside
+  // click since it's no longer anchored in the DOM to move or get dismissed automatically.
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btn.current?.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 6, left: r.left + r.width / 2 });
+    };
+    place();
+    const onOutside = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (btn.current?.contains(t) || popover.current?.contains(t)) return;
+      setOpen(false);
+    };
+    window.addEventListener('scroll', () => setOpen(false), { capture: true, once: true });
+    document.addEventListener('pointerdown', onOutside, true);
+    return () => document.removeEventListener('pointerdown', onOutside, true);
+  }, [open]);
+
+  return (
+    <div className="flex w-[22px] flex-none items-center justify-center self-stretch">
+      <button ref={btn}
+        className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] leading-none transition-colors ${transition
+          ? 'border-signal bg-signal-soft text-signal' : 'border-line text-muted hover:border-ink-2 hover:text-ink-2'}`}
+        title={transition ? `Transition: ${easingLabel(transition.easing)} · ${(transition.durationMs / 1000).toFixed(2)}s — click to edit` : 'Add a transition between these two clips'}
+        onClick={(e) => { e.stopPropagation(); if (!transition) onChange({}); setOpen((v) => !v); }}>
+        {transition ? '◆' : '›'}
+      </button>
+      {open && createPortal(
+        <div ref={popover} className="fixed z-50 -translate-x-1/2" style={{ top: pos.top, left: pos.left }}
+          onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+          <div className="flex flex-col gap-2 rounded-lg border border-line-soft bg-panel p-2.5 shadow-lg">
+            <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted">
+              <span className="flex-1 text-ink-2">Transition</span>
+              <span>duration</span>
+              <input type="number" min={20} step={20} className="w-14 rounded border border-line bg-field px-1 py-0.5 text-[11px] text-ink"
+                value={transition?.durationMs ?? 300}
+                onChange={(e) => onChange({ durationMs: Math.max(20, Math.round(+e.target.value)) })} />
+              <span>ms</span>
+            </div>
+            {transition && <CurveEditor value={transition.easing} onChange={(easing) => onChange({ easing })} />}
+            {transition && (
+              <button className="text-[10px] font-medium text-hot underline decoration-dotted underline-offset-2 self-start"
+                onClick={() => { onRemove(); setOpen(false); }}>
+                Remove transition
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
   );
 }
 

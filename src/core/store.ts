@@ -56,6 +56,7 @@ export interface Editor {
   addBlock: (presetId: string, index?: number) => void;
   removeBlock: (id: string) => void;
   setBlockDuration: (id: string, ms: number) => void;
+  renameBlock: (id: string, name: string) => void;
   setBlockSpeed: (id: string, speed: number) => void;
   setBlockLoop: (id: string, loop: boolean) => void;
   moveBlock: (id: string, index: number) => void;
@@ -334,6 +335,10 @@ export const useEditor = create<Editor>((set, get) => ({
       const tl = at(p);
       relayoutBlocks(tl, tl.blocks.map((b) => (b.id === id ? { ...b, durationMs: Math.max(60, Math.round(ms)) } : b)));
     }, `dur.${id}`);
+  },
+
+  renameBlock(id, name) {
+    get().commit((p) => { const b = at(p).blocks.find((x) => x.id === id); if (b && name.trim()) b.name = name.trim(); }, `bname.${id}`);
   },
 
   setBlockSpeed(id, speed) {
