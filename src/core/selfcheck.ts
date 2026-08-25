@@ -8,7 +8,7 @@ import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
 import { defaultProject, makeTimeline } from './defaults';
-import { blockStarts, derivedDuration } from './timeline';
+import { blockStarts, derivedDuration, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
@@ -388,6 +388,81 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   useEditor.getState().removeBlock(blinkBlock.id);
   ok('removing a clip drops its per-clip effects along with it',
     !activeTimeline(useEditor.getState().project).modifiers.some((m) => m.id === 'cm'));
+}
+
+// --- per-clip playback speed and loop ---------------------------------------------
+{
+  const proj = defaultProject();
+  const tl = activeTimeline(proj);
+  const talk = tl.blocks[2]; // 3300–4900ms, body.transform.scale.y is a multi-segment track
+  const talkTrack = tl.tracks.find((t) => t.blockId === talk.id && t.nodeId === 'body' && t.property === 'transform.scale.y')!;
+
+  talk.speed = 2;
+  const withSpeed = valueAt(proj, 'body', 'transform.scale.y', 3300 + 300);
+  const expected = sampleTrack(talkTrack, 3300 + 300 * 2); // 2x speed samples the source at double the elapsed local time
+  ok('block speed re-times its own sampling, not the block\'s position or duration',
+    Math.abs((withSpeed as number) - (expected as number)) < 1e-6, `${withSpeed} vs ${expected}`);
+  delete talk.speed;
+
+  const blink = tl.blocks[1]; // 2400–3300ms; its preset's natural length is 900ms
+  const before = blink.durationMs;
+  blink.loop = true; // set *before* relayoutBlocks: a looping block keeps its natural
+  // timing on resize instead of being proportionally stretched, so there's still a
+  // natural-length cycle for evaluateRig to wrap at, not just one stretched-out playthrough
+  relayoutBlocks(tl, tl.blocks.map((b) => (b.id === blink.id ? { ...b, durationMs: before * 3, loop: true } : b)));
+
+  const atFirstRep = valueAt(proj, 'eyeL', 'eye.openness', 2400 + 200);
+  const atThirdRep = evaluateRig(proj, 2400 + before * 2 + 200).nodes.eyeL.eye!.openness;
+  ok('a looping clip repeats its own content instead of holding the last frame',
+    Math.abs((atFirstRep as number) - atThirdRep) < 1e-6, `${atFirstRep} vs ${atThirdRep}`);
+
+  const nonLoopProj = defaultProject();
+  const nonLoopBlink = activeTimeline(nonLoopProj).blocks[1];
+  relayoutBlocks(activeTimeline(nonLoopProj), activeTimeline(nonLoopProj).blocks.map((b) => (b.id === nonLoopBlink.id ? { ...b, durationMs: before * 3 } : b)));
+  const nonLoopAtThirdRep = evaluateRig(nonLoopProj, 2400 + before * 2 + 200).nodes.eyeL.eye!.openness;
+  ok('without loop, the same resize instead proportionally stretches the content (existing behavior unchanged)',
+    Math.abs(nonLoopAtThirdRep - (atFirstRep as number)) > 0.05, `${nonLoopAtThirdRep} vs ${atFirstRep}`);
+}
+
+// --- transitions: runtime blend between the outgoing pose and the incoming animation
+{
+  const proj = defaultProject();
+  const tl = activeTimeline(proj);
+  const idle = tl.blocks[0]; // 0–2400ms
+  tl.transitions = [{ id: 'tx', afterBlockId: idle.id, durationMs: 400, easing: { type: 'linear' } }];
+  const boundary = 2400;
+
+  // the same project with the transition stripped out — the "no blending at all" baseline
+  const noTransitionProj = { ...proj, timelines: proj.timelines.map((t) => (t.id === tl.id ? { ...t, transitions: [] } : t)) };
+  const rawAtBoundary = evaluateRig(noTransitionProj, boundary);
+
+  const atSeam = evaluateRig(proj, boundary); // progress 0 — must read as 100% outgoing
+  ok('right at the seam, the blend is entirely the outgoing clip\'s pose',
+    Math.abs(atSeam.nodes.eyeL.eye!.openness - rawAtBoundary.nodes.eyeL.eye!.openness) < 1e-6,
+    `${atSeam.nodes.eyeL.eye!.openness} vs ${rawAtBoundary.nodes.eyeL.eye!.openness}`);
+
+  const incomingLiveAtEnd = evaluateRig(noTransitionProj, boundary + 400).nodes.eyeL.eye!.openness;
+  const atEnd = evaluateRig(proj, boundary + 399.99); // progress ≈ 1 — must read as ≈100% incoming
+  ok('by the end of the transition, the blend is essentially the incoming clip\'s own animation',
+    Math.abs(atEnd.nodes.eyeL.eye!.openness - incomingLiveAtEnd) < 0.01,
+    `${atEnd.nodes.eyeL.eye!.openness} vs ${incomingLiveAtEnd}`);
+
+  const mid = evaluateRig(proj, boundary + 200).nodes.body.surface.yaw;
+  const outVal = rawAtBoundary.nodes.body.surface.yaw;
+  const inVal = evaluateRig(noTransitionProj, boundary + 200).nodes.body.surface.yaw;
+  ok('midway through a linear transition, the blend sits between outgoing and incoming',
+    (mid - outVal) * (inVal - mid) >= -1e-9, // mid must lie on the segment between out and in
+    `out=${outVal} mid=${mid} in=${inVal}`);
+
+  ok('a transition never touches the outgoing or incoming clip\'s own stored keyframes',
+    JSON.stringify(activeTimeline(proj).tracks) === JSON.stringify(activeTimeline(noTransitionProj).tracks));
+
+  const beforeCount = tl.blocks.length;
+  useEditor.getState().loadProject(proj);
+  useEditor.getState().removeBlock(idle.id);
+  ok('removing a clip drops the transition that followed it',
+    activeTimeline(useEditor.getState().project).blocks.length === beforeCount - 1
+    && !activeTimeline(useEditor.getState().project).transitions?.some((x) => x.id === 'tx'));
 }
 
 // --- moveBlock: reordering drags its keyframes along, in one undo step ---------

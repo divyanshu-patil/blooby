@@ -110,12 +110,33 @@ export interface Preset {
   thumbnail?: string;
 }
 
-/** One placed preset instance on the strip (§7). */
+/** One placed preset instance on the strip (§7) — a clip instance in spec terms: the
+ * `presetId` is the reusable source, everything else here is this placement's own. */
 export interface Block {
   id: string;
   presetId: string;
   name: string;
   durationMs: number;
+  /** how fast this clip's own keyframes progress, independent of how much timeline space
+   * it occupies — 1 = normal. At 2 it plays twice as fast then holds its last pose for
+   * the remainder of `durationMs`; at 0.5 it may not finish before the clip ends. Distinct
+   * from resizing the clip (which proportionally re-times every keyframe to fit). */
+  speed?: number;
+  /** when true, this clip's own animation repeats to fill `durationMs` instead of holding
+   * its last pose once it runs out — useful once a short clip (Blink) is stretched long. */
+  loop?: boolean;
+}
+
+/** How one clip blends into the next. Lives on the *incoming* clip's side of the seam —
+ * `afterBlockId` names the clip it follows. A runtime blend, never baked into keyframes:
+ * evaluation captures the outgoing clip's actually-evaluated pose at the boundary, then
+ * lerps it toward the incoming clip's own (still-progressing) animation over `durationMs`,
+ * eased by `easing`. Both clips' source keyframes are untouched either way. */
+export interface Transition {
+  id: string;
+  afterBlockId: string;
+  durationMs: number;
+  easing: EasingCurve;
 }
 
 /**
@@ -129,6 +150,10 @@ export interface Timeline {
   tracks: Track[];
   modifiers: Modifier[];
   blocks: Block[];
+  /** one per transitioned seam, keyed by the clip it follows — absent entries just mean
+   * no transition there yet. Optional (not defaulted to []) so every project saved before
+   * transitions existed keeps loading with zero migration needed. */
+  transitions?: Transition[];
   durationMode: 'custom' | 'even';
   timelineDurationMs: number;
   /** explicit user-set duration floor — lets the timeline hold trailing dead space past

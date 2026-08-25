@@ -1,4 +1,4 @@
-import type { Block, Preset, Timeline } from './types';
+import type { Block, Preset, Timeline, Transition } from './types';
 
 export function blockStarts(tl: Timeline): number[] {
   const out: number[] = [];
@@ -26,14 +26,17 @@ export function relayoutBlocks(tl: Timeline, next: Block[]): void {
   const oldStarts = blockStarts(tl);
   const oldById = new Map(tl.blocks.map((b, i) => [b.id, { start: oldStarts[i], dur: b.durationMs }]));
   let t = 0;
-  const newById = new Map<string, { start: number; dur: number }>();
-  for (const b of next) { newById.set(b.id, { start: t, dur: b.durationMs }); t += b.durationMs; }
+  const newById = new Map<string, { start: number; dur: number; loop?: boolean }>();
+  for (const b of next) { newById.set(b.id, { start: t, dur: b.durationMs, loop: b.loop }); t += b.durationMs; }
 
   for (const track of tl.tracks) {
     if (!track.blockId) continue;
     const o = oldById.get(track.blockId), n = newById.get(track.blockId);
     if (!o || !n) continue;
-    const k = o.dur === 0 ? 1 : n.dur / o.dur;
+    // a looping clip keeps its own natural timing when resized — evaluateRig repeats it
+    // to fill whatever span the clip now occupies, rather than proportionally stretching
+    // (slowing/speeding) the content itself, which is what a non-looping resize still does.
+    const k = n.loop || o.dur === 0 ? 1 : n.dur / o.dur;
     for (const key of track.keyframes) key.time = n.start + (key.time - o.start) * k;
   }
   tl.blocks = next;
@@ -43,7 +46,23 @@ export function relayoutBlocks(tl: Timeline, next: Block[]): void {
   // owning clip left: never evaluates again (evaluateRig skips an unresolvable window)
   // but stays in the timeline forever with no UI left to ever reach or remove it.
   tl.modifiers = tl.modifiers.filter((m) => !m.blockId || newById.has(m.blockId));
+  // same for a transition into a now-gone clip — nothing left for it to blend into
+  if (tl.transitions) tl.transitions = tl.transitions.filter((x) => newById.has(x.afterBlockId));
   tl.timelineDurationMs = derivedDuration(tl);
+}
+
+/** The transition in effect at `t`, if any — active for its own `durationMs` starting
+ * at the moment its incoming clip begins, never past into the clip after that. */
+export function activeTransitionAt(tl: Timeline, t: number): { transition: Transition; boundaryMs: number } | null {
+  if (!tl.transitions?.length) return null;
+  const starts = blockStarts(tl);
+  for (let i = 1; i < tl.blocks.length; i++) {
+    const transition = tl.transitions.find((x) => x.afterBlockId === tl.blocks[i - 1].id);
+    if (!transition) continue;
+    const boundaryMs = starts[i];
+    if (t >= boundaryMs && t < boundaryMs + transition.durationMs) return { transition, boundaryMs };
+  }
+  return null;
 }
 
 export function evenDuration(tl: Timeline): number {

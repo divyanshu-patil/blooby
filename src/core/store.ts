@@ -4,7 +4,7 @@ import { readProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
 import { blocksEnd, derivedDuration, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery } from './gallery';
-import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, RigNode, Timeline, Track } from './types';
+import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, RigNode, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
@@ -56,10 +56,15 @@ export interface Editor {
   addBlock: (presetId: string, index?: number) => void;
   removeBlock: (id: string) => void;
   setBlockDuration: (id: string, ms: number) => void;
+  setBlockSpeed: (id: string, speed: number) => void;
+  setBlockLoop: (id: string, loop: boolean) => void;
   moveBlock: (id: string, index: number) => void;
   setDurationMode: (m: 'custom' | 'even') => void;
   setTimelineLoop: (v: boolean) => void;
   setTimelineDuration: (ms: number) => void;
+
+  setTransition: (afterBlockId: string, patch: Partial<Pick<Transition, 'durationMs' | 'easing'>>) => void;
+  removeTransition: (afterBlockId: string) => void;
 
   addTimeline: (name?: string) => void;
   renameTimeline: (id: string, name: string) => void;
@@ -329,6 +334,37 @@ export const useEditor = create<Editor>((set, get) => ({
       const tl = at(p);
       relayoutBlocks(tl, tl.blocks.map((b) => (b.id === id ? { ...b, durationMs: Math.max(60, Math.round(ms)) } : b)));
     }, `dur.${id}`);
+  },
+
+  setBlockSpeed(id, speed) {
+    get().commit((p) => {
+      const b = at(p).blocks.find((x) => x.id === id);
+      if (b) b.speed = Math.max(0.1, Math.round(speed * 100) / 100);
+    }, `speed.${id}`);
+  },
+
+  setBlockLoop(id, loop) {
+    get().commit((p) => {
+      const b = at(p).blocks.find((x) => x.id === id);
+      if (b) b.loop = loop;
+    });
+  },
+
+  setTransition(afterBlockId, patch) {
+    get().commit((p) => {
+      const tl = at(p);
+      const list = tl.transitions ?? (tl.transitions = []);
+      const existing = list.find((x) => x.afterBlockId === afterBlockId);
+      if (existing) Object.assign(existing, patch);
+      else list.push({ id: uid('x'), afterBlockId, durationMs: 300, easing: { type: 'preset', name: 'easeInOut' }, ...patch });
+    });
+  },
+
+  removeTransition(afterBlockId) {
+    get().commit((p) => {
+      const tl = at(p);
+      if (tl.transitions) tl.transitions = tl.transitions.filter((x) => x.afterBlockId !== afterBlockId);
+    });
   },
 
   moveBlock(id, index) {
