@@ -316,8 +316,10 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('t=0 still reads as unchanged after the write', sampleTrack(track, 0) === before);
   ok('the target time reads the new value', sampleTrack(track, 2000) === 25);
   ok('halfway there interpolates, does not jump', (sampleTrack(track, 1000) as number) > (before as number) && (sampleTrack(track, 1000) as number) < 25);
-  // writing again on the SAME (now-existing) track must not re-anchor a second time
-  writeKeyframe(p, 'eyeL', 'transform.rotation', 3000, 40, { type: 'linear' });
+  // writing again on the SAME (now-existing) track must not re-anchor a second time —
+  // stays inside Idle's own window (0–2400ms), the block this track just got scoped to;
+  // a write outside it would correctly become a *different* clip's own track instead.
+  writeKeyframe(p, 'eyeL', 'transform.rotation', 2200, 40, { type: 'linear' });
   ok('a second write on an existing track adds one keyframe, not another anchor', track.keyframes.length === 3);
 }
 
@@ -463,6 +465,26 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('removing a clip drops the transition that followed it',
     activeTimeline(useEditor.getState().project).blocks.length === beforeCount - 1
     && !activeTimeline(useEditor.getState().project).transitions?.some((x) => x.id === 'tx'));
+
+  // the checks above all happen to use properties/moments where the default project's own
+  // authored values coincide at the Idle/Blink boundary (Idle's own yaw curve returns to 0
+  // by its end; Blink never touches yaw either) — every one of them still passes if the
+  // "outgoing" snapshot is silently captured on the *incoming* side of the seam instead
+  // (blending a value with itself is invisible). Use a property forced to genuinely differ
+  // on each side, so a regression like that can't hide behind coincidentally-equal fixture
+  // data the way it did the first time this was written.
+  useEditor.getState().loadProject(defaultProject());
+  const idle2 = activeTimeline(useEditor.getState().project).blocks[0];
+  useEditor.getState().setPlayhead(100);
+  useEditor.getState().toggleTrack('body', 'transform.rotation'); // Idle doesn't already animate this
+  useEditor.getState().setValue('body', 'transform.rotation', 60, 'rot2');
+  useEditor.getState().setTransition(idle2.id, { durationMs: 400, easing: { type: 'linear' } });
+  const rotAtSeam = evaluateRig(useEditor.getState().project, 2400).nodes.body.transform.rotation;
+  const rotMidway = evaluateRig(useEditor.getState().project, 2600).nodes.body.transform.rotation;
+  const rotAtEnd = evaluateRig(useEditor.getState().project, 2800).nodes.body.transform.rotation;
+  ok('a transition actually morphs a property that differs on each side of the seam, not a same-value no-op',
+    Math.abs(rotAtSeam - 60) < 1e-6 && Math.abs(rotMidway - 30) < 1e-6 && Math.abs(rotAtEnd) < 1e-6,
+    `seam=${rotAtSeam} mid=${rotMidway} end=${rotAtEnd} (want 60, 30, 0)`);
 }
 
 // --- duplicateBlock: an independent instance, inserted right after the original --------
@@ -543,6 +565,34 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     PT().tracks.some((t) => t.blockId === added.id && t.nodeId === 'body' && t.property === 'surface.yaw'));
   ok('the clip remembers it came from a gallery item, for the inspector\'s source label',
     added.gallerySource?.galleryName === 'Some Other Mascot');
+
+  // a *multi-block* source timeline (any real saved project — defaultProject()'s own
+  // active timeline has 4) contributes several tracks for the same property, one per its
+  // own sub-block. Brought in as one clip, this used to "deform the mascot": every copied
+  // track shared the new clip's single blockId, so activeTrackFor couldn't tell them
+  // apart and just picked whichever sub-block's track came first, for the clip's entire
+  // span. mergeTracksForClip combines same-property tracks into one before copying.
+  const sourceProj = defaultProject();
+  const sourceTl = activeTimeline(sourceProj);
+  useEditor.getState().loadProject(defaultProject());
+  useEditor.getState().addClipFrom({
+    label: 'Idle (imported)', timeline: sourceTl,
+    gallerySource: { galleryId: 'g2', galleryName: 'Other', timelineId: sourceTl.id, timelineName: 'Idle' },
+  });
+  const importedTl = activeTimeline(useEditor.getState().project);
+  const imported = importedTl.blocks.at(-1)!;
+  const importedStart = blockStarts(importedTl).at(-1)!;
+  ok('a multi-block source becomes exactly one new clip, not several',
+    imported.durationMs === sourceTl.timelineDurationMs
+    && importedTl.tracks.filter((t) => t.blockId === imported.id && t.nodeId === 'eyeL' && t.property === 'eye.openness').length === 1);
+  let worstDiff = 0;
+  for (const rel of [100, 500, 1200, 1790, 1880, 2400, 2800, 3220, 3600, 4200, 4900, 5200, 5900, 6299]) {
+    const got = evaluateRig(useEditor.getState().project, importedStart + rel).nodes.eyeL.eye!.openness;
+    const want = evaluateRig(sourceProj, rel).nodes.eyeL.eye!.openness;
+    worstDiff = Math.max(worstDiff, Math.abs(got - want));
+  }
+  ok('the imported clip reproduces the source\'s full animation exactly, no cross-block bleed',
+    worstDiff < 1e-6, `worst diff ${worstDiff}`);
 }
 
 // --- moveBlock: reordering drags its keyframes along, in one undo step ---------
@@ -596,12 +646,15 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   const untouched = resolveTracks([constTrack], true, 2000);
   ok('a track already flat at its start value is left alone', untouched[0] === constTrack);
 
-  // evaluateRig actually uses this — the seam is visible in playback, not just in theory
+  // evaluateRig actually uses this — the seam is visible in playback, not just in theory.
+  // No blocks on this timeline: a global track like t3 is only ever reachable outside
+  // every block (activeTrackFor seals a clip off from tracks that aren't its own), so
+  // this has to run on a blockless timeline to actually exercise the global-track path.
   const proj = defaultProject();
   const ptl2 = activeTimeline(proj);
   ptl2.loop = true;
-  ptl2.tracks = ptl2.tracks.filter((t) => !(t.nodeId === 'body' && t.property === 'transform.rotation'));
-  ptl2.tracks.push({ id: 't3', nodeId: 'body', property: 'transform.rotation', keyframes: openTrack.keyframes });
+  ptl2.blocks = [];
+  ptl2.tracks = [{ id: 't3', nodeId: 'body', property: 'transform.rotation', keyframes: openTrack.keyframes }];
   const atEnd = evaluateRig(proj, ptl2.timelineDurationMs).nodes.body.transform.rotation;
   const atStart = evaluateRig(proj, 0).nodes.body.transform.rotation;
   ok('evaluateRig itself loops the pose, not just the raw track helper', atEnd === atStart, `${atEnd} vs ${atStart}`);
@@ -654,17 +707,44 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     `${valueAt(P(), 'body', 'surface.yaw', 1200)} vs ${yawBefore}`);
   useEditor.getState().undo();
 
-  // expressions and morphs
-  useEditor.getState().morphBetween('x_neutral', 'x_surprised', 3000, 400, { type: 'preset', name: 'easeInOut' });
-  // several tracks can share a nodeId+property (one per preset block already on the
-  // timeline) — the one the morph actually wrote into is whichever is active at 3000/3400,
-  // never just the first array match (that's the exact bug this refactor fixes).
-  const scaleTrack = activeTrackFor(PT(), 'eyeL', 'transform.scale.x', 3000);
+  // a clip is a sealed instance: a property toggled/edited while scrubbed into one clip
+  // must stay that clip's own override, never leak into a different (especially a brand
+  // new, blank) clip that doesn't animate the property itself.
+  useEditor.getState().setPlayhead(500); // inside Idle (0–2400ms)
+  useEditor.getState().toggleTrack('body', 'transform.rotation'); // Idle doesn't already animate this
+  useEditor.getState().setValue('body', 'transform.rotation', 33, 'rot');
+  ok('an edit made inside one clip applies there', evaluateRig(P(), 500).nodes.body.transform.rotation === 33);
+  useEditor.getState().addBlock('p_neutral'); // the blank builtin preset — appends at the end
+  const neutral = PT().blocks.at(-1)!;
+  const neutralMid = blockStarts(PT()).at(-1)! + neutral.durationMs / 2;
+  ok('a brand-new blank clip shows the rig\'s own rest pose, not another clip\'s edit',
+    evaluateRig(P(), neutralMid).nodes.body.transform.rotation === 0,
+    `${evaluateRig(P(), neutralMid).nodes.body.transform.rotation}`);
+  useEditor.getState().undo();
+  useEditor.getState().undo();
+  useEditor.getState().undo();
+
+  // expressions and morphs — both ends land inside Talk's window (3300–4900ms), so this
+  // exercises "one clip's own track gets both keyframes" rather than the cross-clip case
+  // covered separately below.
+  useEditor.getState().morphBetween('x_neutral', 'x_surprised', 3400, 400, { type: 'preset', name: 'easeInOut' });
+  const scaleTrack = activeTrackFor(PT(), 'eyeL', 'transform.scale.x', 3400);
   ok('morph wrote both ends', !!scaleTrack
-    && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3000) < 1)
-    && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3400) < 1));
+    && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3400) < 1)
+    && scaleTrack.keyframes.some((k) => Math.abs(k.time - 3800) < 1));
   ok('morph skips properties that match', !PT().tracks.some((t) => t.nodeId === 'body' && t.property === 'surface.pitch'
-    && t.keyframes.some((k) => Math.abs(k.time - 3000) < 1)));
+    && t.keyframes.some((k) => Math.abs(k.time - 3400) < 1)));
+  useEditor.getState().undo();
+
+  // a morph spanning a clip boundary writes into *each* clip's own track — a clip is a
+  // sealed instance, so one keyframe can't reach across into a different clip's track.
+  useEditor.getState().morphBetween('x_neutral', 'x_surprised', 3000, 400, { type: 'preset', name: 'easeInOut' }); // 3000 in Blink, 3400 in Talk
+  const blinkScale = activeTrackFor(PT(), 'eyeL', 'transform.scale.x', 3000);
+  const talkScale = activeTrackFor(PT(), 'eyeL', 'transform.scale.x', 3400);
+  ok('a morph across a clip boundary lands in two independent clip-scoped tracks',
+    !!blinkScale && !!talkScale && blinkScale.id !== talkScale.id
+    && blinkScale.keyframes.some((k) => Math.abs(k.time - 3000) < 1)
+    && talkScale.keyframes.some((k) => Math.abs(k.time - 3400) < 1));
   useEditor.getState().undo();
 
   // duration: can extend past content (a trailing hold), shrinking clamps keyframes onto

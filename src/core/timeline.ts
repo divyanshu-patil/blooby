@@ -1,4 +1,4 @@
-import type { Block, Preset, Timeline, Transition } from './types';
+import type { Block, Preset, Timeline, Track, Transition } from './types';
 
 export function blockStarts(tl: Timeline): number[] {
   const out: number[] = [];
@@ -9,6 +9,49 @@ export function blockStarts(tl: Timeline): number[] {
 
 export function blocksEnd(tl: Timeline): number {
   return tl.blocks.reduce((s, b) => s + b.durationMs, 0);
+}
+
+/** Which clip (if any) occupies time `t` — a clip is a sealed instance: activeTrackFor
+ * uses this to keep a track scoped to one block from ever winning inside another, and a
+ * global (blockless) track from bleeding into a clip that simply doesn't animate that
+ * property itself, which used to read as "a random earlier keyframe leaking into it." */
+export function blockAt(tl: Timeline, t: number): Block | undefined {
+  const starts = blockStarts(tl);
+  for (let i = 0; i < tl.blocks.length; i++) {
+    const b = tl.blocks[i];
+    if (t >= starts[i] && t < starts[i] + b.durationMs) return b;
+  }
+  // the exact end of the last block still counts as inside it (matches activeTransitionAt
+  // and the block-window checks elsewhere using an inclusive upper bound)
+  const last = tl.blocks.at(-1);
+  if (last && t === starts.at(-1)! + last.durationMs) return last;
+  return undefined;
+}
+
+/**
+ * Merge a source timeline's tracks into one track per (nodeId, property), offset by
+ * `start` and scoped to `blockId` — the shared engine behind bringing another timeline or
+ * a gallery animation in as a single clip. A multi-block source timeline (any real saved
+ * project) contributes several tracks for the same property, one per its own sub-block;
+ * merging them here keeps this new clip's "at most one track per property" invariant
+ * intact. Without it, activeTrackFor can't tell the merged tracks apart (they'd all share
+ * this one new blockId) and just picks whichever happens to be first — which is exactly
+ * why a multi-clip gallery animation, brought in whole, used to render deformed: most of
+ * its own sub-ranges were reading a sub-block's track that didn't actually belong there.
+ * Only tracks whose nodeId is in `validIds` are kept — the rig-compatibility filter for a
+ * gallery source, always a no-op for a same-project one.
+ */
+export function mergeTracksForClip(sourceTracks: Track[], validIds: Set<string>, blockId: string, start: number, idGen: () => string): Track[] {
+  const merged = new Map<string, Track>();
+  for (const t of sourceTracks) {
+    if (!validIds.has(t.nodeId)) continue;
+    const key = `${t.nodeId} ${t.property}`;
+    let dst = merged.get(key);
+    if (!dst) { dst = { id: idGen(), nodeId: t.nodeId, property: t.property, blockId, keyframes: [] }; merged.set(key, dst); }
+    for (const k of t.keyframes) dst.keyframes.push({ ...k, id: idGen(), time: k.time + start });
+  }
+  for (const track of merged.values()) track.keyframes.sort((a, b) => a.time - b.time);
+  return [...merged.values()];
 }
 
 export function lastKeyframe(tl: Timeline): number {

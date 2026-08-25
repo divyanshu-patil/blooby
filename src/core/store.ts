@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { defaultProject, makeTimeline, uid } from './defaults';
 import { readProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
-import { blocksEnd, blockStarts, derivedDuration, relayoutBlocks } from './timeline';
+import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
@@ -239,7 +239,10 @@ export const useEditor = create<Editor>((set, get) => ({
       if (track) {
         upsertKeyframe(track, playhead, value);
       } else if (autoKey) {
-        const t: Track = { id: uid('t'), nodeId, property, keyframes: [] };
+        // scoped to whichever clip the playhead is in (a proper clip override, per spec
+        // §15) — never a global track, or it would leak into every other clip that
+        // doesn't animate this property, including a brand-new one added later.
+        const t: Track = { id: uid('t'), nodeId, property, keyframes: [], blockId: blockAt(at(p), playhead)?.id };
         upsertKeyframe(t, playhead, value);
         at(p).tracks.push(t);
       } else {
@@ -260,7 +263,8 @@ export const useEditor = create<Editor>((set, get) => ({
       } else {
         const v = readProp(p.rig, nodeId, property);
         if (v === undefined) return;
-        at(p).tracks.push({ id: uid('t'), nodeId, property, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
+        // same clip-scoping as setValue's autoKey branch — see its comment
+        at(p).tracks.push({ id: uid('t'), nodeId, property, blockId: blockAt(at(p), playhead)?.id, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
       }
     });
   },
@@ -378,13 +382,7 @@ export const useEditor = create<Editor>((set, get) => ({
       next.splice(at0, 0, block);
       let start = 0;
       for (let i = 0; i < at0; i++) start += next[i].durationMs;
-      for (const t of source.timeline.tracks) {
-        if (!validIds.has(t.nodeId)) continue;
-        tl.tracks.push({
-          id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
-          keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
-        });
-      }
+      tl.tracks.push(...mergeTracksForClip(source.timeline.tracks, validIds, blockId, start, () => uid('t')));
       const shifted = tl.blocks.slice(at0).map((b) => b.id);
       if (shifted.length) {
         const set2 = new Set(shifted);
@@ -412,13 +410,7 @@ export const useEditor = create<Editor>((set, get) => ({
       tl.tracks = tl.tracks.filter((t) => t.blockId !== blockId);
       const idx = tl.blocks.findIndex((b) => b.id === blockId);
       const start = blockStarts(tl)[idx];
-      for (const t of timeline.tracks) {
-        if (!validIds.has(t.nodeId)) continue;
-        tl.tracks.push({
-          id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
-          keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
-        });
-      }
+      tl.tracks.push(...mergeTracksForClip(timeline.tracks, validIds, blockId, start, () => uid('t')));
     });
   },
 
@@ -702,15 +694,21 @@ export function writeKeyframe(p: Project, nodeId: string, property: string, time
   const tl = at(p);
   let track = activeTrackFor(tl, nodeId, property, time);
   if (!track) {
-    track = { id: uid('t'), nodeId, property, keyframes: [] };
+    // scoped to whichever clip `time` falls in (a clip override, not a global track that
+    // would leak into every other clip) — undefined blockId (global) only when this
+    // timeline has no blocks at all, the pre-clip free-keyframe workflow.
+    const owner = blockAt(tl, time);
+    track = { id: uid('t'), nodeId, property, keyframes: [], blockId: owner?.id };
     tl.tracks.push(track);
-    // A brand-new track with one keyframe is constant *everywhere* (sampleTrack's
-    // length===1 case), so writing a target value at t>0 would retroactively apply it
-    // at t=0 too. Anchor the track to the value it already had, so only the segment
-    // from `time` onward actually changes.
-    if (time > 1) {
+    // A brand-new track with one keyframe is constant *everywhere within its own scope*
+    // (sampleTrack's length===1 case), so writing a target value at t>anchor would
+    // retroactively apply it before that too. Anchor at the clip's own start (absolute 0
+    // for a global track) so only the segment from `time` onward actually changes, and
+    // the anchor stays inside the same clip it's anchoring.
+    const anchorAt = owner ? blockStarts(tl)[tl.blocks.indexOf(owner)] : 0;
+    if (time > anchorAt + 1) {
       const base = readProp(p.rig, nodeId, property);
-      if (base !== undefined) track.keyframes.push({ id: uid('k'), time: 0, value: base, easingOut: { type: 'linear' } });
+      if (base !== undefined) track.keyframes.push({ id: uid('k'), time: anchorAt, value: base, easingOut: { type: 'linear' } });
     }
   }
   const k = track.keyframes.find((x) => Math.abs(x.time - time) < 1);

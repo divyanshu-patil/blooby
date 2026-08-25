@@ -372,6 +372,12 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
   background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--r); box-shadow: var(--shadow);
 }
 .strip.empty { align-items: center; justify-content: center; color: var(--muted); font-size: 12px; min-height: 84px; }
+.add-blank-clip {
+  flex: none; width: 36px; align-self: stretch; border-radius: 6px;
+  border: 1.5px dashed var(--line); color: var(--muted); font-size: 18px;
+  display: grid; place-items: center; transition: border-color .12s, color .12s, background .12s;
+}
+.add-blank-clip:hover { border-color: var(--signal); color: var(--signal); background: var(--signal-soft); }
 
 .block {
   flex: none; width: 78px;

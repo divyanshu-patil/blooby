@@ -4,7 +4,7 @@ import { noise1d } from './noise';
 import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
 import { getCameraProp, getProp, PROP_RANGE, readProp, setCameraProp, setProp, writeProp } from './props';
 import { activeTimeline } from './types';
-import { activeTransitionAt, blockStarts } from './timeline';
+import { activeTransitionAt, blockAt, blockStarts } from './timeline';
 import type { ColorStop, EasingCurve, KeyValue, Modifier, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
@@ -51,28 +51,26 @@ function blockWindow(tl: Timeline, blockId: string): [number, number] | null {
   return [starts[idx], starts[idx] + tl.blocks[idx].durationMs];
 }
 
-/** [start, end) of the block a track belongs to, or null for a block-less (global) track. */
-function trackWindow(tl: Timeline, track: Track): [number, number] | null {
-  return track.blockId ? blockWindow(tl, track.blockId) : null;
-}
-
 /**
  * The one track actually driving `nodeId`/`property` at time `t` — never just "whichever
  * track happens to sit first (or last) in the array". A timeline can hold several tracks
- * for the same node+property, one per block (each block's preset contributes its own);
- * outside its own block window a track's value still exists (sampleTrack extrapolates the
- * nearest keyframe), so scanning the array naively lets an unrelated block silently win
- * at every other point on the timeline — exactly why edits looked like they "did nothing".
- * A block-scoped track wins whenever `t` falls in its window; a block-less (manually
- * keyframed / expression) track is the fallback everywhere else.
+ * for the same node+property, one per block (each block's preset contributes its own).
+ *
+ * A clip is a sealed instance: when `t` falls inside a block's own span, *only* that
+ * block's own track for this property is eligible — never a different block's track
+ * (which used to win by array order — "edits do nothing"), and never a global/blockless
+ * track either, just because this clip doesn't happen to animate the property itself
+ * (which used to read as "a stray keyframe from somewhere else leaking into a brand-new
+ * clip that should just show its own rest pose"). A global track is only ever the
+ * fallback outside every block — past the last one, or a timeline with no blocks at all.
  */
 export function activeTrackFor(tl: Timeline, nodeId: string, property: string, t: number): Track | undefined {
+  const inside = blockAt(tl, t);
   let fallback: Track | undefined;
   for (const track of tl.tracks) {
     if (track.nodeId !== nodeId || track.property !== property) continue;
-    const w = trackWindow(tl, track);
-    if (!w) { fallback ??= track; continue; }
-    if (t >= w[0] && t <= w[1]) return track;
+    if (inside) { if (track.blockId === inside.id) return track; continue; }
+    if (!track.blockId) fallback ??= track;
   }
   return fallback;
 }
@@ -232,7 +230,13 @@ export function evaluateRig(project: Project, timeMs: number): Rig {
   const active = activeTransitionAt(tl, timeMs);
   const rig = evaluateRigRaw(project, timeMs);
   if (!active) return rig;
-  const outgoing = evaluateRigRaw(project, active.boundaryMs);
+  // boundaryMs is the *incoming* clip's own start (blockAt's window check is exclusive on
+  // the upper end, so the outgoing clip's own span ends just short of it) — evaluating
+  // "outgoing" at that exact instant would silently read the incoming clip's context
+  // instead (both clips resolve to the same block there), capturing the same pose on both
+  // sides of the blend and producing no visible morph at all. Step fractionally back so
+  // this reads as the outgoing clip's own last instant, not the incoming clip's first.
+  const outgoing = evaluateRigRaw(project, active.boundaryMs - 1e-3);
   const progress = applyEasing(active.transition.easing, (timeMs - active.boundaryMs) / active.transition.durationMs);
   // amount=progress: blendRigInto(to, from, amount) resolves toward `from` at amount=0
   // and `to` at amount=1 — at the seam (progress 0) that must read as 100% outgoing,

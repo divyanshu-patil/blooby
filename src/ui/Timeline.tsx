@@ -261,6 +261,8 @@ export function Timeline() {
               </Fragment>
             );
           })}
+          <button className="btn icon add-blank-clip" title="Add a blank clip — the rig's own rest pose, ready to animate from scratch"
+            onClick={() => addBlock('p_neutral')}>+</button>
         </div>
       </div>
 
