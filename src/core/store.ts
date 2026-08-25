@@ -54,6 +54,7 @@ export interface Editor {
   updateNode: (id: string, fn: (n: RigNode) => void, label?: string) => void;
 
   addBlock: (presetId: string, index?: number) => void;
+  duplicateBlock: (id: string) => void;
   removeBlock: (id: string) => void;
   setBlockDuration: (id: string, ms: number) => void;
   renameBlock: (id: string, name: string) => void;
@@ -319,6 +320,38 @@ export const useEditor = create<Editor>((set, get) => ({
       tl.blocks = next;
       tl.timelineDurationMs = derivedDuration(tl);
     });
+  },
+
+  duplicateBlock(id) {
+    const { project } = get();
+    const tl = at(project);
+    const idx = tl.blocks.findIndex((b) => b.id === id);
+    if (idx < 0) return;
+    const original = tl.blocks[idx];
+    const ownTracks = tl.tracks.filter((t) => t.blockId === id);
+    const ownMods = tl.modifiers.filter((m) => m.blockId === id);
+    const newId = uid('b');
+    get().commit((p) => {
+      const tl2 = at(p);
+      const next = [...tl2.blocks];
+      next.splice(idx + 1, 0, { ...original, id: newId });
+      // open a duration-sized gap right after the original for the copy to sit in
+      const shiftAfter = new Set(tl2.blocks.slice(idx + 1).map((b) => b.id));
+      for (const t of tl2.tracks) if (t.blockId && shiftAfter.has(t.blockId)) for (const k of t.keyframes) k.time += original.durationMs;
+      // the copy's own keyframes land exactly one clip-duration after the original's —
+      // same offset-within-block, translated forward by durationMs (no window lookup
+      // needed since it's landing immediately adjacent, not somewhere arbitrary)
+      for (const t of ownTracks) {
+        tl2.tracks.push({
+          ...t, id: uid('t'), blockId: newId,
+          keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + original.durationMs })),
+        });
+      }
+      for (const m of ownMods) tl2.modifiers.push({ ...m, id: uid('m'), blockId: newId });
+      tl2.blocks = next;
+      tl2.timelineDurationMs = derivedDuration(tl2);
+    });
+    set({ selectedBlockId: newId });
   },
 
   removeBlock(id) {

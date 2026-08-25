@@ -191,6 +191,7 @@ export function ClipInspector() {
   const setBlockSpeed = useEditor((s) => s.setBlockSpeed);
   const setBlockLoop = useEditor((s) => s.setBlockLoop);
   const removeBlock = useEditor((s) => s.removeBlock);
+  const duplicateBlock = useEditor((s) => s.duplicateBlock);
   const selectBlock = useEditor((s) => s.selectBlock);
 
   const tl = activeTimeline(project);
@@ -258,6 +259,8 @@ export function ClipInspector() {
       <div className="row">
         <button className="btn sm" onClick={() => selectBlock(null)}>Done editing this clip</button>
         <span className="spacer" />
+        <button className="btn ghost sm" title="Insert a copy right after this clip — its own instance, edits here don't affect it"
+          onClick={() => duplicateBlock(block.id)}>Duplicate</button>
         <button className="btn ghost sm" onClick={() => removeBlock(block.id)}>Remove clip</button>
       </div>
     </Panel>

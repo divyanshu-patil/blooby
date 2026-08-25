@@ -465,6 +465,45 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     && !activeTimeline(useEditor.getState().project).transitions?.some((x) => x.id === 'tx'));
 }
 
+// --- duplicateBlock: an independent instance, inserted right after the original --------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const PT = () => activeTimeline(P());
+  const idle = PT().blocks[0];
+  const trackCountBefore = PT().tracks.filter((t) => t.blockId === idle.id).length;
+  const blockCountBefore = PT().blocks.length;
+
+  useEditor.getState().duplicateBlock(idle.id);
+  ok('duplicate inserts a new block right after the original', PT().blocks.length === blockCountBefore + 1
+    && PT().blocks[1].presetId === idle.presetId && PT().blocks[1].id !== idle.id);
+
+  const dup = PT().blocks[1];
+  ok('duplicate gets its own copy of the tracks, not shared references',
+    PT().tracks.filter((t) => t.blockId === dup.id).length === trackCountBefore
+    && PT().tracks.filter((t) => t.blockId === dup.id).every((t) => !PT().tracks.some((o) => o.blockId === idle.id && o.id === t.id)));
+
+  ok('the duplicate is selected for editing', useEditor.getState().selectedBlockId === dup.id);
+
+  // editing a property inside the duplicate's own window must never touch the original's
+  // corresponding track — they're independent instances, not a shared reference
+  const idleTrack = PT().tracks.find((t) => t.blockId === idle.id)!;
+  const idleFirstKfBefore = JSON.stringify(idleTrack.keyframes[0]);
+  const dupWindowMidpoint = idle.durationMs + idle.durationMs / 2; // dup sits right after idle
+  useEditor.getState().setPlayhead(dupWindowMidpoint);
+  useEditor.getState().setValue(idleTrack.nodeId, idleTrack.property, 999, 'test');
+  ok('editing the duplicate\'s track does not mutate the original clip\'s keyframes',
+    JSON.stringify(PT().tracks.find((t) => t.id === idleTrack.id)!.keyframes[0]) === idleFirstKfBefore);
+  ok('the edit actually landed on the duplicate\'s own track',
+    PT().tracks.find((t) => t.blockId === dup.id && t.nodeId === idleTrack.nodeId && t.property === idleTrack.property)!
+      .keyframes.some((k) => k.value === 999));
+  useEditor.getState().undo();
+
+  const blocksEndAfter = PT().blocks.reduce((s, b) => s + b.durationMs, 0);
+  ok('duplicating extends the sequence by exactly the original\'s duration',
+    blocksEndAfter === PT().blocks.filter((b) => b.id !== dup.id).reduce((s, b) => s + b.durationMs, 0) + idle.durationMs);
+}
+
 // --- moveBlock: reordering drags its keyframes along, in one undo step ---------
 {
   const ed = useEditor.getState();
