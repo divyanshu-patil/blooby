@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useEditor } from '../core/store';
-import { valueAt } from '../core/scene';
+import { activeTrackFor, valueAt } from '../core/scene';
+import { activeTimeline } from '../core/types';
 import { NumberField, Panel, PropRow } from './bits';
 import type { RigNode } from '../core/types';
 
@@ -14,6 +15,7 @@ export function EyePanel() {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const setValue = useEditor((s) => s.setValue);
+  const toggleTrack = useEditor((s) => s.toggleTrack);
   const updateNode = useEditor((s) => s.updateNode);
   const select = useEditor((s) => s.select);
   const selection = useEditor((s) => s.selection);
@@ -33,6 +35,10 @@ export function EyePanel() {
   const setBoth = (property: string, value: number, label: string) => {
     for (const e of eyes) if (!e.eye.linkedToId) setValue(e.id, property, value, label);
   };
+  const toggleBoth = (property: string) => {
+    for (const e of eyes) if (!e.eye.linkedToId) toggleTrack(e.id, property);
+  };
+  const trackedLeft = (property: string) => !!activeTrackFor(activeTimeline(project), left.id, property, playhead);
 
   const setSeparation = (deg: number) => {
     if (left === right) { setValue(left.id, 'eye.distanceFromCenter', deg, 'sep'); return; }
@@ -60,26 +66,33 @@ export function EyePanel() {
           updateNode(right.id, (n) => { if (n.eye) n.eye.linkedToId = linked ? null : left.id; });
         }}>{linked ? 'Linked' : 'Unlinked'}</button>
     }>
-      <div ref={pad} className="pad" onPointerDown={onPad} onPointerMove={onPad}
-        role="slider" aria-label="Eye direction" aria-valuenow={Math.round(gazeYaw)} tabIndex={0}
-        onKeyDown={(e) => {
-          const step = e.shiftKey ? 8 : 2;
-          if (e.key === 'ArrowLeft') setBoth('surface.yaw', gazeYaw - step, 'gaze');
-          if (e.key === 'ArrowRight') setBoth('surface.yaw', gazeYaw + step, 'gaze');
-          if (e.key === 'ArrowUp') setBoth('surface.pitch', gazePitch - step, 'gaze');
-          if (e.key === 'ArrowDown') setBoth('surface.pitch', gazePitch + step, 'gaze');
-        }}>
-        <svg viewBox="-1 -1 2 2" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-          <line x1={-1} y1={0} x2={1} y2={0} stroke="rgba(255,255,255,.12)" strokeWidth={0.006} />
-          <line x1={0} y1={-1} x2={0} y2={1} stroke="rgba(255,255,255,.12)" strokeWidth={0.006} />
-          <circle cx={0} cy={0} r={0.55} fill="none" stroke="rgba(255,255,255,.1)" strokeWidth={0.006} />
-          <circle cx={clamp(gazeYaw / PAD_RANGE, -1, 1)} cy={clamp(gazePitch / PAD_RANGE, -1, 1)} r={0.075} fill="#fff" />
-        </svg>
+      <div style={{ position: 'relative' }}>
+        <div ref={pad} className="pad" onPointerDown={onPad} onPointerMove={onPad}
+          role="slider" aria-label="Eye direction" aria-valuenow={Math.round(gazeYaw)} tabIndex={0}
+          onKeyDown={(e) => {
+            const step = e.shiftKey ? 8 : 2;
+            if (e.key === 'ArrowLeft') setBoth('surface.yaw', gazeYaw - step, 'gaze');
+            if (e.key === 'ArrowRight') setBoth('surface.yaw', gazeYaw + step, 'gaze');
+            if (e.key === 'ArrowUp') setBoth('surface.pitch', gazePitch - step, 'gaze');
+            if (e.key === 'ArrowDown') setBoth('surface.pitch', gazePitch + step, 'gaze');
+          }}>
+          <svg viewBox="-1 -1 2 2" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+            <line x1={-1} y1={0} x2={1} y2={0} stroke="rgba(255,255,255,.12)" strokeWidth={0.006} />
+            <line x1={0} y1={-1} x2={0} y2={1} stroke="rgba(255,255,255,.12)" strokeWidth={0.006} />
+            <circle cx={0} cy={0} r={0.55} fill="none" stroke="rgba(255,255,255,.1)" strokeWidth={0.006} />
+            <circle cx={clamp(gazeYaw / PAD_RANGE, -1, 1)} cy={clamp(gazePitch / PAD_RANGE, -1, 1)} r={0.075} fill="#fff" />
+          </svg>
+        </div>
+        <button className="stopwatch" style={{ position: 'absolute', top: 6, left: 6, background: 'rgba(23,22,27,.55)' }}
+          aria-pressed={trackedLeft('surface.yaw') || trackedLeft('surface.pitch')}
+          title="Animate the gaze (yaw + pitch)"
+          onClick={() => { toggleBoth('surface.yaw'); toggleBoth('surface.pitch'); }} />
       </div>
       <p className="hint">Drag to aim the eyes. They ride the sphere, so the path curves and the far eye narrows.</p>
 
       <div className="prop">
-        <span />
+        <button className="stopwatch" aria-pressed={trackedLeft('eye.distanceFromCenter')} title="Animate distance apart"
+          onClick={() => toggleBoth('eye.distanceFromCenter')} />
         <label className="prop-label"><span className="t">Distance apart</span>
           <input type="range" min={0} max={60} step={0.5} value={separation} onChange={(e) => setSeparation(+e.target.value)} />
         </label>
@@ -87,7 +100,8 @@ export function EyePanel() {
       </div>
 
       <div className="prop">
-        <span />
+        <button className="stopwatch" aria-pressed={trackedLeft('eye.openness')} title="Animate openness"
+          onClick={() => toggleBoth('eye.openness')} />
         <label className="prop-label"><span className="t">Openness</span>
           <input type="range" min={0} max={1} step={0.01} value={num(left, 'eye.openness')}
             onChange={(e) => setBoth('eye.openness', +e.target.value, 'open')} />
@@ -96,7 +110,8 @@ export function EyePanel() {
       </div>
 
       <div className="prop">
-        <span />
+        <button className="stopwatch" aria-pressed={trackedLeft('transform.length')} title="Animate eye length"
+          onClick={() => toggleBoth('transform.length')} />
         <label className="prop-label"><span className="t">Eye length</span>
           <input type="range" min={0.2} max={3} step={0.01} value={num(left, 'transform.length')}
             onChange={(e) => setBoth('transform.length', +e.target.value, 'len')} />
@@ -105,7 +120,8 @@ export function EyePanel() {
       </div>
 
       <div className="prop">
-        <span />
+        <button className="stopwatch" aria-pressed={trackedLeft('transform.scale.x')} title="Animate eye width"
+          onClick={() => toggleBoth('transform.scale.x')} />
         <label className="prop-label"><span className="t">Eye width</span>
           <input type="range" min={0.2} max={2.5} step={0.01} value={num(left, 'transform.scale.x')}
             onChange={(e) => setBoth('transform.scale.x', +e.target.value, 'wide')} />

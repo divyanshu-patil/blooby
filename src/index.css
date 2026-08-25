@@ -68,6 +68,11 @@ body {
 
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; padding: 0; }
+button:disabled { cursor: not-allowed; }
+/* every other hand-rolled clickable that isn't a real <button> — a div acting as a tab,
+ * a keyframe marker, a native color swatch — needs the same pointer cursor a button gets
+ * for free, or it silently reads as non-interactive. */
+select, input[type='color'], .tl-tab, .kfd { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; border-radius: 4px; }
 
 /* ---- app frame ---------------------------------------------------------- */
@@ -248,6 +253,7 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06), 0 6px 24px -12px rgba(23, 22, 27, .5);
 }
 .stage-frame.on-light { --stage-ink: 23, 22, 27; }
+.stage-frame:fullscreen, .stage-frame.fullscreen { border-radius: 0; width: 100%; height: 100%; }
 /* transparent preview: the checker *is* the "nothing here" cue, matching the export */
 .stage-frame.checker {
   background-color: #d9d7dd;
@@ -311,11 +317,20 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
   padding: 7px 4px 6px;
   border: 1px solid var(--line-soft); border-radius: 6px; background: var(--field);
   font: 500 11px var(--ui);
+  cursor: pointer; position: relative;
   transition: border-color .12s, transform .12s;
 }
 .chip:hover { border-color: var(--signal); transform: translateY(-1px); }
 .chip:active { cursor: grabbing; }
 .chip .glyph { width: 100%; height: 42px; border-radius: 4px; background: var(--ink); display: block; }
+.chip-color {
+  position: absolute; top: 4px; right: 4px; width: 12px; height: 12px; padding: 0;
+  border: 1px solid rgba(23, 22, 27, .25); border-radius: 50%; background: none;
+  opacity: 0; transition: opacity .12s; z-index: 1;
+}
+.chip:hover .chip-color, .chip:focus-visible .chip-color { opacity: 1; }
+.chip-color::-webkit-color-swatch-wrapper { padding: 0; }
+.chip-color::-webkit-color-swatch { border: none; border-radius: 50%; }
 
 /* ---- timeline ----------------------------------------------------------- */
 .timeline { display: flex; flex-direction: column; gap: 8px; }
@@ -380,13 +395,13 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .add-blank-clip:hover { border-color: var(--signal); color: var(--signal); background: var(--signal-soft); }
 
 .block {
-  flex: none; width: 78px;
+  flex: none; width: 78px; min-width: 56px;
   display: flex; flex-direction: column; gap: 4px; align-items: center;
-  padding: 5px; border-radius: 6px; border: 1.5px solid transparent;
+  padding: 5px; border-radius: 6px; border: 1.5px solid transparent; border-top-width: 1.5px;
   background: var(--field);
   position: relative;
   cursor: grab;
-  transition: border-color .12s, opacity .12s;
+  transition: border-color .12s, opacity .12s, width .1s;
 }
 .block:active { cursor: grabbing; }
 .block:hover { border-color: var(--line); }
@@ -423,6 +438,14 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 }
 .block:hover .x { display: grid; }
 .block .tick { position: absolute; top: -8px; left: 50%; width: 2px; height: 5px; background: var(--signal); border-radius: 1px; }
+.block-color {
+  position: absolute; bottom: 3px; left: 3px; width: 12px; height: 12px; padding: 0;
+  border: 1px solid rgba(23, 22, 27, .25); border-radius: 50%; background: none;
+  opacity: 0; transition: opacity .12s; z-index: 3;
+}
+.block:hover .block-color, .block[data-selected='true'] .block-color { opacity: 1; }
+.block-color::-webkit-color-swatch-wrapper { padding: 0; }
+.block-color::-webkit-color-swatch { border: none; border-radius: 50%; }
 
 /* ---- tracks ------------------------------------------------------------- */
 .tracks { display: flex; flex: 1; min-height: 150px; overflow: auto; scrollbar-width: thin; }
@@ -431,14 +454,17 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
   position: sticky; left: 0; z-index: 2; background: var(--panel);
 }
 .track-lanes { flex: none; position: relative; }
+/* two bands stacked in one row: the clip-name band on top, the second/tick ruler below
+ * it — tall enough (30px, was 21px) that neither ever reads as glued to the other the
+ * way "Idle" and "0s" did sharing one 21px line with nothing separating them. */
 .ruler {
-  height: 21px; border-bottom: 1px solid var(--line-soft); position: relative;
+  height: 30px; border-bottom: 1px solid var(--line-soft); position: relative;
   font: 500 9.5px var(--mono); color: var(--muted);
   position: sticky; top: 0; z-index: 1; background: var(--panel);
 }
 .track-names .ruler { z-index: 3; }
-.ruler span { position: absolute; top: 5px; transform: translateX(3px); }
-.ruler i { position: absolute; top: 0; width: 1px; height: 5px; background: var(--line); }
+.ruler span { position: absolute; top: 17px; transform: translateX(3px); }
+.ruler i { position: absolute; top: 12px; width: 1px; height: 5px; background: var(--line); }
 
 .trow { height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 8px; font: 500 11px var(--ui); border-bottom: 1px solid rgba(206, 198, 182, .35); cursor: pointer; transition: opacity .12s, background .12s; }
 .trow[aria-selected='true'] { background: var(--signal-soft); }
@@ -484,7 +510,14 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .dur-end { position: absolute; top: 0; bottom: 0; width: 18px; margin-left: -9px; cursor: ew-resize; z-index: 4; }
 .dur-end::after { content: ''; position: absolute; top: 0; bottom: 0; left: 8px; width: 2px; background: var(--hot); opacity: .55; border-radius: 1px; }
 .dur-end:hover::after, .dur-end:active::after { opacity: 1; }
-.blockband { position: absolute; top: 0; height: 21px; border-left: 1px solid var(--line); font: 500 9px var(--mono); color: var(--muted); padding-left: 3px; overflow: hidden; }
+/* the top band of the now-two-band .ruler (see above) — the second/tick labels own the
+ * bottom band (top:17px), so a clip name at t=0 can never sit on the same line as "0s". */
+.blockband {
+  position: absolute; top: 0; height: 15px; border-left: 2px solid var(--line);
+  font: 600 9.5px var(--ui); color: var(--ink-2); padding: 2px 4px 0;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  display: flex; align-items: center;
+}
 
 /* ---- graph editor ------------------------------------------------------- */
 .graph { display: block; width: 100%; flex: 1; min-height: 0; cursor: crosshair; }

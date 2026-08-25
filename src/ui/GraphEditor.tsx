@@ -1,10 +1,19 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '../core/store';
 import { applyEasing, curveHandles } from '../core/easing';
-import { activeTimeline, PROP_LABEL, type Track } from '../core/types';
+import { activeTimeline, PROP_LABEL, type Project, type Track } from '../core/types';
+import { clipColor } from './Timeline';
 
 const PAD = { l: 40, r: 14, t: 14, b: 20 };
 const PALETTE = ['#2233e0', '#d9401f', '#2f9e57', '#a24bd6', '#c98a12', '#0f8ea3'];
+
+/** A track's own clip color when it has one, else the next unused fallback from the
+ * palette — so a colored clip's curves read the same accent everywhere, and an
+ * uncolored one still gets a distinct line instead of every track defaulting to blue. */
+function colorFor(project: Project, track: Track, index: number): string {
+  const block = track.blockId ? activeTimeline(project).blocks.find((b) => b.id === track.blockId) : undefined;
+  return clipColor(project, block) ?? PALETTE[index % PALETTE.length];
+}
 
 /**
  * Value-vs-time graph, After Effects style: keyframe points sit on the curve and the
@@ -87,7 +96,7 @@ export function GraphEditor({ tracks, selected, onSelect, focus, onToggleFocus, 
     }
 
     numeric.forEach((track, ti) => {
-      const col = PALETTE[ti % PALETTE.length];
+      const col = colorFor(project, track, ti);
       const keys = track.keyframes;
       if (!keys.length) return;
       const [ta, tb] = rangeOf(track.id);
@@ -243,7 +252,7 @@ export function GraphEditor({ tracks, selected, onSelect, focus, onToggleFocus, 
         <div className="graph-legend">
           {numeric.map((t, ti) => (
             <button key={t.id} className="graph-legend-item" data-dim={focus.size > 0 && !focus.has(t.id)}
-              style={{ '--dot': PALETTE[ti % PALETTE.length] } as React.CSSProperties}
+              style={{ '--dot': colorFor(project, t, ti) } as React.CSSProperties}
               title="Click to focus this curve · shift-click to focus several"
               onClick={(e) => onToggleFocus(t.id, e.shiftKey)}>
               <span className="dot" />

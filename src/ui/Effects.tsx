@@ -41,7 +41,7 @@ export function Effects() {
       <>
         <button className="btn sm" onClick={() => add('shake', target)}>+ Shake</button>
         <button className="btn sm" onClick={() => add('float', target)}>+ Float</button>
-        <button className="btn sm" onClick={() => add('stretch', project.rig.rootId)}>+ Stretch</button>
+        <button className="btn sm" onClick={() => add('stretch', target)}>+ Stretch</button>
       </>
     }>
       <div className="flex items-center gap-2 rounded-md border border-line-soft bg-field px-2.5 py-1.5 text-[11px]">
@@ -69,7 +69,7 @@ export function Effects() {
         <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, background: 'var(--field)', border: '1px solid var(--line-soft)', borderRadius: 6 }}>
           <div className="row">
             <strong style={{ font: '700 11px var(--display)', letterSpacing: '.1em', textTransform: 'uppercase' }}>{m.kind}</strong>
-            {m.kind === 'stretch' ? <span className="tag">whole rig</span> : <span className="tag">{nodeName(m.nodeId)}</span>}
+            <span className="tag">{nodeName(m.nodeId)}{m.kind === 'stretch' && m.nodeId === project.rig.rootId ? ' + all' : m.kind === 'stretch' ? ' + children' : ''}</span>
             <span className="spacer" />
             <button className="btn ghost sm icon" title="Remove" onClick={() => removeModifier(m.id)}>✕</button>
           </div>

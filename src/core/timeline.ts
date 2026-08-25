@@ -1,4 +1,4 @@
-import type { Block, Preset, Timeline, Track, Transition } from './types';
+import type { Block, EasingCurve, Preset, Timeline, Track, Transition } from './types';
 
 export function blockStarts(tl: Timeline): number[] {
   const out: number[] = [];
@@ -95,17 +95,33 @@ export function relayoutBlocks(tl: Timeline, next: Block[]): void {
 }
 
 /** The transition in effect at `t`, if any — active for its own `durationMs` starting
- * at the moment its incoming clip begins, never past into the clip after that. */
+ * at the moment its incoming clip begins, never past into the clip after that. Every seam
+ * morphs by default (an implicit `{DEFAULT_TRANSITION_MS, DEFAULT_TRANSITION_EASING}`) —
+ * an explicit `durationMs: 0` entry is the only way to opt a seam out into a hard cut. */
 export function activeTransitionAt(tl: Timeline, t: number): { transition: Transition; boundaryMs: number } | null {
-  if (!tl.transitions?.length) return null;
+  if (tl.blocks.length < 2) return null;
   const starts = blockStarts(tl);
   for (let i = 1; i < tl.blocks.length; i++) {
-    const transition = tl.transitions.find((x) => x.afterBlockId === tl.blocks[i - 1].id);
-    if (!transition) continue;
+    const afterId = tl.blocks[i - 1].id;
+    const explicit = explicitTransitionFor(tl, afterId);
+    if (explicit?.durationMs === 0) continue; // explicit hard cut — no blend
+    const transition = explicit ?? { id: `${afterId}~default`, afterBlockId: afterId, durationMs: DEFAULT_TRANSITION_MS, easing: DEFAULT_TRANSITION_EASING };
     const boundaryMs = starts[i];
     if (t >= boundaryMs && t < boundaryMs + transition.durationMs) return { transition, boundaryMs };
   }
   return null;
+}
+
+/** Every clip seam morphs by default (spec: "no direct value change") — an explicit
+ * Transition entry only needed to *customize* the duration/easing, or to opt out with
+ * `durationMs: 0` (an explicit hard cut, distinct from "never configured"). */
+export const DEFAULT_TRANSITION_MS = 250;
+export const DEFAULT_TRANSITION_EASING: EasingCurve = { type: 'preset', name: 'easeInOut' };
+
+/** The explicit Transition stored for this seam, if any — never the implicit default.
+ * Used by the UI to tell "auto" from "user-customized" from "explicitly a hard cut". */
+export function explicitTransitionFor(tl: Timeline, afterBlockId: string): Transition | undefined {
+  return tl.transitions?.find((x) => x.afterBlockId === afterBlockId);
 }
 
 export function evenDuration(tl: Timeline): number {

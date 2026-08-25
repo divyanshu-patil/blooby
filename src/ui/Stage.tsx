@@ -57,6 +57,17 @@ export function Stage() {
   const setValue = useEditor((s) => s.setValue);
   const [tool, setTool] = useState<'select' | 'turn'>('select');
   const [showGuides, setShowGuides] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+  const frameRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === frameRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else frameRef.current?.requestFullscreen();
+  };
   const [bg, setBg] = useState(() => { try { return localStorage.getItem('blooby.stageBg') || '#17161b'; } catch { return '#17161b'; } });
   const setBgPersist = (v: string) => { setBg(v); try { localStorage.setItem('blooby.stageBg', v); } catch { /* private mode */ } };
   const svgRef = useRef<SVGSVGElement>(null);
@@ -210,7 +221,7 @@ export function Stage() {
 
   const transparent = bg === 'transparent';
   return (
-    <div className={`stage-frame${transparent ? ' checker' : ''}${!transparent && isLight(bg) ? ' on-light' : ''}`}
+    <div ref={frameRef} className={`stage-frame${transparent ? ' checker' : ''}${!transparent && isLight(bg) ? ' on-light' : ''}${fullscreen ? ' fullscreen' : ''}`}
       style={transparent ? undefined : { background: bg }}>
       <svg ref={svgRef} viewBox={`0 0 ${COMP.width} ${COMP.height}`} preserveAspectRatio="xMidYMid meet"
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
@@ -244,6 +255,8 @@ export function Stage() {
         <button className="btn icon sm" aria-pressed={tool === 'turn'} title="Turn the head (T)" onClick={() => setTool('turn')}>◍</button>
         <button className="btn icon sm" aria-pressed={showGuides} title="Guides (G)" onClick={() => setShowGuides((v) => !v)}>⌗</button>
         <button className="btn icon sm" title="Recentre" onClick={reset}>⌂</button>
+        <button className="btn icon sm" aria-pressed={fullscreen} title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen preview'}
+          onClick={toggleFullscreen}>⛶</button>
         <div className="stage-bg" title="Preview background only — exports stay transparent">
           {BG_SWATCHES.map((c) => (
             <button key={c} className={`sw${c === 'transparent' ? ' checker' : ''}`} aria-pressed={bg === c}

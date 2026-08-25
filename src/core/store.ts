@@ -60,7 +60,12 @@ export interface Editor {
   toggleTrack: (nodeId: string, property: string) => void;
   addKeyframeNow: (nodeId: string, property: string) => void;
   moveKeyframe: (trackId: string, kfId: string, time: number) => void;
+  /** set several keyframes (from a multi-select drag) to explicit absolute times in one
+   * undo step — the caller (drag handler) computes each from its own pre-drag time plus
+   * a shared delta, so this never compounds across repeated pointermove events. */
+  moveKeyframes: (entries: { trackId: string; kfId: string; time: number }[]) => void;
   deleteKeyframe: (trackId: string, kfId: string) => void;
+  deleteKeyframes: (ids: { trackId: string; kfId: string }[]) => void;
   setEasing: (trackId: string, kfId: string, easing: EasingCurve) => void;
 
   addNode: (node: RigNode) => void;
@@ -80,6 +85,7 @@ export interface Editor {
   renameBlock: (id: string, name: string) => void;
   setBlockSpeed: (id: string, speed: number) => void;
   setBlockLoop: (id: string, loop: boolean) => void;
+  setBlockColor: (id: string, color: string | undefined) => void;
   moveBlock: (id: string, index: number) => void;
   setDurationMode: (m: 'custom' | 'even') => void;
   setTimelineLoop: (v: boolean) => void;
@@ -115,9 +121,12 @@ export interface Editor {
   removeModifier: (id: string) => void;
 
   captureExpression: (name: string) => void;
+  renameExpression: (id: string, name: string) => void;
   applyExpression: (expressionId: string, atMs: number, easing?: EasingCurve) => void;
   morphBetween: (fromId: string, toId: string, atMs: number, durationMs: number, easing: EasingCurve) => void;
   savePreset: (name: string, trackIds: string[], durationMs: number) => void;
+  renamePreset: (id: string, name: string) => void;
+  setPresetColor: (id: string, color: string | undefined) => void;
 
   /** `galleryId` ties this load to an existing gallery entry — omit it for a project
    * that has never been in the gallery before (an imported file, say) so it gets its
@@ -160,6 +169,15 @@ function autosave(p: Project) {
     const id = getActiveId();
     if (id) putEntry({ id, name: p.name, updatedAt: Date.now(), project: p }).catch(() => { /* IndexedDB unavailable — local/session work still stands */ });
   }, 400);
+}
+
+/** `name`, or `name 2` / `name 3` / … if it's already taken — never a silent collision
+ * between two captured poses or two presets sharing a label. */
+function uniqueName(base: string, taken: string[]): string {
+  if (!taken.includes(base)) return base;
+  let n = 2;
+  while (taken.includes(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
 }
 
 /** Snapshot values of every property that any expression could touch. */
@@ -291,12 +309,44 @@ export const useEditor = create<Editor>((set, get) => ({
     }, `move.${kfId}`);
   },
 
+  moveKeyframes(entries) {
+    if (!entries.length) return;
+    get().commit((p) => {
+      const tl = at(p);
+      const touched = new Set<string>();
+      for (const { trackId, kfId, time } of entries) {
+        const t = tl.tracks.find((x) => x.id === trackId);
+        const k = t?.keyframes.find((x) => x.id === kfId);
+        if (k) { k.time = Math.max(0, Math.round(time)); touched.add(trackId); }
+      }
+      for (const trackId of touched) tl.tracks.find((x) => x.id === trackId)?.keyframes.sort((a, b) => a.time - b.time);
+    }, `movemulti.${entries.map((i) => i.kfId).join(',')}`);
+  },
+
   deleteKeyframe(trackId, kfId) {
     get().commit((p) => {
       const t = at(p).tracks.find((x) => x.id === trackId);
       if (!t) return;
       t.keyframes = t.keyframes.filter((k) => k.id !== kfId);
       if (!t.keyframes.length) at(p).tracks = at(p).tracks.filter((x) => x.id !== trackId);
+    });
+  },
+
+  deleteKeyframes(ids) {
+    if (!ids.length) return;
+    get().commit((p) => {
+      const tl = at(p);
+      const byTrack = new Map<string, Set<string>>();
+      for (const { trackId, kfId } of ids) {
+        if (!byTrack.has(trackId)) byTrack.set(trackId, new Set());
+        byTrack.get(trackId)!.add(kfId);
+      }
+      for (const [trackId, kfIds] of byTrack) {
+        const t = tl.tracks.find((x) => x.id === trackId);
+        if (!t) continue;
+        t.keyframes = t.keyframes.filter((k) => !kfIds.has(k.id));
+      }
+      tl.tracks = tl.tracks.filter((t) => t.keyframes.length);
     });
   },
 
@@ -480,6 +530,13 @@ export const useEditor = create<Editor>((set, get) => ({
     });
   },
 
+  setBlockColor(id, color) {
+    get().commit((p) => {
+      const b = at(p).blocks.find((x) => x.id === id);
+      if (b) b.color = color;
+    });
+  },
+
   setTransition(afterBlockId, patch) {
     get().commit((p) => {
       const tl = at(p);
@@ -542,13 +599,18 @@ export const useEditor = create<Editor>((set, get) => ({
   },
 
   addTimeline(name) {
-    const tl = makeTimeline(name?.trim() || `Timeline ${get().project.timelines.length + 1}`);
+    const { project } = get();
+    const base = name?.trim() || `Timeline ${project.timelines.length + 1}`;
+    const tl = makeTimeline(uniqueName(base, project.timelines.map((t) => t.name)));
     get().commit((p) => { p.timelines.push(tl); p.activeTimelineId = tl.id; });
     set({ selection: [], playhead: 0 });
   },
 
   renameTimeline(id, name) {
-    get().commit((p) => { const tl = p.timelines.find((t) => t.id === id); if (tl && name.trim()) tl.name = name.trim(); }, `tlname.${id}`);
+    get().commit((p) => {
+      const tl = p.timelines.find((t) => t.id === id);
+      if (tl && name.trim()) tl.name = uniqueName(name.trim(), p.timelines.filter((t) => t.id !== id).map((t) => t.name));
+    }, `tlname.${id}`);
   },
 
   deleteTimeline(id) {
@@ -625,7 +687,17 @@ export const useEditor = create<Editor>((set, get) => ({
       }
     }
     for (const prop of ['camera.fov', 'camera.distance']) snapshot[snapshotKey(CAMERA_ID, prop)] = readProp(rig, CAMERA_ID, prop)!;
-    get().commit((p) => { p.expressions.push({ id: uid('x'), name, snapshot }); });
+    get().commit((p) => {
+      const unique = uniqueName(name, p.expressions.map((e) => e.name));
+      p.expressions.push({ id: uid('x'), name: unique, snapshot });
+    });
+  },
+
+  renameExpression(id, name) {
+    get().commit((p) => {
+      const x = p.expressions.find((e) => e.id === id);
+      if (x && name.trim()) x.name = uniqueName(name.trim(), p.expressions.filter((e) => e.id !== id).map((e) => e.name));
+    }, `xname.${id}`);
   },
 
   applyExpression(expressionId, atMs, easing = { type: 'preset', name: 'easeInOut' }) {
@@ -667,11 +739,22 @@ export const useEditor = create<Editor>((set, get) => ({
       if (!picked.length) return;
       const start = Math.min(...picked.flatMap((t) => t.keyframes.map((k) => k.time)));
       const preset: Preset = {
-        id: uid('p'), name, source: 'custom', durationMs,
+        id: uid('p'), name: uniqueName(name, p.presets.map((x) => x.name)), source: 'custom', durationMs,
         tracks: picked.map((t) => ({ id: uid('t'), nodeId: t.nodeId, property: t.property, keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })) })),
       };
       p.presets.push(preset);
     });
+  },
+
+  renamePreset(id, name) {
+    get().commit((p) => {
+      const x = p.presets.find((e) => e.id === id);
+      if (x && name.trim()) x.name = uniqueName(name.trim(), p.presets.filter((e) => e.id !== id).map((e) => e.name));
+    }, `pname.${id}`);
+  },
+
+  setPresetColor(id, color) {
+    get().commit((p) => { const x = p.presets.find((e) => e.id === id); if (x) x.color = color; });
   },
 
   loadProject(p, galleryId) {

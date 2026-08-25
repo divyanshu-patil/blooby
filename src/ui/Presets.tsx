@@ -19,6 +19,8 @@ function glyphScene(project: Project, preset: Preset) {
 export function Presets() {
   const project = useEditor((s) => s.project);
   const addBlock = useEditor((s) => s.addBlock);
+  const renamePreset = useEditor((s) => s.renamePreset);
+  const setPresetColor = useEditor((s) => s.setPresetColor);
   const [filter, setFilter] = useState<'all' | 'builtin' | 'custom'>('all');
   const list = project.presets.filter((p) => filter === 'all' || p.source === filter);
 
@@ -32,12 +34,25 @@ export function Presets() {
     }>
       <div className="chips">
         {list.map((preset) => (
-          <button key={preset.id} className="chip" draggable title={`Add ${preset.name} · ${(preset.durationMs / 1000).toFixed(1)}s`}
+          // a plain <button> can't nest the color swatch's own <input type="color"> without
+          // invalid/broken interactive-inside-interactive markup, so this one's a div
+          // acting as a button — role/tabIndex/onKeyDown restore what <button> gave for free.
+          <div key={preset.id} className="chip" draggable role="button" tabIndex={0}
+            title={`Add ${preset.name} · ${(preset.durationMs / 1000).toFixed(1)}s — double-click to rename`}
             onDragStart={(e) => { e.dataTransfer.setData('text/blooby-preset', preset.id); e.dataTransfer.effectAllowed = 'copy'; }}
-            onClick={() => addBlock(preset.id)}>
+            onClick={() => addBlock(preset.id)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addBlock(preset.id); } }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              const name = prompt('Rename preset', preset.name);
+              if (name?.trim()) renamePreset(preset.id, name);
+            }}>
+            <input type="color" className="chip-color" title="Accent color — shows on this preset's clips"
+              value={preset.color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setPresetColor(preset.id, e.target.value)} />
             <MascotThumb className="glyph" scene={glyphScene(project, preset)} view={COMP} />
             {preset.name}
-          </button>
+          </div>
         ))}
       </div>
       {!list.length && <p className="empty-note">Save a selection of tracks from the timeline to make one.</p>}
@@ -76,6 +91,7 @@ export function Expressions() {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const capture = useEditor((s) => s.captureExpression);
+  const renameExpression = useEditor((s) => s.renameExpression);
   const apply = useEditor((s) => s.applyExpression);
   const morph = useEditor((s) => s.morphBetween);
   const [name, setName] = useState('');
@@ -95,16 +111,27 @@ export function Expressions() {
           onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) { capture(name.trim()); setName(''); } }} />
         <button className="btn sm" disabled={!name.trim()} onClick={() => { capture(name.trim()); setName(''); }}>Capture</button>
       </div>
-      <div>
-        {project.expressions.map((x) => (
-          <div key={x.id} className="layer">
-            <span style={{ flex: 1 }}>{x.name}</span>
-            <span className="tag">{Object.keys(x.snapshot).length}</span>
-            <button className="btn sm" title={`Write keyframes at ${(playhead / 1000).toFixed(2)}s`}
-              onClick={() => apply(x.id, playhead)}>Set</button>
+      {project.expressions.length > 0 && (
+        <>
+          <span className="panel-title">Captured poses</span>
+          <div className="chips">
+            {project.expressions.map((x) => (
+              <button key={x.id} className="chip" title={`Apply "${x.name}" at ${(playhead / 1000).toFixed(2)}s — double-click to rename`}
+                onClick={() => apply(x.id, playhead)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  const next = prompt('Rename captured pose', x.name);
+                  if (next?.trim()) renameExpression(x.id, next);
+                }}>
+                <span className="glyph" style={{ display: 'grid', placeItems: 'center', font: '600 9px var(--mono)', color: 'var(--paper)' }}>
+                  {Object.keys(x.snapshot).length}
+                </span>
+                {x.name}
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
       <div className="divider" />
       <span className="panel-title">Morph</span>
       <div className="row">

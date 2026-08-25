@@ -8,7 +8,7 @@ import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
 import { defaultProject, makeTimeline } from './defaults';
-import { blockStarts, derivedDuration, relayoutBlocks } from './timeline';
+import { activeTransitionAt, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
@@ -434,8 +434,11 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   tl.transitions = [{ id: 'tx', afterBlockId: idle.id, durationMs: 400, easing: { type: 'linear' } }];
   const boundary = 2400;
 
-  // the same project with the transition stripped out — the "no blending at all" baseline
-  const noTransitionProj = { ...proj, timelines: proj.timelines.map((t) => (t.id === tl.id ? { ...t, transitions: [] } : t)) };
+  // the same project with the transition explicitly turned off — the "no blending at
+  // all" baseline. An *empty* transitions array no longer means this (every seam morphs
+  // by default now — see the dedicated default-transition test below), so this has to be
+  // an explicit durationMs:0 hard cut, the one real opt-out that exists.
+  const noTransitionProj = { ...proj, timelines: proj.timelines.map((t) => (t.id === tl.id ? { ...t, transitions: [{ id: 'none', afterBlockId: idle.id, durationMs: 0, easing: { type: 'linear' as const } }] } : t)) };
   const rawAtBoundary = evaluateRig(noTransitionProj, boundary);
 
   const atSeam = evaluateRig(proj, boundary); // progress 0 — must read as 100% outgoing
@@ -970,6 +973,117 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   // the looping second timeline gets no auto-advance guard — it never completes
   const sIdx = text.indexOf('s/mascot.json');
   ok('a .lottie was actually produced with a state machine entry', sIdx >= 0);
+}
+
+// --- default transition: every seam morphs even with zero explicit Transition entries --
+{
+  useEditor.getState().loadProject(defaultProject());
+  const idle = activeTimeline(useEditor.getState().project).blocks[0];
+  useEditor.getState().setPlayhead(100);
+  useEditor.getState().toggleTrack('body', 'transform.rotation'); // Idle doesn't already animate this
+  useEditor.getState().setValue('body', 'transform.rotation', 60, 'rot3');
+  // no setTransition call at all — tl.transitions is still untouched (undefined)
+
+  ok('activeTransitionAt finds an implicit default at an untouched seam',
+    !!activeTransitionAt(activeTimeline(useEditor.getState().project), 2400 + 10));
+  ok('explicitTransitionFor only reports what was actually stored, never the implicit default',
+    explicitTransitionFor(activeTimeline(useEditor.getState().project), idle.id) === undefined);
+
+  const seam = evaluateRig(useEditor.getState().project, 2400).nodes.body.transform.rotation;
+  const nearSeamDefault = evaluateRig(useEditor.getState().project, 2400 + 10).nodes.body.transform.rotation;
+  const mid = evaluateRig(useEditor.getState().project, 2400 + DEFAULT_TRANSITION_MS / 2).nodes.body.transform.rotation;
+  const end = evaluateRig(useEditor.getState().project, 2400 + DEFAULT_TRANSITION_MS + 5).nodes.body.transform.rotation;
+  ok('an untouched seam still morphs by default — no sudden cut, no explicit Transition needed',
+    Math.abs(seam - 60) < 1e-6 && nearSeamDefault > 40 && mid > 1 && mid < 59 && Math.abs(end) < 1e-6,
+    `seam=${seam} near=${nearSeamDefault} mid=${mid} end=${end}`);
+
+  // explicit durationMs:0 opts a seam back out into a real hard cut
+  useEditor.getState().setTransition(idle.id, { durationMs: 0 });
+  const nearSeamCut = evaluateRig(useEditor.getState().project, 2400 + 10).nodes.body.transform.rotation;
+  ok('an explicit durationMs:0 is a real hard cut, not just a very short morph',
+    Math.abs(nearSeamCut) < 1e-6, `default=${nearSeamDefault} cut=${nearSeamCut}`);
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- transform.scale cascades down the rig tree: scaling the body also scales the eyes -
+{
+  const proj = defaultProject();
+  const before = buildScene(proj.rig, { width: 720, height: 720 }).find((s) => s.id === 'eyeL')!;
+  const scaled: Rig = structuredClone(proj.rig);
+  scaled.nodes.body.transform.scale = { x: 1.5, y: 1.5 };
+  const after = buildScene(scaled, { width: 720, height: 720 }).find((s) => s.id === 'eyeL')!;
+  ok('scaling the body also scales its children (eyes), not just the body node itself',
+    Math.abs(after.w / before.w - 1.5) < 1e-6, `${after.w} vs ${before.w}`);
+
+  // three levels deep, ratio-based (not an absolute pixel count) so it can't depend on
+  // exactly what projectToScreen's own foreshortening happens to be for this rig shape
+  const mkNode = (id: string, parentId: string, scale: number): RigNode => ({
+    id, name: id, kind: 'primitive', parentId,
+    surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: 0, y: 0 } },
+    transform: { scale: { x: scale, y: scale }, rotation: 0 },
+    size: { x: 10, y: 10 }, color: { r: 0, g: 0, b: 0, a: 1 }, visible: true, zIndex: 0,
+    primitive: { shape: 'circle' },
+  });
+  const rigWithScaledGroup: Rig = structuredClone(proj.rig);
+  rigWithScaledGroup.nodes['g'] = mkNode('g', 'body', 2);
+  rigWithScaledGroup.nodes['gc'] = mkNode('gc', 'g', 1);
+  const gcScaled = buildScene(rigWithScaledGroup, { width: 720, height: 720 }).find((s) => s.id === 'gc')!.w;
+  const rigNoScaledGroup: Rig = structuredClone(rigWithScaledGroup);
+  rigNoScaledGroup.nodes['g'].transform.scale = { x: 1, y: 1 };
+  const gcUnscaled = buildScene(rigNoScaledGroup, { width: 720, height: 720 }).find((s) => s.id === 'gc')!.w;
+  ok('cascade multiplies through multiple ancestor levels, not just the immediate parent',
+    Math.abs(gcScaled / gcUnscaled - 2) < 1e-3, `${gcScaled} vs ${gcUnscaled}`);
+}
+
+// --- unique naming: captured poses and timelines auto-suffix on a name collision -------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const beforeCount = useEditor.getState().project.expressions.length;
+  useEditor.getState().captureExpression('Neutral'); // 'Neutral' is already a builtin expression
+  const names = useEditor.getState().project.expressions.map((e) => e.name);
+  ok('capturing a duplicate name gets a numeric suffix instead of colliding',
+    names.filter((n) => n === 'Neutral').length === 1 && names.includes('Neutral 2'), names.join(', '));
+  ok('exactly one new expression was added', useEditor.getState().project.expressions.length === beforeCount + 1);
+
+  useEditor.getState().addTimeline('Idle'); // 'Idle' is already the default timeline's name
+  const tlNames = useEditor.getState().project.timelines.map((t) => t.name);
+  ok('adding a timeline with a taken name gets a numeric suffix', tlNames.includes('Idle 2'), tlNames.join(', '));
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- batch keyframe move/delete: a multi-select drag/delete is one undo step -----------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const tl = activeTimeline(useEditor.getState().project);
+  const idleYaw = tl.tracks.find((t) => t.nodeId === 'body' && t.property === 'surface.yaw')!;
+  const idleOffsetY = tl.tracks.find((t) => t.nodeId === 'body' && t.property === 'flatOffset.y')!;
+
+  const moved = [
+    { trackId: idleYaw.id, kfId: idleYaw.keyframes[1].id, time: idleYaw.keyframes[1].time + 100 },
+    { trackId: idleOffsetY.id, kfId: idleOffsetY.keyframes[1].id, time: idleOffsetY.keyframes[1].time + 100 },
+  ];
+  const pastLen = useEditor.getState().past.length;
+  useEditor.getState().moveKeyframes(moved);
+  const afterMove = activeTimeline(useEditor.getState().project);
+  ok('moveKeyframes moves every entry across different tracks to its own explicit time',
+    afterMove.tracks.find((t) => t.id === idleYaw.id)!.keyframes.some((k) => k.id === moved[0].kfId && Math.abs(k.time - moved[0].time) < 1)
+    && afterMove.tracks.find((t) => t.id === idleOffsetY.id)!.keyframes.some((k) => k.id === moved[1].kfId && Math.abs(k.time - moved[1].time) < 1));
+  ok('a multi-keyframe move is exactly one undo step, not one per keyframe',
+    useEditor.getState().past.length === pastLen + 1);
+
+  const doomed = [
+    { trackId: idleYaw.id, kfId: idleYaw.keyframes[0].id },
+    { trackId: idleOffsetY.id, kfId: idleOffsetY.keyframes[0].id },
+  ];
+  useEditor.getState().deleteKeyframes(doomed);
+  const afterDelete = activeTimeline(useEditor.getState().project);
+  ok('deleteKeyframes removes every selected keyframe across different tracks in one call',
+    !afterDelete.tracks.find((t) => t.id === idleYaw.id)?.keyframes.some((k) => k.id === doomed[0].kfId)
+    && !afterDelete.tracks.find((t) => t.id === idleOffsetY.id)?.keyframes.some((k) => k.id === doomed[1].kfId));
+
+  useEditor.getState().loadProject(defaultProject());
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------

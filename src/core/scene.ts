@@ -79,17 +79,18 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number) {
   const gain = (m.amount / 100) * m.amplitude;
   if (gain === 0) return;
 
-  // unlike shake/float, stretch is never about one node — it pulses the whole rig
-  // (body and every mapped child) by a shared factor, so it walks all of them instead
-  // of targeting m.nodeId.
+  const node = rig.nodes[m.nodeId];
+  if (!node) return;
+
+  // stretch pulses one node's own scale.x/y — buildScene's own cascading scale (see
+  // `scaleOf`/`cum` there) carries that pulse down to every one of its children for free,
+  // so "the whole rig" is just what happens when the target is the root.
   if (m.kind === 'stretch') {
     const s = 1 + (gain / 100) * Math.sin(2 * Math.PI * m.frequency * tSec + (m.phase ?? 0));
-    for (const n of Object.values(rig.nodes)) n.transform.scale = { x: n.transform.scale.x * s, y: n.transform.scale.y * s };
+    node.transform.scale = { x: node.transform.scale.x * s, y: node.transform.scale.y * s };
     return;
   }
 
-  const node = rig.nodes[m.nodeId];
-  if (!node) return;
   const isRoot = node.id === rig.rootId || !node.surface.mapped;
   const bump = (path: string, d: number) => {
     const cur = getProp(node, path);
@@ -320,7 +321,16 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
     });
   }
 
-  const walk = (parent: RigNode, px: number, py: number, pr: number, R: number, headAngles: Vec2) => {
+  // a node's own transform.scale used to only ever size *itself* — a parent's scale never
+  // reached its children (buildScene's own w/h always came from `node.size` alone), so
+  // scaling the body up or down left every eye exactly the same size. `cum` threads the
+  // accumulated ancestor scale (geometric mean of x/y, so a non-uniform squash on one
+  // node doesn't warp a child's own aspect ratio) down the recursion — each node's actual
+  // drawn size is its own size × its own scale × everything above it, same principle the
+  // stretch modifier now relies on to affect "a node and all its children" from one dial.
+  const scaleOf = (n: RigNode) => Math.sqrt(Math.max(1e-6, n.transform.scale.x * n.transform.scale.y));
+
+  const walk = (parent: RigNode, px: number, py: number, pr: number, R: number, headAngles: Vec2, cum: number) => {
     for (const node of childrenOf(rig, parent.id)) {
       if (!node.visible) continue;
       const p = projectToScreen(node, rig, R, headAngles);
@@ -332,8 +342,8 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
       const ax = px + lx * cos - ly * sin;
       const ay = py + lx * sin + ly * cos;
 
-      const w = node.size.x * node.transform.scale.x * p.sx;
-      const h = eyeHeight(node) * node.transform.scale.y * p.sy;
+      const w = node.size.x * node.transform.scale.x * p.sx * cum;
+      const h = eyeHeight(node) * node.transform.scale.y * p.sy * cum;
       const rot = pr + node.transform.rotation;
 
       const color = p.alpha < 1 ? { ...node.color, a: node.color.a * p.alpha } : node.color;
@@ -343,11 +353,11 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
         const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
         out.push({ id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot, color, depth: p.depth, zIndex: node.zIndex });
       }
-      walk(node, ax, ay, rot, Math.max(w, h) / 2, { x: 0, y: 0 });
+      walk(node, ax, ay, rot, Math.max(w, h) / 2, { x: 0, y: 0 }, cum * scaleOf(node));
     }
   };
 
-  walk(root, cx, cy, roll, rx, head);
+  walk(root, cx, cy, roll, rx, head, scaleOf(root));
   out.sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
   return out;
 }

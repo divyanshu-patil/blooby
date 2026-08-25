@@ -3,13 +3,26 @@ import { createPortal } from 'react-dom';
 import { useEditor, keyframeTimes } from '../core/store';
 import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
-import { blockStarts, characteristicTime, fmtSec } from '../core/timeline';
+import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
-import { activeTimeline, PROP_LABEL, type Track, type Transition } from '../core/types';
+import { activeTimeline, PROP_LABEL, type Block, type Track, type Transition } from '../core/types';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
 import { NumberField } from './bits';
+
+const FPS_OPTIONS = [12, 15, 24, 25, 30, 50, 60];
+
+const kfKey = (trackId: string, kfId: string) => `${trackId} ${kfId}`;
+const parseKfKey = (key: string) => { const [trackId, kfId] = key.split(' '); return { trackId, kfId }; };
+
+/** The color a clip reads as everywhere (strip, track lane, graph) — its own override,
+ * else its source preset's, else undefined (no accent, exactly like before clip colors
+ * existed). Never the gallery/blank case's problem: those just show no accent either. */
+export function clipColor(project: { presets: { id: string; color?: string }[] }, block: Block | undefined): string | undefined {
+  if (!block) return undefined;
+  return block.color ?? project.presets.find((p) => p.id === block.presetId)?.color;
+}
 
 export function Timeline() {
   const project = useEditor((s) => s.project);
@@ -34,20 +47,32 @@ export function Timeline() {
   const setDurationMode = useEditor((s) => s.setDurationMode);
   const setTimelineDuration = useEditor((s) => s.setTimelineDuration);
   const moveKeyframe = useEditor((s) => s.moveKeyframe);
+  const moveKeyframes = useEditor((s) => s.moveKeyframes);
   const deleteKeyframe = useEditor((s) => s.deleteKeyframe);
+  const deleteKeyframes = useEditor((s) => s.deleteKeyframes);
   const setEasing = useEditor((s) => s.setEasing);
   const savePreset = useEditor((s) => s.savePreset);
+  const setBlockColor = useEditor((s) => s.setBlockColor);
   const commit = useEditor((s) => s.commit);
 
   const [view, setView] = useState<'tracks' | 'graph'>('tracks');
   const [zoom, setZoom] = useState(1);
-  const [sel, setSel] = useState<{ trackId: string; kfId: string } | null>(null);
+  const [stripZoom, setStripZoom] = useState(1);
+  const [isolatedBlockId, setIsolatedBlockId] = useState<string | null>(null);
+  // multi-select: every selected keyframe as `${trackId} ${kfId}`, click to replace,
+  // shift/cmd-click to add or remove one from the set. `sel` (below) is the *primary* one
+  // — the easing/curve editor in the transport only makes sense for exactly one at a time.
+  const [selKeys, setSelKeys] = useState<Set<string>>(new Set());
+  const sel = selKeys.size === 1 ? parseKfKey([...selKeys][0]) : null;
+  const setSel = (s: { trackId: string; kfId: string } | null) => setSelKeys(s ? new Set([kfKey(s.trackId, s.kfId)]) : new Set());
   const [curveOpen, setCurveOpen] = useState(false);
   useEffect(() => { if (!sel) setCurveOpen(false); }, [sel]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(760);
-  const kfDrag = useRef<{ trackId: string; kfId: string } | null>(null);
+  const [stripWidth, setStripWidth] = useState(600);
+  const kfDrag = useRef<{ keys: { trackId: string; kfId: string; startTime: number }[]; anchorStartTime: number } | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const resize = useRef<{ id: string; startX: number; startMs: number } | null>(null);
   const resizing = useRef(false);
@@ -72,13 +97,34 @@ export function Timeline() {
     return () => ro.disconnect();
   }, []);
 
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setStripWidth(Math.max(120, e.contentRect.width - 16)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // a selected clip can vanish out from under isolate mode (removed, or a different one
+  // picked) — never leave the timeline silently stuck showing a dead clip's empty tracks.
+  useEffect(() => {
+    if (isolatedBlockId && selectedBlockId !== isolatedBlockId) setIsolatedBlockId(null);
+  }, [selectedBlockId, isolatedBlockId]);
+
   const duration = Math.max(tl.timelineDurationMs, 1);
   const pxPerMs = ((width - 12) / duration) * zoom;
   const laneW = duration * pxPerMs;
+  // clip width in the strip is proportional to its own duration, fit to the strip's own
+  // viewport at stripZoom=1 (a literal "resize to viewport") — the +/- buttons scale that
+  // baseline, same convention as the Tracks/Graph zoom just above it.
+  const blockPxPerMs = (stripWidth / Math.max(blocksEnd(tl), 1)) * stripZoom;
 
   const visible = useMemo(
-    () => (selection.length ? tl.tracks.filter((t) => selection.includes(t.nodeId)) : tl.tracks),
-    [tl.tracks, selection],
+    () => {
+      const byNode = selection.length ? tl.tracks.filter((t) => selection.includes(t.nodeId)) : tl.tracks;
+      return isolatedBlockId ? byNode.filter((t) => t.blockId === isolatedBlockId) : byNode;
+    },
+    [tl.tracks, selection, isolatedBlockId],
   );
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
   const starts = blockStarts(tl);
@@ -118,6 +164,8 @@ export function Timeline() {
   };
 
   const selKf = sel && tl.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
+  const isolatedBlock = isolatedBlockId ? tl.blocks.find((b) => b.id === isolatedBlockId) : null;
+  const colorForBlockId = (id: string | undefined) => (id ? clipColor(project, tl.blocks.find((b) => b.id === id)) : undefined);
 
   const tickStep = duration > 12000 ? 2000 : duration > 5000 ? 1000 : 500;
   const activeBlock = starts.findIndex((s, i) => playhead >= s && playhead < s + tl.blocks[i].durationMs);
@@ -154,6 +202,11 @@ export function Timeline() {
             <button className="btn sm" onClick={() => { deleteKeyframe(sel!.trackId, sel!.kfId); setSel(null); }}>Delete key</button>
           </>
         )}
+        {!sel && selKeys.size > 1 && (
+          <button className="btn sm" onClick={() => { deleteKeyframes([...selKeys].map(parseKfKey)); setSelKeys(new Set()); }}>
+            Delete {selKeys.size} keys
+          </button>
+        )}
         <div className="seg">
           <button aria-pressed={view === 'tracks'} onClick={() => setView('tracks')}>Tracks</button>
           <button aria-pressed={view === 'graph'} onClick={() => setView('graph')}>Graph</button>
@@ -186,7 +239,18 @@ export function Timeline() {
           onClick={() => commit((p) => { const t2 = activeTimeline(p); t2.loop = !t2.loop; }, 'projloop')}>
           {tl.loop ? 'Loops' : 'Loop'}
         </button>
-        <div className={tl.blocks.length ? 'strip' : 'strip empty'}
+        <div style={{ display: 'flex', alignSelf: 'center', gap: 2 }}>
+          <button className="btn icon sm" title="Shrink clips (fit more of the strip in view)" onClick={() => setStripZoom((z) => Math.max(0.25, z / 1.4))}>−</button>
+          <button className="btn icon sm" title="Grow clips" onClick={() => setStripZoom((z) => Math.min(6, z * 1.4))}>+</button>
+        </div>
+        {isolatedBlock && (
+          <button className="btn sm" style={{ alignSelf: 'center' }}
+            title="Tracks/Graph below are showing only this clip's own keyframes"
+            onClick={() => setIsolatedBlockId(null)}>
+            Editing "{isolatedBlock.name}" only · show all
+          </button>
+        )}
+        <div ref={stripRef} className={tl.blocks.length ? 'strip' : 'strip empty'}
           onDragOver={(e) => {
             if (e.dataTransfer.types.includes('text/blooby-preset') || e.dataTransfer.types.includes('text/blooby-block-reorder')) {
               e.preventDefault();
@@ -212,11 +276,13 @@ export function Timeline() {
           {tl.blocks.map((b, i) => {
             const start = starts[i];
             const within = playhead >= start && playhead < start + b.durationMs;
+            const color = clipColor(project, b);
             return (
               <Fragment key={b.id}>
               <div className="block" data-active={activeBlock === i} data-dragging={dragging === b.id}
                 data-selected={selectedBlockId === b.id}
-                draggable title="Drag to reorder · click to select for editing (effects, inspector)"
+                style={{ width: Math.max(56, b.durationMs * blockPxPerMs), ...(color ? { borderTopColor: color, borderTopWidth: 3 } : {}) }}
+                draggable title="Drag to reorder · click to select for editing (effects, inspector) · double-click to isolate its keyframes below"
                 onDragStart={(e) => {
                   // a resize just starting on the child handle still targets this
                   // element for native dragstart (per spec, the ancestor draggable
@@ -226,9 +292,17 @@ export function Timeline() {
                   e.dataTransfer.setData('text/blooby-block-reorder', b.id); e.dataTransfer.effectAllowed = 'move'; setDragging(b.id);
                 }}
                 onDragEnd={() => setDragging(null)}
-                onClick={() => { setPlayhead(start); selectBlock(selectedBlockId === b.id ? null : b.id); }}>
+                onClick={() => {
+                  setPlayhead(start);
+                  if (isolatedBlockId && isolatedBlockId !== b.id) setIsolatedBlockId(null);
+                  selectBlock(selectedBlockId === b.id ? null : b.id);
+                }}
+                onDoubleClick={() => { setPlayhead(start); selectBlock(b.id); setIsolatedBlockId(b.id); }}>
                 {within && <span className="tick" style={{ left: `${((playhead - start) / b.durationMs) * 100}%` }} />}
                 <button className="x" title="Remove block" onClick={(e) => { e.stopPropagation(); removeBlock(b.id); }}>✕</button>
+                <input type="color" className="block-color" title="Clip accent color — shows in the strip, track lanes and graph"
+                  value={color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => { e.stopPropagation(); setBlockColor(b.id, e.target.value); }} />
                 <MascotThumb className="thumb" scene={thumbs[i]} view={COMP} />
                 <span style={{ font: '600 10.5px var(--ui)', width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                 <DurInput ms={b.durationMs} label={`${b.name} duration`} locked={tl.durationMode === 'even'}
@@ -244,8 +318,7 @@ export function Timeline() {
                     onPointerMove={(e) => {
                       const r = resize.current;
                       if (!r || r.id !== b.id) return;
-                      const pxPerMsNow = (width - 12) / Math.max(tl.timelineDurationMs, 1) * zoom;
-                      const next = r.startMs + (e.clientX - r.startX) / pxPerMsNow;
+                      const next = r.startMs + (e.clientX - r.startX) / blockPxPerMs;
                       setBlockDuration(b.id, Math.max(60, next));
                     }}
                     onPointerUp={() => { resize.current = null; resizing.current = false; }}
@@ -254,7 +327,7 @@ export function Timeline() {
               </div>
               {i < tl.blocks.length - 1 && (
                 <TransitionConnector
-                  transition={tl.transitions?.find((x) => x.afterBlockId === b.id)}
+                  transition={explicitTransitionFor(tl, b.id)}
                   onChange={(patch) => setTransition(b.id, patch)}
                   onRemove={() => removeTransition(b.id)} />
               )}
@@ -275,7 +348,9 @@ export function Timeline() {
             <div className="track-names">
               <div className="ruler" style={{ paddingLeft: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ position: 'static', transform: 'none' }}>
-                  {selection.length ? `${visible.length} track${visible.length === 1 ? '' : 's'} · selected` : `${tl.tracks.length} tracks`}
+                  {selection.length || isolatedBlockId
+                    ? `${visible.length} track${visible.length === 1 ? '' : 's'}${selection.length ? ' · selected' : ''}`
+                    : `${tl.tracks.length} tracks`}
                 </span>
                 {focus.size > 0 && (
                   <button className="btn ghost sm" style={{ height: 18, padding: '0 6px', fontSize: 10 }}
@@ -290,6 +365,7 @@ export function Timeline() {
                   <div key={t.id} style={{ display: 'contents' }}>
                     <div className="trow" aria-selected={sel?.trackId === t.id}
                       data-focused={focus.has(t.id)} data-dim={dimmed(t.id)}
+                      style={!focus.has(t.id) && colorForBlockId(t.blockId) ? { boxShadow: `inset 2.5px 0 0 ${colorForBlockId(t.blockId)}` } : undefined}
                       title="Click to focus this property in Tracks and Graph · shift-click to focus several"
                       onClick={(e) => toggleFocus(t.id, e.shiftKey)}>
                       {numeric ? (
@@ -314,7 +390,10 @@ export function Timeline() {
               <div style={{ position: 'relative' }}>
                 <div className="ruler">
                   {tl.blocks.map((b, i) => (
-                    <div key={b.id} className="blockband" style={{ left: starts[i] * pxPerMs, width: b.durationMs * pxPerMs }}>{b.name}</div>
+                    <div key={b.id} className="blockband" title={b.name}
+                      style={{ left: starts[i] * pxPerMs, width: b.durationMs * pxPerMs, borderLeftColor: clipColor(project, b) || undefined }}>
+                      {b.name}
+                    </div>
                   ))}
                   {Array.from({ length: Math.floor(duration / tickStep) + 1 }, (_, i) => i * tickStep).map((t) => (
                     <span key={t} style={{ left: t * pxPerMs }}>{(t / 1000).toFixed(t % 1000 ? 1 : 0)}s</span>
@@ -329,25 +408,43 @@ export function Timeline() {
                           <span className="seg-fill" style={{ left: t.keyframes[0].time * pxPerMs, width: (t.keyframes[t.keyframes.length - 1].time - t.keyframes[0].time) * pxPerMs }} />
                         )}
                         {t.keyframes.map((k) => (
-                          <span key={k.id} className="kfd" data-sel={sel?.kfId === k.id} data-shape={easingShape(k.easingOut)}
+                          <span key={k.id} className="kfd" data-sel={selKeys.has(kfKey(t.id, k.id))} data-shape={easingShape(k.easingOut)}
                             style={{ left: k.time * pxPerMs }}
-                            title={`${(k.time / 1000).toFixed(2)}s · ${easingLabel(k.easingOut)}`}
+                            title={`${(k.time / 1000).toFixed(2)}s · ${easingLabel(k.easingOut)} — shift/cmd-click to select several`}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               (e.target as Element).setPointerCapture?.(e.pointerId);
-                              setSel({ trackId: t.id, kfId: k.id });
-                              kfDrag.current = { trackId: t.id, kfId: k.id };
+                              const key = kfKey(t.id, k.id);
+                              const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+                              let next: Set<string>;
+                              if (additive) { next = new Set(selKeys); next.has(key) ? next.delete(key) : next.add(key); }
+                              else next = selKeys.has(key) && selKeys.size > 1 ? new Set(selKeys) : new Set([key]);
+                              setSelKeys(next);
+                              if (!next.has(key)) { kfDrag.current = null; return; }
+                              const group = [...next].map(parseKfKey).map(({ trackId, kfId }) => {
+                                const kf = tl.tracks.find((x) => x.id === trackId)?.keyframes.find((x) => x.id === kfId);
+                                return { trackId, kfId, startTime: kf?.time ?? 0 };
+                              });
+                              kfDrag.current = { keys: group, anchorStartTime: k.time };
                             }}
                             onPointerMove={(e) => {
-                              if (!kfDrag.current) return;
+                              const d = kfDrag.current;
+                              if (!d) return;
                               e.stopPropagation();
                               const r = lanesRef.current!.getBoundingClientRect();
                               const raw = (e.clientX - r.left) / pxPerMs;
-                              const snap = [...jumps, playhead].find((j) => Math.abs(j - raw) < 6 / pxPerMs && Math.abs(j - k.time) > 0.5);
-                              moveKeyframe(t.id, k.id, snap ?? raw);
+                              const snap = [...jumps, playhead].find((j) => Math.abs(j - raw) < 6 / pxPerMs && Math.abs(j - d.anchorStartTime) > 0.5);
+                              const target = snap ?? raw;
+                              const delta = target - d.anchorStartTime;
+                              if (d.keys.length > 1) moveKeyframes(d.keys.map((x) => ({ trackId: x.trackId, kfId: x.kfId, time: x.startTime + delta })));
+                              else moveKeyframe(d.keys[0].trackId, d.keys[0].kfId, target);
                             }}
                             onPointerUp={() => { kfDrag.current = null; }}
-                            onDoubleClick={() => { deleteKeyframe(t.id, k.id); setSel(null); }} />
+                            onDoubleClick={() => {
+                              if (selKeys.size > 1 && selKeys.has(kfKey(t.id, k.id))) deleteKeyframes([...selKeys].map(parseKfKey));
+                              else deleteKeyframe(t.id, k.id);
+                              setSelKeys(new Set());
+                            }} />
                         ))}
                       </div>
                       {expanded.has(t.id) && numeric && (
@@ -404,14 +501,18 @@ function DurInput({ ms, label, locked, onCommit }: { ms: number; label: string; 
 
 /**
  * The visible, editable seam between two clips (spec §9) — never invisible metadata.
- * A faint "›" means no transition; click it to create a default one and open the editor.
- * A filled diamond means one exists; click to reopen, edit duration/easing, or remove it.
+ * Every seam morphs by default now (no more silent hard cuts), so this reads three states:
+ * a faint "⋯" means the implicit default (250ms easeInOut, nothing stored yet) is doing
+ * the work; a filled "◆" means someone customized it; a hollow "–" means it was explicitly
+ * turned off (`durationMs: 0`) for an intentional hard cut, the one opt-out that exists.
  */
 function TransitionConnector({ transition, onChange, onRemove }: {
   transition: Transition | undefined;
   onChange: (patch: Partial<Pick<Transition, 'durationMs' | 'easing'>>) => void;
   onRemove: () => void;
 }) {
+  const isNone = transition?.durationMs === 0;
+  const effective = transition ?? { durationMs: DEFAULT_TRANSITION_MS, easing: DEFAULT_TRANSITION_EASING };
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btn = useRef<HTMLButtonElement>(null);
@@ -442,11 +543,13 @@ function TransitionConnector({ transition, onChange, onRemove }: {
   return (
     <div className="flex w-[22px] flex-none items-center justify-center self-stretch">
       <button ref={btn}
-        className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] leading-none transition-colors ${transition
-          ? 'border-signal bg-signal-soft text-signal' : 'border-line text-muted hover:border-ink-2 hover:text-ink-2'}`}
-        title={transition ? `Transition: ${easingLabel(transition.easing)} · ${(transition.durationMs / 1000).toFixed(2)}s — click to edit` : 'Add a transition between these two clips'}
-        onClick={(e) => { e.stopPropagation(); if (!transition) onChange({}); setOpen((v) => !v); }}>
-        {transition ? '◆' : '›'}
+        className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] leading-none transition-colors ${isNone
+          ? 'border-line text-muted hover:border-ink-2 hover:text-ink-2'
+          : transition ? 'border-signal bg-signal-soft text-signal' : 'border-line-soft text-muted/70 hover:border-ink-2 hover:text-ink-2'}`}
+        title={isNone ? 'Hard cut — no morph. Click to change.'
+          : `Transition: ${easingLabel(effective.easing)} · ${(effective.durationMs / 1000).toFixed(2)}s${transition ? '' : ' (default)'} — click to edit`}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}>
+        {isNone ? '–' : transition ? '◆' : '⋯'}
       </button>
       {open && createPortal(
         <div ref={popover} className="fixed z-50 -translate-x-1/2" style={{ top: pos.top, left: pos.left }}
@@ -454,19 +557,29 @@ function TransitionConnector({ transition, onChange, onRemove }: {
           <div className="flex flex-col gap-2 rounded-lg border border-line-soft bg-panel p-2.5 shadow-lg">
             <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted">
               <span className="flex-1 text-ink-2">Transition</span>
-              <span>duration</span>
-              <input type="number" min={20} step={20} className="w-14 rounded border border-line bg-field px-1 py-0.5 text-[11px] text-ink"
-                value={transition?.durationMs ?? 300}
-                onChange={(e) => onChange({ durationMs: Math.max(20, Math.round(+e.target.value)) })} />
-              <span>ms</span>
+              {!isNone && (
+                <>
+                  <span>duration</span>
+                  <input type="number" min={20} step={20} className="w-14 rounded border border-line bg-field px-1 py-0.5 text-[11px] text-ink"
+                    value={effective.durationMs}
+                    onChange={(e) => onChange({ durationMs: Math.max(20, Math.round(+e.target.value)) })} />
+                  <span>ms</span>
+                </>
+              )}
             </div>
-            {transition && <CurveEditor value={transition.easing} onChange={(easing) => onChange({ easing })} />}
-            {transition && (
+            {!isNone && <CurveEditor value={effective.easing} onChange={(easing) => onChange({ easing })} />}
+            <div className="flex items-center gap-2">
+              {transition && !isNone && (
+                <button className="text-[10px] font-medium text-muted underline decoration-dotted underline-offset-2 self-start"
+                  onClick={() => { onRemove(); setOpen(false); }}>
+                  Reset to default
+                </button>
+              )}
               <button className="text-[10px] font-medium text-hot underline decoration-dotted underline-offset-2 self-start"
-                onClick={() => { onRemove(); setOpen(false); }}>
-                Remove transition
+                onClick={() => { isNone ? onRemove() : onChange({ durationMs: 0 }); setOpen(false); }}>
+                {isNone ? 'Turn morphing back on' : 'None — hard cut'}
               </button>
-            )}
+            </div>
           </div>
         </div>,
         document.body,
@@ -511,10 +624,16 @@ function Sparkline({ track, width, height, pxPerMs }: { track: Track; width: num
 export function DurationField() {
   const project = useEditor((s) => s.project);
   const commit = useEditor((s) => s.commit);
+  const setFps = (v: number) => commit((p) => { p.fps = Math.min(60, Math.max(6, Math.round(v))); }, 'fps');
+  const isStandard = FPS_OPTIONS.includes(project.fps);
   return (
     <div className="fps" title="Frames per second — the rate every export bakes at">
       <span className="prop-label"><span className="t">fps</span></span>
-      <NumberField value={project.fps} onChange={(v) => commit((p) => { p.fps = Math.min(60, Math.max(6, Math.round(v))); })} />
+      <select className="sel" value={isStandard ? project.fps : 'custom'}
+        onChange={(e) => { if (e.target.value !== 'custom') setFps(+e.target.value); }}>
+        {FPS_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+        {!isStandard && <option value="custom">{project.fps} (custom)</option>}
+      </select>
     </div>
   );
 }

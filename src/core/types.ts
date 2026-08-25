@@ -108,6 +108,10 @@ export interface Preset {
   durationMs: number;
   tracks: Track[];
   thumbnail?: string;
+  /** an identifying accent — shown on the preset's chip, and on every clip/track/graph
+   * line it drives, so a busy timeline reads at a glance instead of every clip looking
+   * the same. Undefined means "no accent", the same as every preset before this existed. */
+  color?: string;
 }
 
 /** One placed preset instance on the strip (§7) — a clip instance in spec terms: the
@@ -132,6 +136,9 @@ export interface Block {
    * never a crash. Changing `timelineId` (via the clip inspector) re-copies from that
    * timeline instead — the gallery project itself is only ever read, never modified. */
   gallerySource?: { galleryId: string; galleryName: string; timelineId: string; timelineName: string };
+  /** overrides the source preset's own color for this instance — unset means "use the
+   * preset's color", same fallback a gallery/blank clip (no preset color to inherit) needs. */
+  color?: string;
 }
 
 /** How one clip blends into the next. Lives on the *incoming* clip's side of the seam —
