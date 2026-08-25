@@ -13,10 +13,11 @@ import { ExportBar } from './ui/ExportBar';
 import { Split } from './ui/Resizable';
 import { TimelineTabs } from './ui/TimelineTabs';
 import { Gallery, openGallery } from './ui/Gallery';
+import { StateMachine } from './ui/StateMachine';
 import { activeTimeline } from './core/types';
 import type { Project } from './core/types';
 
-type Tab = 'node' | 'eyes' | 'fx' | 'ai';
+type Tab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
 
 export default function App() {
   const project = useEditor((s) => s.project);
@@ -40,10 +41,17 @@ export default function App() {
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
-      const { playhead, project: p } = useEditor.getState();
+      const state = useEditor.getState();
+      const { playhead, project: p, pendingStateChange } = state;
       const duration = activeTimeline(p).timelineDurationMs;
       let t = playhead + (now - last);
       last = now;
+      // a scheduled state.enableState(name, {at}) fires the instant playback reaches it
+      if (pendingStateChange && t >= pendingStateChange.atMs) {
+        state.setState(pendingStateChange.timelineId, { duration: pendingStateChange.durationMs, easing: pendingStateChange.easing });
+        raf = requestAnimationFrame(tick);
+        return;
+      }
       if (t >= duration) {
         if (loop) t = t % duration;
         else { setPlayhead(duration); setPlaying(false); return; }
@@ -125,9 +133,9 @@ export default function App() {
               { min: 240, max: 560, content: (
                 <div className="rail rail-right">
                   <div className="tabs">
-                    {(['node', 'eyes', 'fx', 'ai'] as Tab[]).map((t) => (
+                    {(['node', 'eyes', 'fx', 'states', 'ai'] as Tab[]).map((t) => (
                       <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
-                        {t === 'node' ? (selectedBlockId ? 'Clip' : 'Node') : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : 'Copilot'}
+                        {t === 'node' ? (selectedBlockId ? 'Clip' : 'Node') : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : t === 'states' ? 'States' : 'Copilot'}
                       </button>
                     ))}
                   </div>
@@ -147,6 +155,7 @@ export default function App() {
                         { min: 140, content: <CameraPanel /> },
                       ]} />
                     )}
+                    {tab === 'states' && <StateMachine />}
                     {tab === 'ai' && <Copilot />}
                   </div>
                 </div>

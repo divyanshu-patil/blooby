@@ -5,7 +5,7 @@ import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
 import { getCameraProp, getProp, PROP_RANGE, readProp, setCameraProp, setProp, writeProp } from './props';
 import { activeTimeline } from './types';
 import { activeTransitionAt, blockStarts } from './timeline';
-import type { ColorStop, KeyValue, Modifier, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
+import type { ColorStop, EasingCurve, KeyValue, Modifier, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
 const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
@@ -239,6 +239,20 @@ export function evaluateRig(project: Project, timeMs: number): Rig {
   // sliding to 100% incoming (`rig`, already evaluated live above) as progress reaches 1.
   blendRigInto(rig, outgoing, progress);
   return rig;
+}
+
+/**
+ * Preview-only: blends a captured outgoing rig toward the live evaluation of `project` at
+ * `timeMs`, by `progress` (0 = entirely `fromRig`, 1 = entirely live) eased by `easing`.
+ * This is the same runtime-blend principle as evaluateRig's clip transitions, one level up
+ * — a *state* (timeline) switch, driven by the state machine's setState/enableState rather
+ * than a fixed position on one timeline, so it can't be expressed as a pure function of
+ * (project, time) the way a clip transition can. Never used for export/baking.
+ */
+export function evaluateWithTransition(project: Project, timeMs: number, fromRig: Rig, progress: number, easing: EasingCurve): Rig {
+  const live = evaluateRig(project, timeMs);
+  blendRigInto(live, fromRig, applyEasing(easing, Math.min(1, Math.max(0, progress))));
+  return live;
 }
 
 /** Everything the renderer and the exporter need. Absolute, flattened, no nesting. */

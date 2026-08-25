@@ -4,7 +4,7 @@ import { readProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
 import { blocksEnd, blockStarts, derivedDuration, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
-import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, RigNode, Timeline, Track, Transition } from './types';
+import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
@@ -29,6 +29,16 @@ export interface Editor {
   future: Project[];
   lastLabel: string;
   lastAt: number;
+
+  /** the timeline active immediately before the last setState/enableState switch — what
+   * returnToPreviousState targets. Not undo history; switching states isn't undoable. */
+  previousTimelineId: string | null;
+  /** a state switch requested with `at` still in the future — checked once per playback
+   * frame in App.tsx's tick and fired the instant the playhead reaches it. */
+  pendingStateChange: { timelineId: string; atMs: number; durationMs: number; easing: EasingCurve } | null;
+  /** an in-progress blended state switch — Stage.tsx (preview only, never export/baking)
+   * blends this captured pose toward the new timeline's live animation as it plays out. */
+  stateTransition: { fromRig: Rig; durationMs: number; easing: EasingCurve; startedAtMs: number } | null;
 
   commit: (fn: (p: Project) => void, label?: string) => void;
   undo: () => void;
@@ -78,6 +88,21 @@ export interface Editor {
   renameTimeline: (id: string, name: string) => void;
   deleteTimeline: (id: string) => void;
   setActiveTimeline: (id: string) => void;
+
+  /**
+   * Programmatic state-machine control (spec §14) — each Timeline is a "state" (matching
+   * the dotLottie export, where every timeline already becomes one exported state). The
+   * intended public surface: setState for an immediate or blended switch, enableState as
+   * the scheduled-at-a-future-moment alias, returnToPreviousState, cancelScheduledState.
+   * Matched by name (case-insensitive) or id, so `setState("happy")` reads the way the
+   * spec's own examples do. Also mirrored onto window.blooby for host-app / console use —
+   * see main.tsx — so runtime control never requires reaching into editor internals.
+   */
+  setState: (nameOrId: string, opts?: { at?: number; duration?: number; easing?: EasingCurve }) => void;
+  enableState: (nameOrId: string, opts?: { at?: number; duration?: number; easing?: EasingCurve }) => void;
+  returnToPreviousState: (opts?: { duration?: number; easing?: EasingCurve }) => void;
+  cancelScheduledState: () => void;
+  clearStateTransition: () => void;
 
   addModifier: (m: Omit<Modifier, 'id'>) => void;
   updateModifier: (id: string, fn: (m: Modifier) => void) => void;
@@ -151,6 +176,9 @@ export const useEditor = create<Editor>((set, get) => ({
   future: [],
   lastLabel: '',
   lastAt: 0,
+  previousTimelineId: null,
+  pendingStateChange: null,
+  stateTransition: null,
 
   commit(fn, label = '') {
     const { project, past, lastLabel, lastAt } = get();
@@ -538,9 +566,51 @@ export const useEditor = create<Editor>((set, get) => ({
   setActiveTimeline(id) {
     const { project } = get();
     if (!project.timelines.some((t) => t.id === id)) return;
+    const prevId = project.activeTimelineId;
     get().commit((p) => { p.activeTimelineId = id; });
-    set({ selection: [], playhead: 0, selectedBlockId: null });
+    // tracked here too (not just setState) so returnToPreviousState reflects a manual
+    // tab click the same as a programmatic switch — "previous" means whatever was active
+    // right before this one, regardless of which path changed it.
+    set({ selection: [], playhead: 0, selectedBlockId: null, previousTimelineId: prevId });
   },
+
+  setState(nameOrId, opts) {
+    const { project, playhead } = get();
+    const target = project.timelines.find((t) => t.id === nameOrId)
+      ?? project.timelines.find((t) => t.name.toLowerCase() === nameOrId.toLowerCase());
+    if (!target || target.id === project.activeTimelineId) return;
+
+    // "at" in the future schedules it — App.tsx's playback tick fires it the instant the
+    // playhead reaches that point. "at" already passed (or omitted) switches right now.
+    if (opts?.at !== undefined && opts.at > playhead) {
+      set({ pendingStateChange: { timelineId: target.id, atMs: opts.at, durationMs: opts.duration ?? 0, easing: opts.easing ?? { type: 'preset', name: 'easeInOut' } } });
+      return;
+    }
+    const durationMs = opts?.duration ?? 0;
+    const easing = opts?.easing ?? { type: 'preset', name: 'easeInOut' };
+    // capture the *actually evaluated* outgoing pose before switching — not just its last
+    // raw keyframe — same principle the clip-transition blend uses one level down.
+    const fromRig = durationMs > 0 ? evaluateRig(project, playhead) : null;
+    const prevId = project.activeTimelineId;
+    get().commit((p) => { p.activeTimelineId = target.id; });
+    set({
+      selection: [], playhead: 0, selectedBlockId: null, pendingStateChange: null,
+      previousTimelineId: prevId,
+      stateTransition: fromRig ? { fromRig, durationMs, easing, startedAtMs: performance.now() } : null,
+    });
+  },
+
+  // spec's two example call shapes (setState / enableState) are the same operation here —
+  // scheduling and blending are both just optional fields on the same `opts` bag.
+  enableState(nameOrId, opts) { get().setState(nameOrId, opts); },
+
+  returnToPreviousState(opts) {
+    const prev = get().previousTimelineId;
+    if (prev) get().setState(prev, opts);
+  },
+
+  cancelScheduledState() { set({ pendingStateChange: null }); },
+  clearStateTransition() { set({ stateTransition: null }); },
 
   addModifier(m) { get().commit((p) => { at(p).modifiers.push({ ...m, id: uid('m') }); }); },
   updateModifier(id, fn) { get().commit((p) => { const m = at(p).modifiers.find((x) => x.id === id); if (m) fn(m); }, `mod.${id}`); },

@@ -690,6 +690,49 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   useEditor.getState().undo();
   useEditor.getState().undo();
 
+  // --- state machine: setState/enableState, scheduling, blending, previous-state -------
+  // defaultProject() ships one timeline ("Idle") with the four presets as its own blocks —
+  // states are a *project's timelines*, so this needs a few more of those to test against.
+  {
+    useEditor.getState().loadProject(defaultProject());
+    const P = () => useEditor.getState().project;
+    const idleId = P().activeTimelineId;
+    useEditor.getState().addTimeline('Blink state');
+    useEditor.getState().addTimeline('Happy state');
+    useEditor.getState().addTimeline('Talk state');
+    useEditor.getState().setActiveTimeline(idleId); // addTimeline switches to each as it's made
+    const blinkTl = P().timelines.find((t) => t.name === 'Blink state')!;
+    const happyTl = P().timelines.find((t) => t.name === 'Happy state')!;
+    const talkTl = P().timelines.find((t) => t.name === 'Talk state')!;
+
+    useEditor.getState().setState('blink state'); // name match is case-insensitive
+    ok('setState switches the active timeline by name, case-insensitively', P().activeTimelineId === blinkTl.id);
+    ok('setState resets the playhead for the new state', useEditor.getState().playhead === 0);
+    ok('setState records what was active before it', useEditor.getState().previousTimelineId === idleId);
+    ok('an instant setState (no duration) sets up no blend to preview', useEditor.getState().stateTransition === null);
+
+    useEditor.getState().returnToPreviousState();
+    ok('returnToPreviousState switches back', P().activeTimelineId === idleId);
+
+    useEditor.getState().setState(happyTl.id, { duration: 250, easing: { type: 'linear' } });
+    ok('a blended setState captures a snapshot to preview-blend from', useEditor.getState().stateTransition?.durationMs === 250);
+    useEditor.getState().clearStateTransition();
+
+    useEditor.getState().setPlayhead(0);
+    useEditor.getState().setState(talkTl.id, { at: 5000 });
+    ok('setState with a future "at" schedules instead of switching immediately',
+      P().activeTimelineId === happyTl.id && useEditor.getState().pendingStateChange?.timelineId === talkTl.id);
+    useEditor.getState().cancelScheduledState();
+    ok('cancelScheduledState clears the pending switch', useEditor.getState().pendingStateChange === null);
+
+    useEditor.getState().setState('does-not-exist');
+    ok('setState silently ignores an unknown name/id rather than clearing the active state',
+      P().activeTimelineId === happyTl.id);
+
+    // land back on Idle — the copilot section right after this shares this scope's PT()
+    useEditor.getState().setActiveTimeline(idleId);
+  }
+
   // copilot tool calls: validated, then applied as one undo step
   const calls: ToolCall[] = [
     { name: 'add_preset_to_timeline', args: { preset: 'Blink' } },

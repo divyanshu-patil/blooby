@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { COMP } from '../core/defaults';
-import { buildScene, evaluateRig, type SceneItem } from '../core/scene';
+import { buildScene, evaluateRig, evaluateWithTransition, type SceneItem } from '../core/scene';
 import { bodyTurnScale, screenToSurface } from '../core/curvature';
 import { Shapes } from './Mascot';
 import type { Project, Rig } from '../core/types';
@@ -62,7 +62,31 @@ export function Stage() {
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
 
-  const rig = useMemo(() => evaluateRig(project, playhead), [project, playhead]);
+  // a state-machine switch with `duration` (setState/enableState) blends live here for its
+  // own span — preview only, never how evaluateRig itself behaves for export/baking.
+  const stateTransition = useEditor((s) => s.stateTransition);
+  const clearStateTransition = useEditor((s) => s.clearStateTransition);
+  const [transitionTick, setTransitionTick] = useState(0);
+  useEffect(() => {
+    if (!stateTransition) return;
+    let raf = 0;
+    const loop = () => {
+      if (performance.now() - stateTransition.startedAtMs >= stateTransition.durationMs) { clearStateTransition(); return; }
+      setTransitionTick((t) => t + 1);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [stateTransition, clearStateTransition]);
+
+  const rig = useMemo(() => {
+    if (!stateTransition) return evaluateRig(project, playhead);
+    const progress = (performance.now() - stateTransition.startedAtMs) / stateTransition.durationMs;
+    return evaluateWithTransition(project, playhead, stateTransition.fromRig, progress, stateTransition.easing);
+    // transitionTick is a deliberate extra dependency — it's the rAF-driven "re-sample
+    // wall-clock progress" signal, not itself a value read inside this computation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, playhead, stateTransition, transitionTick]);
   const scene = useMemo(() => buildScene(rig, COMP), [rig]);
   const frame = bodyFrame(rig);
   const sel = scene.find((s) => s.id === selection[0]);
