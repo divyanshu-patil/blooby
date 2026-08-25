@@ -386,6 +386,9 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .block:hover { border-color: var(--line); }
 .block[data-active='true'] { border-color: var(--signal); }
 .block[data-dragging='true'] { opacity: .35; }
+/* selected-for-editing (Effects tab targets this clip) is a stronger, filled affordance —
+ * distinct from data-active (just "the playhead happens to be inside this one"). */
+.block[data-selected='true'] { border-color: var(--ink); box-shadow: 0 0 0 1.5px var(--ink); }
 .block-resize {
   position: absolute; top: 0; right: -4px; bottom: 0; width: 8px;
   cursor: ew-resize; z-index: 2;

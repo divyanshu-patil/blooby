@@ -348,6 +348,48 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   })());
 }
 
+// --- per-clip effects: scoped to one block's own time window, phase resets at its start
+{
+  const proj = defaultProject();
+  const tl = activeTimeline(proj);
+  const blinkBlock = tl.blocks[1]; // 2400–3300ms — away from t=0, so an origin-shift bug can't hide
+  tl.modifiers.push({ id: 'cm', nodeId: proj.rig.rootId, kind: 'stretch', amount: 100, frequency: 1, amplitude: 20, blockId: blinkBlock.id });
+
+  const noModifier = defaultProject();
+  const inside = buildScene(evaluateRig(proj, 2650), { width: 720, height: 720 }).find((s) => s.id === 'body')!; // 250ms into Blink
+  const baseline2650 = buildScene(evaluateRig(noModifier, 2650), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+  ok('a clip-scoped effect actually runs inside its own clip', Math.abs(inside.w - baseline2650.w) > 5,
+    `${inside.w} vs ${baseline2650.w}`);
+
+  // Idle runs 0–2400ms — well outside Blink's window, so the effect must vanish there
+  const outsideDuringIdle = buildScene(evaluateRig(proj, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+  const baseline250 = buildScene(evaluateRig(noModifier, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+  ok('a clip-scoped effect does not leak into a different clip', Math.abs(outsideDuringIdle.w - baseline250.w) < 1e-6,
+    `${outsideDuringIdle.w} vs ${baseline250.w}`);
+
+  // the effect's own phase is relative to the clip's start, not absolute timeline time —
+  // its *contribution* 250ms into Blink (starts at 2400ms) must match a global one's
+  // contribution 250ms into t=0, not 2650ms in. Compares deltas against the same
+  // no-modifier baselines, so the unrelated keyframed motion each preset already does at
+  // that absolute time (which legitimately differs between t=250 and t=2650) cancels out.
+  const globalEquivalent = defaultProject();
+  activeTimeline(globalEquivalent).modifiers.push({ id: 'gm', nodeId: globalEquivalent.rig.rootId, kind: 'stretch', amount: 100, frequency: 1, amplitude: 20 });
+  const globalAt250 = buildScene(evaluateRig(globalEquivalent, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+  const globalAt2650 = buildScene(evaluateRig(globalEquivalent, 2650), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+  const insideDelta = inside.w - baseline2650.w;
+  const global250Delta = globalAt250.w - baseline250.w;
+  const global2650Delta = globalAt2650.w - baseline2650.w;
+  ok('a clip-scoped effect phases from its own clip start, not absolute timeline time',
+    Math.abs(insideDelta - global250Delta) < 0.05 && Math.abs(insideDelta - global2650Delta) > 5,
+    `Δinside=${insideDelta} vs Δglobal@250=${global250Delta} vs Δglobal@2650=${global2650Delta}`);
+
+  // removing the block it belongs to must drop the effect too, not leave it orphaned
+  useEditor.getState().loadProject(proj);
+  useEditor.getState().removeBlock(blinkBlock.id);
+  ok('removing a clip drops its per-clip effects along with it',
+    !activeTimeline(useEditor.getState().project).modifiers.some((m) => m.id === 'cm'));
+}
+
 // --- moveBlock: reordering drags its keyframes along, in one undo step ---------
 {
   const ed = useEditor.getState();

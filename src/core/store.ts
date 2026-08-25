@@ -17,6 +17,10 @@ export interface Editor {
   project: Project;
   selection: string[];
   selectedTrackId: string | null;
+  /** the clip currently selected for editing — drives the Effects tab (and future clip
+   * inspector) toward "this clip" instead of the whole timeline. Distinct from playhead
+   * position: scrubbing through a clip shouldn't silently change what you're editing. */
+  selectedBlockId: string | null;
   playhead: number;
   playing: boolean;
   loop: boolean;
@@ -35,6 +39,7 @@ export interface Editor {
   toggleAutoKey: () => void;
   setLoop: (v: boolean) => void;
   selectTrack: (id: string | null) => void;
+  selectBlock: (id: string | null) => void;
 
   setValue: (nodeId: string, property: string, value: KeyValue, label?: string) => void;
   trackFor: (nodeId: string, property: string) => Track | undefined;
@@ -124,6 +129,7 @@ export const useEditor = create<Editor>((set, get) => ({
   project: load(),
   selection: [],
   selectedTrackId: null,
+  selectedBlockId: null,
   playhead: 0,
   playing: false,
   loop: true,
@@ -171,6 +177,7 @@ export const useEditor = create<Editor>((set, get) => ({
   setLoop: (loop) => set({ loop }),
   toggleAutoKey: () => set({ autoKey: !get().autoKey }),
   selectTrack: (selectedTrackId) => set({ selectedTrackId }),
+  selectBlock: (selectedBlockId) => set({ selectedBlockId }),
 
   trackFor(nodeId, property) {
     const { project, playhead } = get();
@@ -314,6 +321,7 @@ export const useEditor = create<Editor>((set, get) => ({
       tl.tracks = tl.tracks.filter((t) => t.blockId !== id);
       relayoutBlocks(tl, tl.blocks.filter((b) => b.id !== id));
     });
+    if (get().selectedBlockId === id) set({ selectedBlockId: null });
   },
 
   setBlockDuration(id, ms) {
@@ -384,14 +392,14 @@ export const useEditor = create<Editor>((set, get) => ({
       p.timelines = p.timelines.filter((t) => t.id !== id);
       if (p.activeTimelineId === id) p.activeTimelineId = p.timelines[0].id;
     });
-    set({ selection: [], playhead: 0 });
+    set({ selection: [], playhead: 0, selectedBlockId: null });
   },
 
   setActiveTimeline(id) {
     const { project } = get();
     if (!project.timelines.some((t) => t.id === id)) return;
     get().commit((p) => { p.activeTimelineId = id; });
-    set({ selection: [], playhead: 0 });
+    set({ selection: [], playhead: 0, selectedBlockId: null });
   },
 
   addModifier(m) { get().commit((p) => { at(p).modifiers.push({ ...m, id: uid('m') }); }); },
@@ -462,7 +470,7 @@ export const useEditor = create<Editor>((set, get) => ({
     const next = { ...defaultProject(), ...migrate(p) };
     setActiveId(galleryId ?? uidGallery());
     autosave(next);
-    set({ project: next, past: [], future: [], selection: [], playhead: 0 });
+    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedTrackId: null });
   },
   resetProject() { get().loadProject(defaultProject()); },
 }));

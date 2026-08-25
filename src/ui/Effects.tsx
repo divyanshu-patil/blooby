@@ -8,10 +8,18 @@ const DEFAULTS = {
   stretch: { amount: 100, frequency: 0.8, amplitude: 12, phase: 0 },
 };
 
-/** Non-destructive layers on top of the keyframes. Baked to real keys on export. */
+/**
+ * Non-destructive layers on top of the keyframes. Baked to real keys on export.
+ * Scoped by whether a clip is selected on the timeline: select one and "+ Shake" etc.
+ * add an effect that only runs during that clip; with nothing selected they're global,
+ * same as before per-clip effects existed. The two lists are never mixed in one view —
+ * contextual editing (select a clip → its own controls) over one panel showing everything.
+ */
 export function Effects() {
   const project = useEditor((s) => s.project);
   const selection = useEditor((s) => s.selection);
+  const selectedBlockId = useEditor((s) => s.selectedBlockId);
+  const selectBlock = useEditor((s) => s.selectBlock);
   const addModifier = useEditor((s) => s.addModifier);
   const updateModifier = useEditor((s) => s.updateModifier);
   const removeModifier = useEditor((s) => s.removeModifier);
@@ -20,16 +28,44 @@ export function Effects() {
   const target = selection[0] ?? project.rig.rootId;
   const nodeName = (id: string) => project.rig.nodes[id]?.name ?? id;
 
+  const block = selectedBlockId ? tl.blocks.find((b) => b.id === selectedBlockId) : null;
+  // the block can vanish out from under a stale id for one render (removed elsewhere) —
+  // fall back to global rather than silently offering to add effects to a dead clip.
+  const clipScoped = !!selectedBlockId && !!block;
+  const list = tl.modifiers.filter((m) => (clipScoped ? m.blockId === selectedBlockId : !m.blockId));
+  const add = (kind: 'shake' | 'float' | 'stretch', nodeId: string) =>
+    addModifier({ nodeId, kind, ...DEFAULTS[kind], blockId: clipScoped ? selectedBlockId! : undefined });
+
   return (
     <Panel title="Effects" actions={
       <>
-        <button className="btn sm" onClick={() => addModifier({ nodeId: target, kind: 'shake', ...DEFAULTS.shake })}>+ Shake</button>
-        <button className="btn sm" onClick={() => addModifier({ nodeId: target, kind: 'float', ...DEFAULTS.float })}>+ Float</button>
-        <button className="btn sm" onClick={() => addModifier({ nodeId: project.rig.rootId, kind: 'stretch', ...DEFAULTS.stretch })}>+ Stretch</button>
+        <button className="btn sm" onClick={() => add('shake', target)}>+ Shake</button>
+        <button className="btn sm" onClick={() => add('float', target)}>+ Float</button>
+        <button className="btn sm" onClick={() => add('stretch', project.rig.rootId)}>+ Stretch</button>
       </>
     }>
-      {!tl.modifiers.length && <p className="empty-note">Shake jitters with noise, float bobs on a sine, stretch pulses the whole rig's size. All three stack on whatever the keyframes are doing.</p>}
-      {tl.modifiers.map((m) => (
+      <div className="flex items-center gap-2 rounded-md border border-line-soft bg-field px-2.5 py-1.5 text-[11px]">
+        {clipScoped ? (
+          <>
+            <span className="inline-block h-1.5 w-1.5 flex-none rounded-full bg-signal" />
+            <span className="text-ink-2">Editing effects for clip <strong className="font-semibold text-ink">{block!.name}</strong> only</span>
+            <span className="flex-1" />
+            <button className="text-muted underline decoration-dotted underline-offset-2 hover:text-ink" onClick={() => selectBlock(null)}>
+              Switch to global
+            </button>
+          </>
+        ) : (
+          <span className="text-muted">Global — applies everywhere. Select a clip on the timeline to scope effects to just it.</span>
+        )}
+      </div>
+
+      {!list.length && (
+        <p className="empty-note">
+          Shake jitters with noise, float bobs on a sine, stretch pulses the whole rig's size.
+          All three stack on whatever the keyframes are doing{clipScoped ? ', for as long as this clip plays' : ''}.
+        </p>
+      )}
+      {list.map((m) => (
         <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, background: 'var(--field)', border: '1px solid var(--line-soft)', borderRadius: 6 }}>
           <div className="row">
             <strong style={{ font: '700 11px var(--display)', letterSpacing: '.1em', textTransform: 'uppercase' }}>{m.kind}</strong>

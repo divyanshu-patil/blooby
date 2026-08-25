@@ -89,6 +89,10 @@ export interface Modifier {
   seed?: number;
   amplitude: number;
   phase?: number;
+  /** set when this effect was added to one clip specifically — it then only evaluates
+   * inside that block's own time window instead of the whole timeline. Undefined means
+   * global, exactly like every effect before per-clip effects existed. */
+  blockId?: string;
 }
 
 export interface Expression {

@@ -38,6 +38,11 @@ export function relayoutBlocks(tl: Timeline, next: Block[]): void {
   }
   tl.blocks = next;
   tl.tracks = tl.tracks.filter((tr) => !tr.blockId || newById.has(tr.blockId));
+  // a per-clip effect (Modifier.blockId) belongs to its block exactly like a block-owned
+  // track does — drop it the same way when that block is gone, or it lingers with no
+  // owning clip left: never evaluates again (evaluateRig skips an unresolvable window)
+  // but stays in the timeline forever with no UI left to ever reach or remove it.
+  tl.modifiers = tl.modifiers.filter((m) => !m.blockId || newById.has(m.blockId));
   tl.timelineDurationMs = derivedDuration(tl);
 }
 

@@ -23,6 +23,8 @@ export function Timeline() {
   const selection = useEditor((s) => s.selection);
   const addBlock = useEditor((s) => s.addBlock);
   const removeBlock = useEditor((s) => s.removeBlock);
+  const selectedBlockId = useEditor((s) => s.selectedBlockId);
+  const selectBlock = useEditor((s) => s.selectBlock);
   const moveBlock = useEditor((s) => s.moveBlock);
   const setBlockDuration = useEditor((s) => s.setBlockDuration);
   const setDurationMode = useEditor((s) => s.setDurationMode);
@@ -200,7 +202,8 @@ export function Timeline() {
             const within = playhead >= start && playhead < start + b.durationMs;
             return (
               <div key={b.id} className="block" data-active={activeBlock === i} data-dragging={dragging === b.id}
-                draggable title="Drag to reorder"
+                data-selected={selectedBlockId === b.id}
+                draggable title="Drag to reorder · click to select for editing (effects, inspector)"
                 onDragStart={(e) => {
                   // a resize just starting on the child handle still targets this
                   // element for native dragstart (per spec, the ancestor draggable
@@ -210,7 +213,7 @@ export function Timeline() {
                   e.dataTransfer.setData('text/blooby-block-reorder', b.id); e.dataTransfer.effectAllowed = 'move'; setDragging(b.id);
                 }}
                 onDragEnd={() => setDragging(null)}
-                onClick={() => setPlayhead(start)}>
+                onClick={() => { setPlayhead(start); selectBlock(selectedBlockId === b.id ? null : b.id); }}>
                 {within && <span className="tick" style={{ left: `${((playhead - start) / b.durationMs) * 100}%` }} />}
                 <button className="x" title="Remove block" onClick={(e) => { e.stopPropagation(); removeBlock(b.id); }}>✕</button>
                 <MascotThumb className="thumb" scene={thumbs[i]} view={COMP} />
