@@ -661,6 +661,19 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   const atEnd = evaluateRig(proj, ptl2.timelineDurationMs).nodes.body.transform.rotation;
   const atStart = evaluateRig(proj, 0).nodes.body.transform.rotation;
   ok('evaluateRig itself loops the pose, not just the raw track helper', atEnd === atStart, `${atEnd} vs ${atStart}`);
+
+  // a clip-owned track must hold its pose into any padding where the timeline's own
+  // duration outlives the sum of block durations — not snap to the rig's bare defaults
+  // the instant blockAt stops recognizing the time as "inside" the last block (the bug
+  // behind the reported yaw/pitch jump right at the loop point)
+  const proj3 = defaultProject();
+  const ptl3 = activeTimeline(proj3);
+  ptl3.blocks = [ptl3.blocks[0]];
+  ptl3.timelineDurationMs = ptl3.blocks[0].durationMs + 300;
+  ptl3.tracks = [{ id: 't4', nodeId: 'body', property: 'transform.rotation', blockId: ptl3.blocks[0].id,
+    keyframes: [{ id: 'a', time: 50, value: 42, easingOut: { type: 'linear' } }] }];
+  const inPadding = evaluateRig(proj3, ptl3.blocks[0].durationMs + 150).nodes.body.transform.rotation;
+  ok('a clip-owned track holds its value past blocksEnd instead of resetting to defaults', inPadding === 42, `${inPadding}`);
 }
 
 // --- the store: block retiming, undo, tool calls -------------------------------

@@ -21,10 +21,12 @@ export function blockAt(tl: Timeline, t: number): Block | undefined {
     const b = tl.blocks[i];
     if (t >= starts[i] && t < starts[i] + b.durationMs) return b;
   }
-  // the exact end of the last block still counts as inside it (matches activeTransitionAt
-  // and the block-window checks elsewhere using an inclusive upper bound)
+  // past the end of the last block — including any padding where the timeline's own
+  // duration runs longer than the blocks tiled on it — still belongs to that last block:
+  // its tracks hold their pose (and loop-ease back to frame 0) through the tail, instead
+  // of vanishing to the rig's bare defaults the moment the block durations are used up.
   const last = tl.blocks.at(-1);
-  if (last && t === starts.at(-1)! + last.durationMs) return last;
+  if (last && t >= starts.at(-1)!) return last;
   return undefined;
 }
 
