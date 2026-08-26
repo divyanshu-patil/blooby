@@ -1,25 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { useEditor } from './core/store';
-import { defaultProject } from './core/defaults';
-import { Stage } from './ui/Stage';
-import { Layers } from './ui/Layers';
-import { Presets, Expressions, OtherTimelines } from './ui/Presets';
-import { NodeInspector, CameraPanel, ClipInspector } from './ui/Inspector';
-import { EyePanel } from './ui/EyePanel';
-import { Effects } from './ui/Effects';
-import { Timeline, DurationField } from './ui/Timeline';
-import { Copilot } from './ui/Copilot';
-import { ExportBar } from './ui/ExportBar';
-import { Split } from './ui/Resizable';
-import { TimelineTabs } from './ui/TimelineTabs';
-import { Gallery, openGallery } from './ui/Gallery';
-import { StateMachine } from './ui/StateMachine';
-import { activeTimeline } from './core/types';
-import type { Project } from './core/types';
+import { useEditor } from '../core/store';
+import { defaultProject } from '../core/defaults';
+import { Stage } from './Stage';
+import { Layers } from './Layers';
+import { Presets, Expressions, OtherTimelines } from './Presets';
+import { NodeInspector, CameraPanel, ClipInspector } from './Inspector';
+import { EyePanel } from './EyePanel';
+import { Effects } from './Effects';
+import { Timeline, DurationField } from './Timeline';
+import { Copilot } from './Copilot';
+import { ExportBar } from './ExportBar';
+import { Split } from './Resizable';
+import { TimelineTabs } from './TimelineTabs';
+import { Gallery, openGallery } from './Gallery';
+import { StateMachine } from './StateMachine';
+import { activeTimeline } from '../core/types';
+import type { Project } from '../core/types';
 
 type Tab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
 
-export default function App() {
+/** The whole editor UI — apps/web renders it with no onSave (local-file Save/Open only),
+ * apps/admin's Preset Publisher passes onSave/saveLabel to add a second save destination
+ * (a cloud table) alongside the local JSON download, which always stays available. */
+export function Editor({ onSave, saveLabel }: { onSave?: (project: Project) => void; saveLabel?: string } = {}) {
   const project = useEditor((s) => s.project);
   const playing = useEditor((s) => s.playing);
   const setPlaying = useEditor((s) => s.setPlaying);
@@ -111,6 +114,7 @@ export default function App() {
         <button className="btn ghost sm" onClick={redo} title="Redo (⇧⌘Z)">Redo</button>
         <button className="btn sm" onClick={() => file.current?.click()}>Open</button>
         <button className="btn sm" onClick={saveProject}>Save</button>
+        {onSave && <button className="btn sm" onClick={() => onSave(project)}>{saveLabel ?? 'Save to cloud'}</button>}
         <button className="btn sm" onClick={openGallery}>Gallery</button>
         <button className="btn sm" title="Start over from the default mascot"
           onClick={() => confirm('Discard this project and start fresh?') && loadProject(defaultProject())}>New</button>

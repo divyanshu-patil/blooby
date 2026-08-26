@@ -625,10 +625,12 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
 // --- resolveTracks: the loop seam is derived, never written into the file ------
 {
-  // a fixture that deliberately does NOT return to its start value — the whole point
+  // a fixture that deliberately does NOT return to its start value — the whole point —
+  // and whose outgoing easing is deliberately NOT easeOut, to prove the close forces its
+  // own easeOut rather than happening to inherit it from the segment before
   const openTrack = { id: 't1', nodeId: 'body', property: 'surface.rotation', keyframes: [
     { id: 'a', time: 0, value: 10, easingOut: { type: 'linear' as const } },
-    { id: 'b', time: 1000, value: 70, easingOut: { type: 'preset' as const, name: 'easeOut' as const } },
+    { id: 'b', time: 1000, value: 70, easingOut: { type: 'linear' as const } },
   ] };
   const off = resolveTracks([openTrack], false, 2000);
   ok('loop off: tracks pass through completely unchanged', off[0] === openTrack);
@@ -639,15 +641,16 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('loop on: a closing keyframe is appended at the very end', src.keyframes.length === 3 && src.keyframes[2].time === 2000);
   ok('the closing value matches the track\'s own t=0 value', src.keyframes[2].value === 10);
   ok('so the last frame and the first frame land on the same pose', sampleTrack(src, 2000) === sampleTrack(src, 0));
-  ok('the seam keeps the outgoing easing, not a fresh default', src.keyframes[2].easingOut.type === 'preset' && (src.keyframes[2].easingOut as { name: string }).name === 'easeOut');
+  ok('the close always eases in with easeOut, not whatever the outgoing segment used', src.keyframes[2].easingOut.type === 'preset' && (src.keyframes[2].easingOut as { name: string }).name === 'easeOut');
 
-  // a track that already ends exactly on its own start value gets no redundant keyframe
+  // even a track already flat at its start value still gets its own closing keyframe —
+  // "first frame == last frame" holds unconditionally, not just when there's a gap to close
   const constTrack = { id: 't2', nodeId: 'body', property: 'transform.rotation', keyframes: [
     { id: 'a', time: 0, value: 5, easingOut: { type: 'linear' as const } },
     { id: 'b', time: 1000, value: 5, easingOut: { type: 'linear' as const } },
   ] };
-  const untouched = resolveTracks([constTrack], true, 2000);
-  ok('a track already flat at its start value is left alone', untouched[0] === constTrack);
+  const stillClosed = resolveTracks([constTrack], true, 2000);
+  ok('a track already flat at its start value still gets a closing keyframe', stillClosed[0].keyframes.length === 3 && stillClosed[0].keyframes[2].value === 5);
 
   // evaluateRig actually uses this — the seam is visible in playback, not just in theory.
   // No blocks on this timeline: a global track like t3 is only ever reachable outside

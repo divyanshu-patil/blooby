@@ -7,7 +7,19 @@ settings:
 importers:
 
   .:
+    devDependencies:
+      oxlint:
+        specifier: ^1.75.0
+        version: 1.79.0
+      typescript:
+        specifier: ~6.0.2
+        version: 6.0.3
+
+  apps/web:
     dependencies:
+      '@blooby/studio':
+        specifier: workspace:*
+        version: link:../../packages/studio
       gif.js.optimized:
         specifier: ^1.0.1
         version: 1.0.1
@@ -17,9 +29,6 @@ importers:
       react-dom:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
-      zustand:
-        specifier: ^5.0.15
-        version: 5.0.15(@types/react@19.2.18)(react@19.2.8)
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -39,6 +48,40 @@ importers:
       oxlint:
         specifier: ^1.75.0
         version: 1.79.0
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.3
+      typescript:
+        specifier: ~6.0.2
+        version: 6.0.3
+      vite:
+        specifier: ^8.2.0
+        version: 8.2.2(@types/node@24.13.3)(jiti@2.7.0)
+
+  packages/studio:
+    dependencies:
+      gif.js.optimized:
+        specifier: ^1.0.1
+        version: 1.0.1
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
+      zustand:
+        specifier: ^5.0.15
+        version: 5.0.15(@types/react@19.2.18)(react@19.2.8)
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.5(@types/react@19.2.18)
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3

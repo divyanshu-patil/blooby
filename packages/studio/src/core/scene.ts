@@ -116,7 +116,12 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number) {
 
 /**
  * When a timeline loops, every track eases from wherever it ends back to its own t=0
- * value by the end of the timeline, so playback (and export) can wrap with no seam.
+ * value by the end of the timeline, so the last frame and the first frame land on the
+ * same pose and playback (and export) can wrap with no seam. Unconditional — even a
+ * track that already happens to end on its start value gets its own closing keyframe, so
+ * "first frame == last frame" holds by construction, not by coincidence. The close always
+ * eases in with easeOut (a settle, not whatever curve the second-to-last segment used) so
+ * the return to rest reads distinctly from the rest of the animation.
  * A pure derivation — never mutates stored keyframes — shared by playback and export so
  * they can't drift apart, same as everything else in this file.
  */
@@ -128,8 +133,8 @@ export function resolveTracks(tracks: Track[], loop: boolean, durationMs: number
     const last = ks[ks.length - 1];
     if (last.time >= durationMs - 1) return track;
     const start = sampleTrack(track, 0);
-    if (start === undefined || JSON.stringify(start) === JSON.stringify(last.value)) return track;
-    return { ...track, keyframes: [...ks, { id: `${last.id}~loop`, time: durationMs, value: start, easingOut: last.easingOut }] };
+    if (start === undefined) return track;
+    return { ...track, keyframes: [...ks, { id: `${last.id}~loop`, time: durationMs, value: start, easingOut: { type: 'preset', name: 'easeOut' } }] };
   });
 }
 
