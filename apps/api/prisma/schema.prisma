@@ -1,16 +1,14 @@
 // Prisma is the QUERY layer here, not the migration tool.
 //
-// The schema itself lives in ../../supabase/migrations/*.sql and is applied with the
-// Supabase CLI/MCP, because Prisma's schema language cannot express what this database
-// actually depends on: RLS policies, the SECURITY DEFINER handle_new_user() trigger,
-// the set_updated_at triggers, the storage bucket and its object policies, or the
-// foreign keys into Supabase's own auth.users table. Running `prisma migrate` against
-// this database would diff against a model that is blind to all of it and generate a
-// migration that DROPS it — RLS off, triggers gone. So: never `prisma migrate` here.
-// `prisma generate` only. Models below are hand-kept in sync with the applied SQL.
+// The schema lives in ../../supabase/migrations/*.sql and is applied with the Supabase
+// CLI/MCP, because Prisma's schema language cannot express RLS policies, the SECURITY
+// DEFINER private.is_admin() helper, the set_updated_at triggers, the partial unique
+// index that keeps exactly one splashscreen published, or the foreign keys into
+// Supabase's auth.users. Running `prisma migrate` here would diff against a model blind
+// to all of it and generate a migration that DROPS it. So: `prisma generate` only.
 //
-// Note this client connects with the database owner role and therefore BYPASSES RLS.
-// Every route that uses it must do its own authorization first — see src/auth.ts.
+// This client connects as the database owner and therefore BYPASSES RLS. Every route
+// using it must do its own authorization first — see src/middlewares/.
 
 generator client {
   provider = "prisma-client-js"
@@ -21,46 +19,134 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Mirrors public.profiles. `isAdmin` is the only source of truth for admin rights —
-/// never a JWT claim, which a user could influence.
+enum UserRole {
+  user
+  admin
+
+  @@map("user_role")
+}
+
+enum Visibility {
+  private
+  public
+
+  @@map("visibility")
+}
+
+enum AssetKind {
+  preset
+  expression
+
+  @@map("asset_kind")
+}
+
+enum AssetSource {
+  builtin
+  official
+  user
+  community
+
+  @@map("asset_source")
+}
+
+enum AssetStatus {
+  draft
+  pending_review
+  published
+  rejected
+  archived
+
+  @@map("asset_status")
+}
+
+enum SplashStatus {
+  draft
+  published
+  archived
+
+  @@map("splash_status")
+}
+
+/// Mirrors public.profiles. `role` is the only source of truth for admin rights — never
+/// a JWT claim, which a user could influence through account metadata.
 model Profile {
-  id        String   @id @db.Uuid
-  isAdmin   Boolean  @default(false) @map("is_admin")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id          String    @id @db.Uuid
+  role        UserRole  @default(user)
+  username    String?   @unique
+  avatarUrl   String?   @map("avatar_url")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  lastLoginAt DateTime? @map("last_login_at") @db.Timestamptz(6)
 
   @@map("profiles")
 }
 
-/// Mirrors public.animations. `userId` references auth.users(id), which Prisma cannot
-/// model (different schema, owned by Supabase) — the FK is enforced in Postgres.
-model Animation {
-  id           String   @id @default(uuid()) @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  name         String
-  projectJson  Json     @map("project_json")
-  thumbnailUrl String?  @map("thumbnail_url")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+/// Mirrors public.projects — metadata only. The animation JSON lives in S3 under
+/// `s3Key`; this row is the pointer plus everything the dashboard needs to render a card
+/// without fetching the payload.
+model Project {
+  id             String     @id @default(uuid()) @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
+  name           String
+  thumbnailUrl   String?    @map("thumbnail_url")
+  s3Key          String     @map("s3_key")
+  s3Bucket       String     @map("s3_bucket")
+  currentVersion Int        @default(1) @map("current_version")
+  sizeBytes      BigInt     @default(0) @map("size_bytes")
+  checksum       String?
+  visibility     Visibility @default(private)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  lastOpenedAt   DateTime?  @map("last_opened_at") @db.Timestamptz(6)
 
-  @@index([userId])
-  @@map("animations")
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([createdAt])
+  @@map("projects")
 }
 
-/// Mirrors public.presets — the curated global library. Readable by anyone once
-/// `published`, writable only through this service (RLS grants no write to anon or
-/// authenticated at all).
-model Preset {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String
-  category     String?
-  source       String?
-  presetJson   Json     @map("preset_json")
-  thumbnailUrl String?  @map("thumbnail_url")
-  published    Boolean  @default(false)
-  createdBy    String?  @map("created_by") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+/// Mirrors public.assets — presets AND expressions, for every source. `source` + `status`
+/// + `ownerId` decide what a row means and who may see it, so one table, one set of
+/// policies and one service cover builtin / official / user / community alike.
+model Asset {
+  id            String      @id @default(uuid()) @db.Uuid
+  kind          AssetKind
+  source        AssetSource
+  status        AssetStatus @default(draft)
+  ownerId       String?     @map("owner_id") @db.Uuid
+  name          String
+  description   String?
+  category      String?
+  tags          String[]    @default([])
+  thumbnailUrl  String?     @map("thumbnail_url")
+  data          Json
+  schemaVersion Int         @default(1) @map("schema_version")
+  version       Int         @default(1)
+  downloadCount Int         @default(0) @map("download_count")
+  reviewNote    String?     @map("review_note")
+  reviewedBy    String?     @map("reviewed_by") @db.Uuid
+  reviewedAt    DateTime?   @map("reviewed_at") @db.Timestamptz(6)
+  publishedAt   DateTime?   @map("published_at") @db.Timestamptz(6)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  @@index([createdBy])
-  @@map("presets")
+  @@index([ownerId, updatedAt(sort: Desc)])
+  @@map("assets")
+}
+
+/// Mirrors public.splashscreens. A partial unique index in Postgres guarantees at most
+/// one row is `published` at a time; the service relies on that rather than re-checking.
+model Splashscreen {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String
+  status      SplashStatus @default(draft)
+  data        Json
+  background  String       @default("#0b0b0f")
+  durationMs  Int          @default(2000) @map("duration_ms")
+  fadeMs      Int          @default(400) @map("fade_ms")
+  createdBy   String?      @map("created_by") @db.Uuid
+  publishedAt DateTime?    @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("splashscreens")
 }

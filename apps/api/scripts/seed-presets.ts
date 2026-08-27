@@ -1,39 +1,45 @@
 /**
- * One-off: load the editor's built-in presets into the shared `presets` table so a fresh
- * project has a library to browse. Idempotent by name — re-running updates rather than
- * duplicating.
+ * Load the editor's built-in presets and expressions into the shared `assets` table so a
+ * fresh install has a library to browse. Idempotent by (kind, name, source='builtin') —
+ * re-running updates rather than duplicating.
  *
- * Reads supabase/presets.seed.json, captured once from packages/studio's builtinPresets().
- * Regenerate it with:
- *   cd packages/studio && npx esbuild gen-seed.ts --bundle --format=esm | node --input-type=module
- * Deliberately not importing studio source directly: that package is authored for a
- * bundler (extensionless relative imports) and does not typecheck under NodeNext.
+ * Reads supabase/presets.seed.json, captured from packages/studio's builtinPresets() /
+ * builtinExpressions(). Deliberately not importing studio source directly: that package
+ * is authored for a bundler (extensionless relative imports) and will not typecheck
+ * under NodeNext.
  */
 import { readFileSync } from 'node:fs';
-import { prisma } from '../src/prisma.js';
+import type { AssetKind } from '@prisma/client';
+import { prisma } from '../src/config/prisma.js';
+import { toJson } from '../src/utils/json.js';
 
-interface SeedPreset { id: string; name: string; source: string; durationMs: number; tracks: unknown[] }
+interface SeedItem { id: string; name: string; [k: string]: unknown }
 
 const seed = JSON.parse(
   readFileSync(new URL('../../../supabase/presets.seed.json', import.meta.url), 'utf8'),
-) as { presets: SeedPreset[] };
+) as { presets: SeedItem[]; expressions: SeedItem[] };
 
-console.log(`seeding ${seed.presets.length} built-in presets…`);
-
-for (const preset of seed.presets) {
-  const existing = await prisma.preset.findFirst({ where: { name: preset.name, source: 'builtin' } });
-  const data = {
-    name: preset.name,
-    category: 'builtin',
-    source: 'builtin',
-    presetJson: preset as unknown as object,
-    published: true,
-    updatedAt: new Date(),
-  };
-  if (existing) await prisma.preset.update({ where: { id: existing.id }, data });
-  else await prisma.preset.create({ data });
-  console.log(`  ${existing ? 'updated' : 'created'} ${preset.name}`);
+async function upsert(kind: AssetKind, items: SeedItem[]) {
+  for (const item of items) {
+    const existing = await prisma.asset.findFirst({ where: { kind, name: item.name, source: 'builtin' } });
+    const data = {
+      kind,
+      source: 'builtin' as const,
+      status: 'published' as const,
+      name: item.name,
+      category: 'builtin',
+      data: toJson(item),
+      publishedAt: new Date(),
+    };
+    if (existing) await prisma.asset.update({ where: { id: existing.id }, data });
+    else await prisma.asset.create({ data });
+    console.log(`  ${existing ? 'updated' : 'created'} ${kind} ${item.name}`);
+  }
 }
+
+console.log(`seeding ${seed.presets.length} presets and ${seed.expressions.length} expressions…`);
+await upsert('preset', seed.presets);
+await upsert('expression', seed.expressions);
 
 await prisma.$disconnect();
 console.log('done.');
