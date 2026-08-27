@@ -115,27 +115,84 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number) {
 }
 
 /**
- * When a timeline loops, every track eases from wherever it ends back to its own t=0
- * value by the end of the timeline, so the last frame and the first frame land on the
- * same pose and playback (and export) can wrap with no seam. Unconditional — even a
- * track that already happens to end on its start value gets its own closing keyframe, so
- * "first frame == last frame" holds by construction, not by coincidence. The close always
- * eases in with easeOut (a settle, not whatever curve the second-to-last segment used) so
- * the return to rest reads distinctly from the rest of the animation.
+ * When a timeline loops, the pose at `durationMs` eases back to the pose actually rendered
+ * at t=0, so the last frame and the first frame match and playback (and export) wrap with
+ * no seam. Unconditional — a track that already happens to end on its start value still
+ * gets its own closing keyframe, so "first frame == last frame" holds by construction, not
+ * by coincidence. The close always eases with easeOut (a settle, not whatever curve the
+ * second-to-last segment used) so the return to rest reads distinctly.
+ *
+ * The subtlety is clip sealing (see `activeTrackFor`): one (nodeId, property) pair can own
+ * several tracks, one per block, and only the one whose block contains `t` is ever
+ * rendered. So closing each track back to *its own* t=0 value is wrong — it matches a
+ * value the viewer never sees. Instead resolve the *global* winner at t=0, then hang the
+ * closing keyframe only on the track that actually wins at the tail. A property animated
+ * in an earlier block but with no track at all in the closing block has nothing to hang it
+ * on, so a minimal one is synthesized for that block, anchored on the rig's base pose.
+ *
  * A pure derivation — never mutates stored keyframes — shared by playback and export so
  * they can't drift apart, same as everything else in this file.
  */
-export function resolveTracks(tracks: Track[], loop: boolean, durationMs: number): Track[] {
+export function resolveTracks(project: Project): Track[] {
+  const tl = activeTimeline(project);
+  const { tracks, loop, timelineDurationMs: durationMs } = tl;
   if (!loop) return tracks;
-  return tracks.map((track) => {
+
+  const keyOf = (nodeId: string, property: string) => `${nodeId} ${property}`;
+
+  // What the viewer actually sees at t=0, per property — the pose the tail must return to.
+  const seen = new Set<string>();
+  const startValue = new Map<string, { nodeId: string; property: string; value: KeyValue }>();
+  for (const t of tracks) {
+    const key = keyOf(t.nodeId, t.property);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const winner = activeTrackFor(tl, t.nodeId, t.property, 0);
+    const value = winner && sampleTrack(winner, 0);
+    if (value !== undefined) startValue.set(key, { nodeId: t.nodeId, property: t.property, value });
+  }
+
+  const closed = new Set<string>();
+  const resolved: Track[] = tracks.map((track) => {
     const ks = track.keyframes;
     if (ks.length < 2) return track;
     const last = ks[ks.length - 1];
     if (last.time >= durationMs - 1) return track;
-    const start = sampleTrack(track, 0);
-    if (start === undefined) return track;
-    return { ...track, keyframes: [...ks, { id: `${last.id}~loop`, time: durationMs, value: start, easingOut: { type: 'preset', name: 'easeOut' } }] };
+    // only the track actually reachable at the tail gets the close — the others are sealed
+    // inside earlier clips and never rendered there.
+    if (activeTrackFor(tl, track.nodeId, track.property, durationMs)?.id !== track.id) return track;
+    const key = keyOf(track.nodeId, track.property);
+    const entry = startValue.get(key);
+    if (!entry) return track;
+    closed.add(key);
+    return { ...track, keyframes: [...ks, { id: `${last.id}~loop`, time: durationMs, value: entry.value, easingOut: { type: 'preset' as const, name: 'easeOut' as const } }] };
   });
+
+  // Properties animated earlier but untouched by the closing clip: nothing to hang the
+  // close on, so synthesize the smallest track that gets them home.
+  // ponytail: assumes the closing block plays at speed 1 and doesn't loop, so
+  // blockSampleTime is the identity across it; retime these two keys if that stops holding.
+  const endBlock = blockAt(tl, durationMs);
+  if (endBlock) {
+    const endStart = blockStarts(tl)[tl.blocks.indexOf(endBlock)];
+    for (const [key, entry] of startValue) {
+      if (closed.has(key)) continue;
+      if (activeTrackFor(tl, entry.nodeId, entry.property, durationMs)) continue;
+      const base = readProp(project.rig, entry.nodeId, entry.property);
+      if (base === undefined || endStart >= durationMs - 1) continue;
+      resolved.push({
+        id: `loop~${key}`,
+        nodeId: entry.nodeId,
+        property: entry.property,
+        blockId: endBlock.id,
+        keyframes: [
+          { id: `loop~${key}~a`, time: endStart, value: base, easingOut: { type: 'linear' as const } },
+          { id: `loop~${key}~b~loop`, time: durationMs, value: entry.value, easingOut: { type: 'preset' as const, name: 'easeOut' as const } },
+        ],
+      });
+    }
+  }
+  return resolved;
 }
 
 /** Where a block-owned track should actually be sampled at absolute time `t` — shifted by
@@ -162,17 +219,16 @@ export function blockSampleTime(project: Project, tl: Timeline, blockId: string,
 function evaluateRigRaw(project: Project, timeMs: number): Rig {
   const rig: Rig = structuredClone(project.rig);
   const tl = activeTimeline(project);
-  const resolved = resolveTracks(tl.tracks, tl.loop, tl.timelineDurationMs);
-  const resolvedById = new Map(resolved.map((t) => [t.id, t]));
+  const resolved = resolveTracks(project);
+  const resolvedTl = { ...tl, tracks: resolved };
   const seen = new Set<string>();
-  for (const track of tl.tracks) {
+  for (const track of resolved) {
     const key = `${track.nodeId} ${track.property}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const winner = activeTrackFor(tl, track.nodeId, track.property, timeMs);
-    const rt = winner && resolvedById.get(winner.id);
+    const winner = activeTrackFor(resolvedTl, track.nodeId, track.property, timeMs);
     const sampleT = winner?.blockId ? blockSampleTime(project, tl, winner.blockId, timeMs) : timeMs;
-    const v = rt && sampleTrack(rt, sampleT);
+    const v = winner && sampleTrack(winner, sampleT);
     if (v !== undefined) writeProp(rig, track.nodeId, track.property, v);
   }
   // linked eyes mirror their source, after keyframes so a track on the source drives both
