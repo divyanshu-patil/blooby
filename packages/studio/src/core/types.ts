@@ -101,10 +101,14 @@ export interface Expression {
   snapshot: Record<string, KeyValue>;
 }
 
+/** Where a preset came from. builtin/custom are local to a file; official and community
+ *  arrive from the shared library and are read-only here. */
+export type PresetSource = 'builtin' | 'custom' | 'official' | 'community';
+
 export interface Preset {
   id: string;
   name: string;
-  source: 'builtin' | 'custom';
+  source: PresetSource;
   durationMs: number;
   tracks: Track[];
   thumbnail?: string;

@@ -7,7 +7,9 @@ import { Panel } from './bits';
 import { EASING_NAMES, namedEasing } from '../core/easing';
 import { characteristicTime } from '../core/timeline';
 import { activeTimeline } from '../core/types';
-import type { Preset, Project } from '../core/types';
+import { hasBackend } from '../core/catalog';
+import { PublishDialog } from '../cloud/PublishDialog';
+import type { Expression, Preset, Project } from '../core/types';
 
 /** A preset's own pose at its most characteristic moment — the icon *is* the animation. */
 function glyphScene(project: Project, preset: Preset) {
@@ -16,6 +18,21 @@ function glyphScene(project: Project, preset: Preset) {
   return sceneAt(temp, characteristicTime(preset), COMP);
 }
 
+/** The four places a preset can come from, plus "everything". Official and community
+ *  only appear once a backend is configured — with none, they would always be empty. */
+type Filter = 'all' | 'builtin' | 'custom' | 'official' | 'community';
+
+const FILTER_LABEL: Record<Filter, string> = {
+  all: 'all', builtin: 'built-in', custom: 'custom', official: 'official', community: 'community',
+};
+const FILTER_HINT: Record<Filter, string> = {
+  all: 'Everything available to this project',
+  builtin: 'Shipped with blooby',
+  custom: 'Saved in this project',
+  official: 'Curated and published by the blooby team',
+  community: 'Published by other people',
+};
+
 export function Presets() {
   const project = useEditor((s) => s.project);
   const addBlock = useEditor((s) => s.addBlock);
@@ -23,7 +40,9 @@ export function Presets() {
   const setPresetColor = useEditor((s) => s.setPresetColor);
   const catalog = useEditor((s) => s.catalog);
   const catalogError = useEditor((s) => s.catalogError);
-  const [filter, setFilter] = useState<'all' | 'builtin' | 'custom'>('all');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [publishing, setPublishing] = useState<Preset | null>(null);
+  const [published, setPublished] = useState<string | null>(null);
   // the shared library and this file's own presets browse as one list; a catalogue entry
   // already pulled into the project (addBlock copies it in) must not show up twice
   const all = useMemo(() => {
@@ -31,16 +50,28 @@ export function Presets() {
     return [...project.presets, ...catalog.filter((p) => !own.has(p.id))];
   }, [project.presets, catalog]);
   const list = all.filter((p) => filter === 'all' || p.source === filter);
+  // hide the shared-library tabs entirely when there is no library to browse, rather
+  // than offering two filters that can only ever come back empty
+  const FILTERS = hasBackend
+    ? (['all', 'builtin', 'custom', 'official', 'community'] as const)
+    : (['all', 'builtin', 'custom'] as const);
 
   return (
     <Panel title="Presets" actions={
-      <div className="seg">
-        {(['all', 'builtin', 'custom'] as const).map((f) => (
-          <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}>{f === 'builtin' ? 'built-in' : f}</button>
+      <div className="seg wrap">
+        {FILTERS.map((f) => (
+          <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}
+            title={FILTER_HINT[f]}>{FILTER_LABEL[f]}</button>
         ))}
       </div>
     }>
       {catalogError && <p className="warn">Preset library unavailable — {catalogError}</p>}
+      {published && <p className="hint">“{published}” submitted for review.</p>}
+      {publishing && (
+        <PublishDialog item={{ kind: 'preset', value: publishing }}
+          onClose={() => setPublishing(null)}
+          onDone={(n) => { setPublishing(null); setPublished(n); }} />
+      )}
       <div className="chips">
         {list.map((preset) => (
           // a plain <button> can't nest the color swatch's own <input type="color"> without
@@ -61,10 +92,23 @@ export function Presets() {
               onChange={(e) => setPresetColor(preset.id, e.target.value)} />
             <MascotThumb className="glyph" scene={glyphScene(project, preset)} view={COMP} />
             {preset.name}
+            {/* only your own work can be submitted — a builtin or something already in
+                the shared library has nowhere to go */}
+            {hasBackend && preset.source === 'custom' && (
+              <button className="chip-pub" title="Publish to the community"
+                onClick={(e) => { e.stopPropagation(); setPublishing(preset); }}>↑</button>
+            )}
           </div>
         ))}
       </div>
-      {!list.length && <p className="empty-note">Save a selection of tracks from the timeline to make one.</p>}
+      {!list.length && (
+        <p className="empty-note">
+          {filter === 'custom' ? 'Save a selection of tracks from the timeline to make one.'
+            : filter === 'community' ? 'Nothing published by the community yet.'
+            : filter === 'official' ? 'No official presets published yet.'
+            : 'Save a selection of tracks from the timeline to make one.'}
+        </p>
+      )}
     </Panel>
   );
 }
@@ -104,10 +148,27 @@ export function Expressions() {
   const apply = useEditor((s) => s.applyExpression);
   const morph = useEditor((s) => s.morphBetween);
   const [name, setName] = useState('');
+  const [publishingPose, setPublishingPose] = useState<Expression | null>(null);
+  const [publishedPose, setPublishedPose] = useState<string | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [dur, setDur] = useState(320);
   const [easing, setEasing] = useState('easeInOut');
+
+  const expressionCatalog = useEditor((s) => s.expressionCatalog);
+  const commit = useEditor((s) => s.commit);
+
+  // Shared-library poses browse alongside your own. Applying one copies it into the
+  // project first, so the file keeps working offline and morph can address it by id.
+  const shared = useMemo(() => {
+    const own = new Set(project.expressions.map((e) => e.id));
+    return expressionCatalog.filter((e) => !own.has(e.id));
+  }, [project.expressions, expressionCatalog]);
+
+  const useShared = (x: Expression) => {
+    commit((p) => { if (!p.expressions.some((e) => e.id === x.id)) p.expressions = [...p.expressions, x]; }, 'add pose from library');
+    apply(x.id, playhead);
+  };
 
   const ids = useMemo(() => project.expressions.map((e) => e.id), [project.expressions]);
   const a = from || ids[0] || '';
@@ -115,6 +176,12 @@ export function Expressions() {
 
   return (
     <Panel title="Expressions">
+      {publishedPose && <p className="hint">“{publishedPose}” submitted for review.</p>}
+      {publishingPose && (
+        <PublishDialog item={{ kind: 'expression', value: publishingPose }}
+          onClose={() => setPublishingPose(null)}
+          onDone={(n) => { setPublishingPose(null); setPublishedPose(n); }} />
+      )}
       <div className="row">
         <input className="txt" placeholder="Capture current pose as…" value={name} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) { capture(name.trim()); setName(''); } }} />
@@ -134,6 +201,27 @@ export function Expressions() {
                 }}>
                 <span className="glyph" style={{ display: 'grid', placeItems: 'center', font: '600 9px var(--mono)', color: 'var(--paper)' }}>
                   {Object.keys(x.snapshot).length}
+                </span>
+                {x.name}
+                {hasBackend && (
+                  <span className="chip-pub" role="button" tabIndex={0} title="Publish to the community"
+                    onClick={(e) => { e.stopPropagation(); setPublishingPose(x); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setPublishingPose(x); } }}>↑</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {shared.length > 0 && (
+        <>
+          <span className="panel-title">From the library</span>
+          <div className="chips">
+            {shared.map((x) => (
+              <button key={x.id} className="chip" title={`Add "${x.name}" and apply it at ${(playhead / 1000).toFixed(2)}s`}
+                onClick={() => useShared(x)}>
+                <span className="glyph" style={{ display: 'grid', placeItems: 'center', font: '600 9px var(--mono)', color: 'var(--paper)' }}>
+                  {Object.keys(x.snapshot ?? {}).length}
                 </span>
                 {x.name}
               </button>

@@ -20,10 +20,11 @@ const at = (p: Project): Timeline => activeTimeline(p);
 
 export interface Editor {
   project: Project;
-  /** The shared preset library fetched from Supabase, kept separate from
-   *  `project.presets` (which is this file's own embedded/custom list). Browsing reads
-   *  both; adding one copies it into the project so a saved file stays self-contained. */
+  /** The shared library fetched from Supabase, kept separate from `project.presets` /
+   *  `project.expressions` (this file's own embedded lists). Browsing reads both; using
+   *  one copies it into the project so a saved file stays self-contained. */
   catalog: Preset[];
+  expressionCatalog: Expression[];
   catalogError: string | null;
   selection: string[];
   selectedTrackId: string | null;
@@ -197,6 +198,7 @@ export function splitKey(key: string): [string, string] {
 export const useEditor = create<Editor>((set, get) => ({
   project: load(),
   catalog: [],
+  expressionCatalog: [],
   catalogError: null,
   selection: [],
   selectedTrackId: null,
@@ -397,7 +399,8 @@ export const useEditor = create<Editor>((set, get) => ({
 
   async loadCatalog() {
     try {
-      set({ catalog: await fetchCatalog(), catalogError: null });
+      const { presets, expressions } = await fetchCatalog();
+      set({ catalog: presets, expressionCatalog: expressions, catalogError: null });
     } catch (e) {
       // deliberately NOT a silent fall back to the builtins: with a backend configured,
       // a library that quietly looks empty is worse than one that says it failed

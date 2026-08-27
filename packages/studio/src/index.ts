@@ -26,4 +26,5 @@ export { useAutosave } from './cloud/useAutosave';
 export { Splashscreen } from './cloud/Splashscreen';
 export { ProjectThumb, AssetThumb } from './cloud/Thumb';
 export { ProjectCard, AssetCard } from './cloud/cards';
+export { PublishDialog } from './cloud/PublishDialog';
 export type * from './cloud/types';

@@ -1,17 +1,16 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Preset } from './types';
+import type { Expression, Preset } from './types';
 
 /**
  * The Supabase client, or null when this build has no backend configured at all.
  *
- * Reads of the preset catalogue go straight from the browser to Postgres under RLS
- * (`presets` is anon-readable where `published = true`), so there is no privilege to
+ * Reads of the shared library go straight from the browser to Postgres under RLS
+ * (`assets` is anon-readable where `status = 'published'`), so there is no privilege to
  * borrow and therefore no reason to hop through apps/api for them. Only the operations
- * that genuinely need the service-role key — listing auth.users, publishing a preset —
- * live behind Express.
+ * that genuinely need the service-role key — listing auth.users, publishing official
+ * content — live behind Express.
  *
- * The publishable key is the only key that ever reaches a browser bundle. The secret key
- * belongs to apps/api and must never be imported from here.
+ * The publishable key is the only key that ever reaches a browser bundle.
  */
 // optional-chained because selfcheck.ts bundles this file and runs it under plain Node,
 // where there is no import.meta.env at all — no backend there is the correct answer
@@ -23,22 +22,54 @@ export const supabase: SupabaseClient | null = url && key ? createClient(url, ke
 /** Whether this build talks to a backend at all. False = the bundled builtins are it. */
 export const hasBackend = supabase !== null;
 
+interface AssetRow { id: string; kind: 'preset' | 'expression'; source: string; name: string; data: unknown }
+
 /**
- * Published presets from the shared library.
+ * Published presets AND expressions from the shared library.
  *
- * With no backend configured this resolves empty and the editor simply runs on the
- * builtins already baked into `defaultProject()` — the offline/dev path. With a backend
- * configured a failure is *not* swallowed into that same fallback: the caller surfaces it,
- * because "the library silently looks like the 2019 builtins" is a much worse failure
- * than an explicit error.
+ * Reads `assets`, which is the one table behind built-in, official, user and community
+ * content alike — the legacy `presets` table this used to query was superseded, which is
+ * exactly why admin-published content stopped showing up in the editor.
+ *
+ * With no backend configured this resolves empty and the editor runs on the builtins
+ * already baked into `defaultProject()` — the offline path. With a backend configured a
+ * failure is NOT swallowed into that same fallback: the caller surfaces it, because a
+ * library that silently looks like the builtins is a worse failure than an explicit error.
  */
-export async function fetchCatalog(): Promise<Preset[]> {
-  if (!supabase) return [];
+export async function fetchCatalog(): Promise<{ presets: Preset[]; expressions: Expression[] }> {
+  if (!supabase) return { presets: [], expressions: [] };
+
   const { data, error } = await supabase
-    .from('presets')
-    .select('preset_json')
-    .eq('published', true)
-    .order('created_at', { ascending: true });
+    .from('assets')
+    .select('id, kind, source, name, data')
+    .eq('status', 'published')
+    // builtins are already bundled into defaultProject(), and the seeded copies carry
+    // different ids, so including them here shows every one twice. They stay in the
+    // table for the API-backed Library browse, which has no bundled copy to fall back on.
+    .neq('source', 'builtin')
+    .order('published_at', { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => row.preset_json as Preset);
+
+  const presets: Preset[] = [];
+  const expressions: Expression[] = [];
+
+  for (const row of (data ?? []) as AssetRow[]) {
+    // `data` is the editor's own payload; the row's columns are the catalogue metadata
+    // around it. Trust the row for identity and provenance, not the embedded copy.
+    const payload = (row.data ?? {}) as Record<string, unknown>;
+    if (row.kind === 'preset') {
+      if (!Array.isArray(payload.tracks)) continue;      // unusable without tracks
+      presets.push({
+        ...(payload as unknown as Preset),
+        id: row.id,
+        name: row.name,
+        source: row.source === 'builtin' || row.source === 'official' || row.source === 'community' ? row.source : 'custom',
+      });
+    } else {
+      if (!payload.snapshot || typeof payload.snapshot !== 'object') continue;
+      expressions.push({ ...(payload as unknown as Expression), id: row.id, name: row.name });
+    }
+  }
+
+  return { presets, expressions };
 }
