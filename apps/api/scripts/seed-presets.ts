@@ -8,6 +8,7 @@
  * is authored for a bundler (extensionless relative imports) and will not typecheck
  * under NodeNext.
  */
+import 'dotenv/config'; // imported directly rather than via config/env.ts, which pulls in the whole server config
 import { readFileSync } from 'node:fs';
 import type { AssetKind } from '@prisma/client';
 import { prisma } from '../src/config/prisma.js';

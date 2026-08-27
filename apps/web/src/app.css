@@ -1,0 +1,14 @@
+.cloud-editor { display: flex; flex-direction: column; height: 100vh; }
+
+.cloud-bar {
+  display: flex; align-items: center; gap: 11px;
+  padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+}
+.cloud-bar .spacer { flex: 1; }
+.cloud-name { font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+
+.cloud-editor-body { flex: 1; min-height: 0; }
+
+.who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+.who img { width: 22px; height: 22px; border-radius: 50%; }
+.who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

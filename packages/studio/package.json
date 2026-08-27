@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./index.css": "./src/index.css"
+    "./index.css": "./src/index.css",
+    "./kit.css": "./src/kit/kit.css"
   },
   "scripts": {
     "check": "npx esbuild src/core/selfcheck.ts --bundle --format=esm | node --input-type=module",

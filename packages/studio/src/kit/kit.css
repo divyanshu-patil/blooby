@@ -1,0 +1,198 @@
+/* ---------------------------------------------------------------------------
+   The app shell around the editor: dashboard, community, admin.
+
+   Deliberately built on the editor's own tokens (--paper/--panel/--signal/--hot,
+   Bricolage + Inter Tight + JetBrains Mono) rather than a second visual identity.
+   Signing in should feel like walking into the same building as the editor, not a
+   different product that happens to link to it.
+
+   Numbers are set in the mono face throughout — metrics, counts, timestamps — which
+   both aligns columns and echoes the timecode readouts in the timeline.
+--------------------------------------------------------------------------- */
+
+.shell { display: grid; grid-template-columns: auto 1fr; height: 100vh; background: var(--paper); }
+
+/* --- sidebar ------------------------------------------------------------ */
+.side {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 232px; padding: 14px 10px;
+  background: var(--panel); border-right: 1px solid var(--line);
+  transition: width .18s ease;
+}
+.side[data-collapsed='true'] { width: 60px; }
+.side[data-collapsed='true'] .side-label,
+.side[data-collapsed='true'] .side-group-title,
+.side[data-collapsed='true'] .brand-word { display: none; }
+
+.brand {
+  display: flex; align-items: center; gap: 9px;
+  padding: 4px 8px 14px; font-family: var(--display);
+  font-size: 17px; font-weight: 700; letter-spacing: -.02em; color: var(--ink);
+}
+.brand-dot { width: 15px; height: 15px; border-radius: 50%; background: var(--signal); flex: none; }
+
+.side-group-title {
+  padding: 14px 8px 5px; font-size: 10px; font-weight: 600;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+}
+
+.side-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 8px; border-radius: var(--r);
+  font: inherit; font-size: 13px; color: var(--ink-2);
+  background: none; border: 0; cursor: pointer; text-align: left; width: 100%;
+}
+.side-item:hover { background: var(--field); color: var(--ink); }
+.side-item[aria-current='true'] { background: var(--signal-soft); color: var(--signal); font-weight: 600; }
+.side-item .side-glyph { width: 16px; text-align: center; flex: none; opacity: .75; }
+.side-item[aria-current='true'] .side-glyph { opacity: 1; }
+.side-count { margin-left: auto; font-family: var(--mono); font-size: 11px; opacity: .7; }
+
+.side-foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+
+/* --- main column -------------------------------------------------------- */
+.main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+.page-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 22px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.page-title { font-family: var(--display); font-size: 20px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
+.page-sub { font-size: 12.5px; color: var(--muted); margin: 2px 0 0; }
+.page-head .spacer { flex: 1; }
+
+.page-body { flex: 1; overflow: auto; padding: 22px; }
+
+/* --- metrics ------------------------------------------------------------ */
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; }
+
+.stat {
+  padding: 13px 15px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--r);
+}
+.stat-label { font-size: 11.5px; color: var(--muted); letter-spacing: .01em; }
+.stat-value {
+  font-family: var(--mono); font-size: 25px; font-weight: 500;
+  letter-spacing: -.02em; color: var(--ink); margin-top: 5px; line-height: 1.1;
+}
+.stat-delta { font-family: var(--mono); font-size: 11.5px; margin-top: 3px; }
+.stat-delta[data-dir='up'] { color: var(--signal); }
+.stat-delta[data-dir='down'] { color: var(--hot); }
+.stat-delta[data-dir='flat'] { color: var(--muted); }
+
+/* --- cards -------------------------------------------------------------- */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(206px, 1fr)); gap: 13px; }
+
+.card {
+  display: flex; flex-direction: column; position: relative;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--r); overflow: hidden; text-align: left;
+  cursor: pointer; padding: 0; font: inherit; color: inherit;
+  transition: border-color .12s ease, transform .12s ease;
+}
+.card:hover { border-color: var(--signal); transform: translateY(-1px); }
+.card:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* the thumbnail is the mascot itself, rendered live from the project's own scene —
+   never a stored image, so it can never go stale against the animation it represents */
+.card-thumb {
+  aspect-ratio: 4 / 3; display: grid; place-items: center;
+  background: var(--field); border-bottom: 1px solid var(--line-soft);
+}
+.card-thumb svg { width: 100%; height: 100%; }
+
+.card-body { padding: 9px 11px 11px; display: flex; flex-direction: column; gap: 2px; }
+.card-name { font-size: 13px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-meta { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+/* destructive and secondary actions stay behind the ⋯ menu rather than sitting on
+   every card competing with the thing you actually came to do: open the project */
+.card-menu {
+  position: absolute; top: 7px; right: 7px;
+  width: 25px; height: 25px; border-radius: 5px;
+  background: var(--panel); border: 1px solid var(--line);
+  color: var(--ink-2); cursor: pointer; opacity: 0; transition: opacity .12s ease;
+  display: grid; place-items: center; font-size: 14px; line-height: 1;
+}
+.card:hover .card-menu, .card-menu:focus-visible, .card-menu[aria-expanded='true'] { opacity: 1; }
+
+.menu {
+  position: absolute; top: 34px; right: 7px; z-index: 20; min-width: 152px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--r); box-shadow: var(--shadow); padding: 4px; text-align: left;
+}
+.menu button {
+  display: block; width: 100%; padding: 6px 9px; border: 0; border-radius: 5px;
+  background: none; font: inherit; font-size: 12.5px; color: var(--ink-2); cursor: pointer; text-align: left;
+}
+.menu button:hover { background: var(--field); color: var(--ink); }
+.menu button[data-danger='true'] { color: var(--hot); }
+
+/* --- states ------------------------------------------------------------- */
+.state { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 56px 20px; text-align: center; }
+.state-title { font-family: var(--display); font-size: 16px; font-weight: 600; color: var(--ink); }
+.state-note { font-size: 13px; color: var(--muted); max-width: 340px; line-height: 1.5; }
+
+.skeleton { background: var(--field); border: 1px solid var(--line-soft); border-radius: var(--r); animation: pulse 1.4s ease-in-out infinite; }
+.skeleton-card { aspect-ratio: 4 / 3.35; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* --- controls ----------------------------------------------------------- */
+.searchbar {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 10px; background: var(--field);
+  border: 1px solid var(--line); border-radius: var(--r); min-width: 200px;
+}
+.searchbar input { border: 0; background: none; font: inherit; font-size: 13px; color: var(--ink); width: 100%; outline: none; }
+
+.chipbar { display: flex; gap: 6px; flex-wrap: wrap; }
+.chipbar button {
+  padding: 4px 10px; border-radius: 999px; font: inherit; font-size: 12px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--ink-2); cursor: pointer;
+}
+.chipbar button[aria-pressed='true'] { background: var(--signal); border-color: var(--signal); color: #fff; }
+
+.tag { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--field); border: 1px solid var(--line-soft); color: var(--muted); }
+.tag[data-tone='live'] { background: var(--signal-soft); border-color: var(--signal); color: var(--signal); }
+.tag[data-tone='warn'] { background: #fdecd8; border-color: #e2a34e; color: #8a5510; }
+.tag[data-tone='bad'] { background: #fbe0da; border-color: var(--hot); color: var(--hot); }
+
+/* --- table -------------------------------------------------------------- */
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th { text-align: left; font-weight: 500; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 7px 11px; }
+.table td { padding: 9px 11px; border-top: 1px solid var(--line-soft); color: var(--ink-2); }
+.table tbody tr { cursor: pointer; }
+.table tbody tr:hover { background: var(--panel); }
+.table .num { font-family: var(--mono); }
+
+/* --- dialog ------------------------------------------------------------- */
+.scrim { position: fixed; inset: 0; background: rgba(23, 22, 27, .34); display: grid; place-items: center; z-index: 90; padding: 20px; }
+.dialog { width: min(460px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 18px; }
+.dialog h2 { font-family: var(--display); font-size: 17px; margin: 0 0 5px; }
+.dialog p { font-size: 13px; color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
+.dialog-actions { display: flex; gap: 7px; justify-content: flex-end; margin-top: 15px; }
+
+.field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 11px; }
+.field-row label { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+.field-row input, .field-row textarea, .field-row select {
+  padding: 7px 9px; font: inherit; font-size: 13px;
+  background: var(--field); border: 1px solid var(--line); border-radius: var(--r); color: var(--ink);
+}
+.field-row input:focus, .field-row textarea:focus { outline: 2px solid var(--signal); outline-offset: -1px; }
+
+/* --- save indicator ----------------------------------------------------- */
+.savestate { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.savestate[data-state='saving'] { color: var(--ink-2); }
+.savestate[data-state='error'] { color: var(--hot); }
+.savestate .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.savestate[data-state='saving'] .dot { animation: pulse 1s ease-in-out infinite; }
+
+@media (max-width: 820px) {
+  .shell { grid-template-columns: 1fr; }
+  .side { position: fixed; inset: 0 auto 0 0; z-index: 60; transform: translateX(-100%); transition: transform .2s ease; }
+  .side[data-open='true'] { transform: none; box-shadow: var(--shadow); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card, .side, .skeleton, .savestate .dot { transition: none; animation: none; }
+}

@@ -1,0 +1,25 @@
+/* The one screen someone sees before the product. It borrows the editor's paper and
+   ultramarine rather than introducing a separate "marketing" look. */
+.auth { display: grid; place-items: center; min-height: 100vh; background: var(--paper); padding: 24px; }
+
+.auth-card {
+  width: min(392px, 100%); padding: 26px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 11px; box-shadow: var(--shadow);
+}
+.auth-title { font-family: var(--display); font-size: 23px; font-weight: 700; letter-spacing: -.025em; margin: 0 0 5px; }
+.auth-sub { font-size: 13px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+
+.btn.wide { width: 100%; justify-content: center; }
+.btn.google { width: 100%; justify-content: center; background: var(--field); border: 1px solid var(--line); font-weight: 500; }
+.btn.google:hover { border-color: var(--signal); }
+
+.auth-or { display: flex; align-items: center; gap: 10px; margin: 15px 0; color: var(--muted); font-size: 11.5px; }
+.auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+.auth-msg { font-size: 12.5px; color: var(--ink-2); margin: 11px 0 0; }
+.auth-msg[data-tone='bad'] { color: var(--hot); }
+
+.auth-switch { display: flex; justify-content: space-between; gap: 10px; margin-top: 15px; }
+.auth-switch button { background: none; border: 0; padding: 0; font: inherit; font-size: 12.5px; color: var(--signal); cursor: pointer; }
+.auth-switch button:hover { text-decoration: underline; }
