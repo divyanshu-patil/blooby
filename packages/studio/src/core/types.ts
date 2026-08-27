@@ -112,6 +112,10 @@ export interface Preset {
   durationMs: number;
   tracks: Track[];
   thumbnail?: string;
+  /** Library metadata, present only on presets that came from the shared catalogue.
+   *  Local builtin/custom presets have no publish date or usage count to sort on. */
+  publishedAt?: string;
+  uses?: number;
   /** an identifying accent — shown on the preset's chip, and on every clip/track/graph
    * line it drives, so a busy timeline reads at a glance instead of every clip looking
    * the same. Undefined means "no accent", the same as every preset before this existed. */

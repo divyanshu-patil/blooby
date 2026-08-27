@@ -9,6 +9,8 @@ import { characteristicTime } from '../core/timeline';
 import { activeTimeline } from '../core/types';
 import { hasBackend } from '../core/catalog';
 import { PublishDialog } from '../cloud/PublishDialog';
+import { assetsApi } from '../cloud/api';
+import { PresetPreview } from './PresetPreview';
 import type { Expression, Preset, Project } from '../core/types';
 
 /** A preset's own pose at its most characteristic moment — the icon *is* the animation. */
@@ -33,6 +35,10 @@ const FILTER_HINT: Record<Filter, string> = {
   community: 'Published by other people',
 };
 
+type Sort = 'default' | 'newest' | 'popular';
+
+const SORT_LABEL: Record<Sort, string> = { default: 'library order', newest: 'newest', popular: 'popular' };
+
 export function Presets() {
   const project = useEditor((s) => s.project);
   const addBlock = useEditor((s) => s.addBlock);
@@ -41,6 +47,8 @@ export function Presets() {
   const catalog = useEditor((s) => s.catalog);
   const catalogError = useEditor((s) => s.catalogError);
   const [filter, setFilter] = useState<Filter>('all');
+  const [sort, setSort] = useState<Sort>('default');
+  const [preview, setPreview] = useState<Preset | null>(null);
   const [publishing, setPublishing] = useState<Preset | null>(null);
   const [published, setPublished] = useState<string | null>(null);
   // the shared library and this file's own presets browse as one list; a catalogue entry
@@ -49,7 +57,26 @@ export function Presets() {
     const own = new Set(project.presets.map((p) => p.id));
     return [...project.presets, ...catalog.filter((p) => !own.has(p.id))];
   }, [project.presets, catalog]);
-  const list = all.filter((p) => filter === 'all' || p.source === filter);
+  const filtered = all.filter((p) => filter === 'all' || p.source === filter);
+
+  // Only library presets carry a publish date or a usage count; a builtin has neither, so
+  // it sorts last rather than pretending to be brand new or unused.
+  const list = useMemo(() => {
+    if (sort === 'default') return filtered;
+    const rank = (p: Preset) => (sort === 'popular' ? (p.uses ?? -1) : Date.parse(p.publishedAt ?? '') || -1);
+    return [...filtered].sort((a, b) => rank(b) - rank(a));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, sort]);
+
+  /**
+   * Adding is the moment worth counting — a browse is curiosity, an add is the preset
+   * actually being used. Fire-and-forget: the count is a metric, and failing to record
+   * one must never stop the preset landing on the timeline.
+   */
+  const add = (preset: Preset) => {
+    addBlock(preset.id);
+    if (preset.source === 'official' || preset.source === 'community') void assetsApi.markUsed(preset.id);
+  };
   // hide the shared-library tabs entirely when there is no library to browse, rather
   // than offering two filters that can only ever come back empty
   const FILTERS = hasBackend
@@ -57,16 +84,32 @@ export function Presets() {
     : (['all', 'builtin', 'custom'] as const);
 
   return (
-    <Panel title="Presets" actions={
-      <div className="seg wrap">
-        {FILTERS.map((f) => (
-          <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}
-            title={FILTER_HINT[f]}>{FILTER_LABEL[f]}</button>
-        ))}
+    <Panel title="Presets">
+      {/* Five filters plus a sort will not fit beside the title in a narrow rail, and
+          wrapping them inside the segmented control's own border reads as a broken box
+          rather than two rows of tabs. Their own full-width row scrolls sideways
+          instead, staying one clean line at any rail width. */}
+      <div className="filter-row">
+        <div className="seg">
+          {FILTERS.map((f) => (
+            <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}
+              title={FILTER_HINT[f]}>{FILTER_LABEL[f]}</button>
+          ))}
+        </div>
+        <select className="sel" value={sort} onChange={(e) => setSort(e.target.value as Sort)}
+          title="Order presets by">
+          {(['default', 'newest', 'popular'] as const).map((o) => (
+            <option key={o} value={o}>{SORT_LABEL[o]}</option>
+          ))}
+        </select>
       </div>
-    }>
       {catalogError && <p className="warn">Preset library unavailable — {catalogError}</p>}
       {published && <p className="hint">“{published}” submitted for review.</p>}
+      {preview && (
+        <PresetPreview project={project} preset={preview}
+          onAdd={() => { add(preview); setPreview(null); }}
+          onClose={() => setPreview(null)} />
+      )}
       {publishing && (
         <PublishDialog item={{ kind: 'preset', value: publishing }}
           onClose={() => setPublishing(null)}
@@ -78,10 +121,10 @@ export function Presets() {
           // invalid/broken interactive-inside-interactive markup, so this one's a div
           // acting as a button — role/tabIndex/onKeyDown restore what <button> gave for free.
           <div key={preset.id} className="chip" draggable role="button" tabIndex={0}
-            title={`Add ${preset.name} · ${(preset.durationMs / 1000).toFixed(1)}s — double-click to rename`}
+            title={`Preview ${preset.name} · ${(preset.durationMs / 1000).toFixed(1)}s — drag straight onto the strip to skip the preview, double-click to rename`}
             onDragStart={(e) => { e.dataTransfer.setData('text/blooby-preset', preset.id); e.dataTransfer.effectAllowed = 'copy'; }}
-            onClick={() => addBlock(preset.id)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addBlock(preset.id); } }}
+            onClick={() => setPreview(preset)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPreview(preset); } }}
             onDoubleClick={(e) => {
               e.stopPropagation();
               const name = prompt('Rename preset', preset.name);
@@ -95,8 +138,8 @@ export function Presets() {
             {/* only your own work can be submitted — a builtin or something already in
                 the shared library has nowhere to go */}
             {hasBackend && preset.source === 'custom' && (
-              <button className="chip-pub" title="Publish to the community"
-                onClick={(e) => { e.stopPropagation(); setPublishing(preset); }}>↑</button>
+              <button className="chip-pub" title={`Publish "${preset.name}" to the community`}
+                onClick={(e) => { e.stopPropagation(); setPublishing(preset); }}>Publish</button>
             )}
           </div>
         ))}
@@ -204,9 +247,9 @@ export function Expressions() {
                 </span>
                 {x.name}
                 {hasBackend && (
-                  <span className="chip-pub" role="button" tabIndex={0} title="Publish to the community"
+                  <span className="chip-pub" role="button" tabIndex={0} title={`Publish "${x.name}" to the community`}
                     onClick={(e) => { e.stopPropagation(); setPublishingPose(x); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setPublishingPose(x); } }}>↑</span>
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setPublishingPose(x); } }}>Publish</span>
                 )}
               </button>
             ))}

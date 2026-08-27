@@ -22,7 +22,10 @@ export const supabase: SupabaseClient | null = url && key ? createClient(url, ke
 /** Whether this build talks to a backend at all. False = the bundled builtins are it. */
 export const hasBackend = supabase !== null;
 
-interface AssetRow { id: string; kind: 'preset' | 'expression'; source: string; name: string; data: unknown }
+interface AssetRow {
+  id: string; kind: 'preset' | 'expression'; source: string; name: string;
+  data: unknown; published_at: string | null; download_count: number | null;
+}
 
 /**
  * Published presets AND expressions from the shared library.
@@ -41,7 +44,7 @@ export async function fetchCatalog(): Promise<{ presets: Preset[]; expressions: 
 
   const { data, error } = await supabase
     .from('assets')
-    .select('id, kind, source, name, data')
+    .select('id, kind, source, name, data, published_at, download_count')
     .eq('status', 'published')
     // builtins are already bundled into defaultProject(), and the seeded copies carry
     // different ids, so including them here shows every one twice. They stay in the
@@ -64,6 +67,8 @@ export async function fetchCatalog(): Promise<{ presets: Preset[]; expressions: 
         id: row.id,
         name: row.name,
         source: row.source === 'builtin' || row.source === 'official' || row.source === 'community' ? row.source : 'custom',
+        publishedAt: row.published_at ?? undefined,
+        uses: row.download_count ?? 0,
       });
     } else {
       if (!payload.snapshot || typeof payload.snapshot !== 'object') continue;
