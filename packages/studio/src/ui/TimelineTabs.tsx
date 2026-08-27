@@ -21,7 +21,7 @@ export function TimelineTabs() {
   };
 
   return (
-    <div className="tl-tabs">
+    <div className="tl-tabs" data-tour="timeline-tabs">
       {project.timelines.map((tl) => (
         <div key={tl.id} className="tl-tab" aria-pressed={tl.id === project.activeTimelineId}
           onClick={() => tl.id !== project.activeTimelineId && setActiveTimeline(tl.id)}
@@ -44,7 +44,7 @@ export function TimelineTabs() {
           )}
         </div>
       ))}
-      <button className="tl-tab-add" title="Add a new timeline (a new state for export)" onClick={() => addTimeline()}>+</button>
+      <button className="tl-tab-add" data-tour="timeline-add" title="Add a new timeline (a new state for export)" onClick={() => addTimeline()}>+</button>
     </div>
   );
 }

@@ -285,7 +285,7 @@ export function Timeline() {
           {playing ? '❙❙' : '▶'}
         </button>
         <button className="btn icon" title="Next keyframe (.)" onClick={() => goto(1)}>›</button>
-        <button className="btn sm" aria-pressed={loop} title="Loop playback" onClick={() => setLoop(!loop)}>Loop</button>
+        <button className="btn sm" data-tour="loop" aria-pressed={loop} title="Loop playback" onClick={() => setLoop(!loop)}>Loop</button>
         <span className="tc">{(playhead / 1000).toFixed(2)}<span className="dim">s / {(duration / 1000).toFixed(2)}s</span></span>
         <span className="tc dim">f{Math.round((playhead / 1000) * project.fps)}</span>
         <button className="btn sm rec" aria-pressed={autoKey} title="Record every change as a keyframe" onClick={toggleAutoKey}>
@@ -296,7 +296,7 @@ export function Timeline() {
           <>
             <span className="hint">easing</span>
             <div style={{ position: 'relative' }}>
-              <button className="btn sm" aria-pressed={curveOpen} onClick={() => setCurveOpen((v) => !v)}
+              <button className="btn sm" data-tour="curve" aria-pressed={curveOpen} onClick={() => setCurveOpen((v) => !v)}
                 title="Edit this keyframe's curve">
                 {easingLabel(selKf.easingOut)} ⌃
               </button>
@@ -316,7 +316,7 @@ export function Timeline() {
         )}
         <div className="seg">
           <button aria-pressed={view === 'tracks'} onClick={() => setView('tracks')}>Tracks</button>
-          <button aria-pressed={view === 'graph'} onClick={() => setView('graph')}>Graph</button>
+          <button data-tour="graph-toggle" aria-pressed={view === 'graph'} onClick={() => setView('graph')}>Graph</button>
         </div>
         <button className="btn icon sm" title="Zoom out" onClick={() => setZoom((z) => Math.max(1, z / 1.5))}>−</button>
         <button className="btn icon sm" title="Zoom in" onClick={() => setZoom((z) => Math.min(24, z * 1.5))}>+</button>
@@ -325,10 +325,10 @@ export function Timeline() {
           onClick={() => {
             const name = prompt('Preset name', selection.length ? project.rig.nodes[selection[0]]?.name : 'My preset');
             if (name) savePreset(name, visible.map((t) => t.id), Math.max(200, Math.round(duration)));
-          }}>Save preset</button>
+          }} data-tour="save-preset">Save preset</button>
       </div>
 
-      <div className="strip-wrap">
+      <div className="strip-wrap" data-tour="strip">
         <label className="dur-field" title="Total timeline length. Shrinking it clamps any keyframe past the new end onto it — nothing is deleted. It can never go shorter than the blocks tiled below.">
           <span className="t">Duration</span>
           <NumberField className="prop-num" value={Math.round(duration) / 1000} step={0.1}

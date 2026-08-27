@@ -252,7 +252,7 @@ export function Stage() {
       <div className="stage-grid" />
       <div className="stage-tools">
         <button className="btn icon sm" aria-pressed={tool === 'select'} title="Select and move (V)" onClick={() => setTool('select')}>↖</button>
-        <button className="btn icon sm" aria-pressed={tool === 'turn'} title="Turn the head (T)" onClick={() => setTool('turn')}>◍</button>
+        <button className="btn icon sm" data-tour="tool-turn" aria-pressed={tool === 'turn'} title="Turn the head (T)" onClick={() => setTool('turn')}>◍</button>
         <button className="btn icon sm" aria-pressed={showGuides} title="Guides (G)" onClick={() => setShowGuides((v) => !v)}>⌗</button>
         <button className="btn icon sm" title="Recentre" onClick={reset}>⌂</button>
         <button className="btn icon sm" aria-pressed={fullscreen} title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen preview'}
