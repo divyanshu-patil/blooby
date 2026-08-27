@@ -5,6 +5,8 @@ export { defaultProject, builtinPresets, builtinExpressions, COMP } from './core
 export { installPublicApi } from './core/publicApi';
 export { fetchCatalog, hasBackend, supabase } from './core/catalog';
 export { sceneAt } from './core/scene';
+export { MascotThumb, Shapes } from './ui/Mascot';
+export type { SceneItem } from './core/scene';
 export { activeTimeline } from './core/types';
 export { smoke } from './smoke';
 export type { Project, Preset, Expression, Timeline } from './core/types';

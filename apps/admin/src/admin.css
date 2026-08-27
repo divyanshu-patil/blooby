@@ -15,38 +15,50 @@
 .admin-editor-body { flex: 1; min-height: 0; }
 
 /* --- dashboard blocks --------------------------------------------------- */
-.panel-block { margin-top: 20px; padding: 15px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); }
-.block-title { font-family: var(--display); font-size: 13.5px; font-weight: 600; margin: 0 0 11px; color: var(--ink); }
+/* Charts and lists DO get card chrome — unlike the stat blocks, they are containers with
+   internal structure, which is exactly what DESIGN.md's 24px card is for. */
+.panel-block {
+  margin-top: 24px; padding: 20px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow);
+}
+.block-title {
+  font-family: var(--display); font-size: 18px; font-weight: 600;
+  line-height: 1.56; margin: 0 0 16px; color: var(--ink);
+}
 
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.two-col .panel-block { margin-top: 0; }
 @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 
-/* the one thing worth interrupting an admin about, so it reads as an action not a stat */
+/* The one thing worth interrupting an admin about. Uses the dark inversion rather than a
+   colour, since #e7000b is reserved for destructive states and a pending queue is work,
+   not an error. */
 .callout {
-  display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 16px;
-  padding: 12px 15px; font: inherit; font-size: 13px; text-align: left; cursor: pointer;
-  background: var(--signal-soft); border: 1px solid var(--signal);
-  border-radius: var(--r); color: var(--signal);
+  display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 24px;
+  padding: 16px 20px; font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  background: var(--ink); border: 0; border-radius: var(--r-card); color: #fafafa;
 }
-.callout strong { font-family: var(--mono); font-size: 16px; }
-.callout-go { margin-left: auto; font-weight: 600; }
+.callout strong { font-family: var(--display); font-size: 18px; font-weight: 600; }
+.callout-go { margin-left: auto; font-weight: 500; }
+.callout:hover { background: var(--ink-2); }
 
 /* --- chart -------------------------------------------------------------- */
-.chart-total { font-size: 12.5px; color: var(--muted); margin-bottom: 9px; }
-.chart-num { font-family: var(--mono); font-size: 19px; color: var(--ink); }
+.chart-total { font-size: 14px; line-height: 1.43; color: var(--muted); margin-bottom: 12px; }
+.chart-num { font-family: var(--display); font-size: 24px; font-weight: 600; letter-spacing: -.6px; color: var(--ink); }
 
-.chart { display: flex; align-items: flex-end; gap: 2px; height: 108px; }
+.chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; }
 .chart-bar { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 2px; }
-.chart-fill { width: 100%; background: var(--signal); border-radius: 1.5px 1.5px 0 0; min-height: 1px; }
+.chart-fill { width: 100%; background: var(--ink); border-radius: 2px 2px 0 0; min-height: 1px; }
+.chart-bar:hover .chart-fill { background: var(--muted); }
 
-.chart-axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+.chart-axis { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 8px; }
 
 /* --- lists -------------------------------------------------------------- */
 .ranked, .plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-.ranked li, .plain-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+.ranked li, .plain-list li { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .ranked li:first-child, .plain-list li:first-child { border-top: 0; }
 .ranked-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ranked-num { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.ranked-num { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 
 /* --- full-bleed editor -------------------------------------------------- */
 /* The preview is the point of this screen, so navigation is a slide-over rather than a
@@ -78,3 +90,26 @@
 }
 @keyframes slide-in { from { transform: translateX(-100%); } to { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .slide-nav { animation: none; } }
+
+/* --- splashscreen editor ------------------------------------------------ */
+.splash-preview {
+  display: grid; place-items: center;
+  aspect-ratio: 16 / 9; width: 100%;
+  border-radius: var(--r-nested, 10px); overflow: hidden;
+}
+.splash-preview svg { width: 100%; height: 100%; }
+.splash-preview-empty { font-size: 12px; color: #fafafa; opacity: .7; padding: 12px; text-align: center; }
+
+/* the card grid reuses the same preview, which must not stretch its row */
+.card-thumb .splash-preview { aspect-ratio: 4 / 3; border-radius: 0; }
+
+.splash-picker {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  max-height: 132px; overflow: auto; margin-bottom: 12px;
+  padding: 10px; background: var(--field); border-radius: var(--r-nested, 10px);
+}
+.splash-pick {
+  padding: 6px 12px; border-radius: var(--r-btn); font: 500 14px var(--ui);
+  background: var(--panel); border: 1px solid var(--line); color: var(--ink); cursor: pointer;
+}
+.splash-pick:hover { border-color: var(--ink); }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { chatJson, listModels, PoolError, type ChatMessage } from '../copilot/client';
-import { baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, needsKey, resolveModel, saveSettings, type CopilotSettings, type KeyStatus } from '../copilot/pool';
+import { acceptsKeys, baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, resolveModel, saveSettings, usesBackend, type CopilotSettings, type KeyStatus } from '../copilot/pool';
 import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate, type ToolCall } from '../copilot/tools';
 import { systemPrompt } from '../copilot/prompt';
 import { parseTurn } from '../copilot/parse';
@@ -126,12 +126,15 @@ export function Copilot() {
             )}
             {settings.endpoint === 'cloud' && (
               <p className="hint">
-                Requests go to <code>localhost:11434</code>, not <code>ollama.com</code> — ollama.com sends no
-                CORS headers, so no browser can call it directly. Point <em>Custom</em> at a proxy if you need
-                to reach it with an API key.
+                {usesBackend(settings)
+                  ? <>Using your {settings.keys.length} key{settings.keys.length === 1 ? '' : 's'} through the blooby
+                      backend. <code>ollama.com</code> sends no CORS headers, so a browser cannot call it directly —
+                      the backend makes the hop. Remove every key to fall back to your local Ollama.</>
+                  : <>With no keys, requests go to <code>localhost:11434</code> and your local Ollama proxies them
+                      using its own sign-in. Add a key below to use your own Ollama Cloud account instead.</>}
               </p>
             )}
-            {needsKey(settings) && (
+            {acceptsKeys(settings) && (
               <>
                 <div className="row">
                   <input className="txt" type="password" placeholder="Paste an API key" value={newKey}
@@ -159,7 +162,10 @@ export function Copilot() {
                 </div>
               </>
             )}
-            <p className="hint">Keys live in this browser's localStorage and are sent only to the endpoint above — blooby has no server.</p>
+            <p className="hint">
+              Keys live in this browser's localStorage. On a custom endpoint they are sent straight there;
+              on Ollama Cloud they are forwarded per-request through the blooby backend, which never stores them.
+            </p>
             <div className="divider" />
           </>
         )}

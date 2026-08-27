@@ -10,7 +10,7 @@ export const ENDPOINT_INFO: Record<Endpoint, { label: string; hint: string }> = 
   },
   cloud: {
     label: 'Ollama Cloud',
-    hint: 'Big models run on Ollama\u2019s hardware. Routed through your local Ollama, which holds the sign-in \u2014 run `ollama signin` once. No key goes in the browser.',
+    hint: 'Big models run on Ollama\u2019s hardware. Add your own API keys below and requests go through the blooby backend, rotating across them. With no keys, it falls back to your local Ollama\u2019s sign-in \u2014 run `ollama signin` once.',
   },
   custom: {
     label: 'Custom',
@@ -69,8 +69,28 @@ export function baseUrl(s: CopilotSettings): string {
   return LOCAL_URL;
 }
 
-/** Only a custom endpoint can need a key; the cloud tier borrows the daemon's sign-in. */
-export const needsKey = (s: CopilotSettings) => s.endpoint === 'custom';
+/**
+ * The cloud tier has two ways to work, and which one applies is decided by whether you
+ * have added keys:
+ *
+ *  - keys added   -> the request goes to blooby's own backend, which holds no CORS
+ *                    restriction against ollama.com and rotates across your keys.
+ *  - no keys      -> the local daemon proxies to Ollama Cloud with its own sign-in,
+ *                    which is the only way a pure browser can reach it at all.
+ *
+ * A browser can never send your keys straight to ollama.com; that is a CORS fact, not a
+ * design choice, which is why "use my own keys" and "go through the backend" are the
+ * same switch.
+ */
+export const usesBackend = (s: CopilotSettings) => s.endpoint === 'cloud' && s.keys.length > 0;
+
+/** A custom endpoint always needs a key; cloud needs one only when routing via backend. */
+export const needsKey = (s: CopilotSettings) => s.endpoint === 'custom' || usesBackend(s);
+
+/** Which tiers can hold a key pool at all — what the settings UI gates on. Distinct from
+ *  needsKey, which asks whether a key is *required* for the request about to be sent;
+ *  gating the editor on that would hide the field you need to add your first key. */
+export const acceptsKeys = (s: CopilotSettings) => s.endpoint === 'custom' || s.endpoint === 'cloud';
 
 /** Cloud models are addressed by a `-cloud` suffix when run through a local daemon. */
 export function resolveModel(s: CopilotSettings, model: string): string {

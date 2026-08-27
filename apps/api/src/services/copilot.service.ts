@@ -13,16 +13,27 @@ import { HttpError } from '../utils/httpError.js';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function copilotChat(req: Request, res: Response) {
-  if (!env.ollamaKeys.length) throw HttpError.upstream('No copilot keys are configured on this server');
+  // A caller may supply their own keys — that is the whole point of the cloud tier from
+  // a browser, which cannot reach ollama.com directly. They are used for this request
+  // only: never logged, never persisted, never mixed into the server's own pool.
+  const { keys: supplied, ...body } = (req.body ?? {}) as { keys?: unknown };
+  const callerKeys = Array.isArray(supplied)
+    ? supplied.filter((k): k is string => typeof k === 'string' && k.trim().length > 0).slice(0, 10)
+    : [];
+
+  const keys = callerKeys.length ? callerKeys : env.ollamaKeys;
+  if (!keys.length) {
+    throw HttpError.badRequest('Add an Ollama Cloud API key in the copilot settings, or configure keys on the server.');
+  }
 
   let lastError = 'no endpoint reachable';
   for (let attempt = 0; attempt < 2; attempt++) {
-    for (const key of env.ollamaKeys) {
+    for (const key of keys) {
       try {
         const upstream = await fetch(`${env.OLLAMA_URL}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-          body: JSON.stringify({ ...req.body, stream: false }),
+          body: JSON.stringify({ ...body, stream: false }),
         });
         if (upstream.ok) return res.json(await upstream.json());
 

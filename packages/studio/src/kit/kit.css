@@ -67,21 +67,32 @@
 .page-sub { font-size: 14px; color: var(--muted); margin: 2px 0 0; line-height: 1.43; }
 .page-head .spacer { flex: 1; }
 
+/* DESIGN.md caps the page at 1280px — beyond that a dashboard stops being scannable
+   and stat blocks drift too far from the chart they describe. */
 .page-body { flex: 1; overflow: auto; padding: 24px; }
+.page-body > * { max-width: var(--page-max, 1280px); }
 
-/* --- metrics ------------------------------------------------------------ */
-.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-
-.stat {
-  padding: 20px; background: var(--panel);
-  border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow);
+/* --- metrics ------------------------------------------------------------
+   DESIGN.md's stat block deliberately has no card chrome: the typographic jump from a
+   12px uppercase label to a 30px/600 value is what makes it read as a metric. Wrapping
+   each one in a bordered card would add eight competing rectangles above the chart and
+   flatten exactly that hierarchy. A single hairline grid groups them instead. */
+.metrics {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
+  background: var(--line); gap: 1px;
+  border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden;
 }
-.stat-label { font-size: 12px; color: var(--muted); letter-spacing: .6px; text-transform: uppercase; }
+
+.stat { padding: 20px; background: var(--paper); }
+.stat-label {
+  font-size: 12px; line-height: 1.33; color: var(--muted);
+  letter-spacing: .6px; text-transform: uppercase;
+}
 .stat-value {
   font-family: var(--display); font-size: 30px; font-weight: 600;
-  letter-spacing: -.75px; color: var(--ink); margin-top: 6px; line-height: 1.2;
+  letter-spacing: -.75px; color: var(--ink); margin-top: 8px; line-height: 1.2;
 }
-.stat-delta { font-size: 14px; color: var(--muted); margin-top: 4px; }
+.stat-delta { font-size: 14px; line-height: 1.43; color: var(--muted); margin-top: 4px; }
 .stat-delta[data-dir='down'] { color: var(--hot); }
 
 /* --- cards -------------------------------------------------------------- */

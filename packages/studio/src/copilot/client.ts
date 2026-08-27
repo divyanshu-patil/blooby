@@ -1,4 +1,5 @@
-import { baseUrl, CLOUD_CATALOGUE, displayModel, needsKey, resolveModel, rotation, type CopilotSettings, type KeyStatus } from './pool';
+import { baseUrl, CLOUD_CATALOGUE, displayModel, needsKey, resolveModel, rotation, usesBackend, type CopilotSettings, type KeyStatus } from './pool';
+import { api, ApiError } from '../cloud/client';
 
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
 
@@ -6,13 +7,36 @@ export class PoolError extends Error {}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Everything stays in the browser: requests go straight from here to the endpoint. */
+/**
+ * Requests go straight from the browser to the endpoint, EXCEPT the cloud tier with your
+ * own keys — a browser cannot reach ollama.com at all (no CORS headers), so those hop
+ * through blooby's backend, which has no such restriction. The keys still live only in
+ * this browser; they are sent per-request and never stored server-side.
+ */
+async function callBackend(s: CopilotSettings, body: unknown): Promise<Response> {
+  try {
+    const json = await api.post<unknown>('/api/copilot/chat', { ...(body as object), keys: s.keys.map((k) => k.value) });
+    return new Response(JSON.stringify(json), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      throw new PoolError('Sign in to use Ollama Cloud with your own keys — the backend needs to know who you are.');
+    }
+    throw new PoolError(e instanceof Error ? e.message : String(e));
+  }
+}
+
 async function call(
   s: CopilotSettings,
   path: string,
   init: RequestInit,
   markKey: (key: string, status: KeyStatus, note?: string) => void,
 ): Promise<Response> {
+  // the backend does its own rotation across the keys we hand it, so there is nothing
+  // to sweep here
+  if (usesBackend(s) && path === '/api/chat') {
+    return callBackend(s, init.body ? JSON.parse(init.body as string) : {});
+  }
+
   const keys = rotation(s);
   let lastError = 'no endpoint reachable';
 
@@ -30,8 +54,8 @@ async function call(
 
         const body = await res.text().catch(() => '');
         lastError = `${res.status} ${body.slice(0, 160)}`;
-        // the daemon holds the cloud sign-in, so an auth failure has one fix
-        if (s.endpoint === 'cloud' && (res.status === 401 || res.status === 403)) {
+        // with no keys the daemon holds the cloud sign-in, so an auth failure has one fix
+        if (s.endpoint === 'cloud' && !usesBackend(s) && (res.status === 401 || res.status === 403)) {
           throw new PoolError('Ollama is not signed in to Ollama Cloud — run `ollama signin`, then try again.');
         }
         if (key) markKey(key, res.status === 429 ? 'rate-limited' : 'error', `${res.status}`);

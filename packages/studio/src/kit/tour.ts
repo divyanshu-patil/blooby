@@ -22,14 +22,30 @@ const markSeen = (key: string) => {
   try { localStorage.setItem(seenKey(key), '1'); } catch { /* private mode — just re-show */ }
 };
 
+/**
+ * At most one tour runs at a time.
+ *
+ * StrictMode double-invokes effects in development, and a scheduled start can also race
+ * a re-render, so without this guard two driver instances stack their overlays and the
+ * page ends up with two popovers and a doubled scrim.
+ */
+let active: { destroy: () => void } | null = null;
+
 export function startTour(key: string, steps: DriveStep[], opts?: { force?: boolean }) {
   if (!opts?.force && hasSeenTour(key)) return;
+
+  // an explicit replay should restart cleanly rather than be swallowed by the guard
+  if (active) {
+    if (!opts?.force) return;
+    active.destroy();
+    active = null;
+  }
 
   // a step whose element never rendered would show an empty highlight box
   const live = steps.filter((s) => !s.element || document.querySelector(s.element as string));
   if (!live.length) return;
 
-  driver({
+  const instance = driver({
     showProgress: true,
     allowClose: true,
     overlayOpacity: 0.6,
@@ -41,8 +57,11 @@ export function startTour(key: string, steps: DriveStep[], opts?: { force?: bool
     doneBtnText: 'Got it',
     steps: live,
     // skipping and finishing both mean "do not show me this again"
-    onDestroyed: () => markSeen(key),
-  }).drive();
+    onDestroyed: () => { markSeen(key); active = null; },
+  });
+
+  active = instance;
+  instance.drive();
 }
 
 /** Run a tour once the elements it points at exist, without racing the first paint. */

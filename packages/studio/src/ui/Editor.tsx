@@ -15,14 +15,32 @@ import { TimelineTabs } from './TimelineTabs';
 import { Gallery, openGallery } from './Gallery';
 import { StateMachine } from './StateMachine';
 import { activeTimeline } from '../core/types';
+import { startTour, startTourWhenReady } from '../kit/tour';
+import type { DriveStep } from 'driver.js';
 import type { Project } from '../core/types';
 
 type Tab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
+
+/**
+ * The editor tour. Each step explains what a region is FOR and the one thing you would
+ * otherwise have to discover by accident — the stopwatch, the clip strip, the two
+ * different timeline drags. Reading the panel titles back would teach nothing.
+ */
+const EDITOR_TOUR: DriveStep[] = [
+  { popover: { title: 'The editor', description: 'A quick pass over the four areas and the gestures that are easy to miss. Escape skips it — the ? button in the toolbar brings it back.' } },
+  { element: '[data-tour="stage"]', popover: { title: 'The stage', description: 'Your mascot, live. Drag the body to turn its head; every change here is what gets keyframed.' } },
+  { element: '[data-tour="rail-left"]', popover: { title: 'Layers and presets', description: 'Layers are the parts of the rig — pick one to edit it. Presets are ready-made animations: click or drag one onto the strip below to add it as a clip.' } },
+  { element: '[data-tour="rail-right"]', popover: { title: 'Properties', description: 'Everything about the selected layer. The stopwatch next to a property is the important control: it turns that property into an animated track.' } },
+  { element: '[data-tour="timeline"]', popover: { title: 'The timeline', description: 'Clips along the top, one lane per animated property below. Drag the ruler to scrub; drag across the lanes to rubber-band select keyframes, then ⌘C/⌘V to copy them to the playhead.' } },
+  { element: '[data-tour="export"]', popover: { title: 'Export', description: 'Lottie, GIF or MP4 — the same renderer as the stage, so what you see is what ships.' } },
+];
 
 /** The whole editor UI — apps/web renders it with no onSave (local-file Save/Open only),
  * apps/admin's Preset Publisher passes onSave/saveLabel to add a second save destination
  * (a cloud table) alongside the local JSON download, which always stays available. */
 export function Editor({ onSave, saveLabel }: { onSave?: (project: Project) => void; saveLabel?: string } = {}) {
+  // first visit only; skipping counts as seen, and the ? button replays it
+  useEffect(() => { startTourWhenReady('editor', EDITOR_TOUR); }, []);
   const project = useEditor((s) => s.project);
   const playing = useEditor((s) => s.playing);
   const setPlaying = useEditor((s) => s.setPlaying);
@@ -118,7 +136,9 @@ export function Editor({ onSave, saveLabel }: { onSave?: (project: Project) => v
         <button className="btn sm" onClick={openGallery}>Gallery</button>
         <button className="btn sm" title="Start over from the default mascot"
           onClick={() => confirm('Discard this project and start fresh?') && loadProject(defaultProject())}>New</button>
-        <ExportBar />
+        <span data-tour="export"><ExportBar /></span>
+        <button className="btn ghost sm" title="Show me around the editor"
+          onClick={() => startTour('editor', EDITOR_TOUR, { force: true })}>?</button>
       </header>
 
       <div className="body-split">
@@ -126,16 +146,16 @@ export function Editor({ onSave, saveLabel }: { onSave?: (project: Project) => v
           { content: (
             <Split direction="row" storageKey="main" flexIndex={1} panes={[
               { min: 190, max: 460, content: (
-                <div className="rail rail-left">
+                <div className="rail rail-left" data-tour="rail-left">
                   <Layers />
                   <Presets />
                   <OtherTimelines />
                   <Expressions />
                 </div>
               ) },
-              { min: 320, content: <div className="stage"><Stage /></div> },
+              { min: 320, content: <div className="stage" data-tour="stage"><Stage /></div> },
               { min: 240, max: 560, content: (
-                <div className="rail rail-right">
+                <div className="rail rail-right" data-tour="rail-right">
                   <div className="tabs">
                     {(['node', 'eyes', 'fx', 'states', 'ai'] as Tab[]).map((t) => (
                       <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
@@ -167,7 +187,7 @@ export function Editor({ onSave, saveLabel }: { onSave?: (project: Project) => v
             ]} />
           ) },
           { min: 220, max: 780, default: 420, content: (
-            <div className="timeline-pane">
+            <div className="timeline-pane" data-tour="timeline">
               <TimelineTabs />
               <Timeline />
             </div>
