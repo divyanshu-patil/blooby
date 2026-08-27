@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
-  AssetCard, ChipBar, Dialog, EmptyState, ErrorState, LoadingGrid, PageHeader,
-  adminApi, useAsync, type AssetRow,
+  AssetPreview, ChipBar, Dialog, EmptyState, ErrorState, LoadingGrid, PageHeader,
+  adminApi, relativeTime, useAsync, type AssetRow,
 } from '@blooby/studio';
 
 const QUEUES = [
@@ -39,7 +39,22 @@ export function Moderation() {
           />
         ) : (
           <div className="card-grid">
-            {data.items.map((a) => <AssetCard key={a.id} asset={a} showStatus onOpen={() => setReview(a)} />)}
+            {data.items.map((a) => (
+              <div key={a.id} className="card" role="button" tabIndex={0}
+                onClick={() => setReview(a)}
+                onKeyDown={(e) => { if (e.key === 'Enter') setReview(a); }}>
+                <div className="card-thumb">
+                  <AssetPreview kind={a.kind} data={a.data} />
+                </div>
+                <div className="card-body">
+                  <div className="card-name">{a.name}</div>
+                  <div className="card-meta" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className="tag">{a.kind}</span>
+                    <span>submitted {relativeTime(Date.parse(a.createdAt))}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         ))}
       </div>
@@ -84,7 +99,13 @@ function ReviewDialog({ asset, onClose, onDone }: { asset: AssetRow; onClose: ()
           )}
         </>
       }>
-      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 12 }}>
+      {/* Reviewing an animation from a still is guesswork — this is the actual motion,
+          looping, on the default rig a person adding it would get. */}
+      <div className="review-stage">
+        <AssetPreview kind={asset.kind} data={asset.data} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', margin: '12px 0' }}>
         <span className="tag">{asset.kind}</span>
         <span className="tag">{asset.source}</span>
         {asset.tags.map((t) => <span key={t} className="tag">{t}</span>)}

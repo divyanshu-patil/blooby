@@ -113,3 +113,16 @@
   background: var(--panel); border: 1px solid var(--line); color: var(--ink); cursor: pointer;
 }
 .splash-pick:hover { border-color: var(--ink); }
+
+/* --- moderation preview -------------------------------------------------- */
+.review-stage {
+  display: grid; place-items: center;
+  aspect-ratio: 16 / 10; width: 100%;
+  background: #0a0a0a; border-radius: var(--r-nested, 10px); overflow: hidden;
+}
+.review-stage svg { width: 100%; height: 100%; }
+.review-stage .empty-note { color: #fafafa; opacity: .7; font-size: 12px; padding: 12px; text-align: center; }
+
+/* the queue grid shows the same live preview, so a reviewer can triage without
+   opening every submission */
+.card-thumb .empty-note { font-size: 11px; color: var(--muted); padding: 10px; text-align: center; }
