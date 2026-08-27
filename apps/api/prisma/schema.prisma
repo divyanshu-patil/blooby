@@ -1,0 +1,66 @@
+// Prisma is the QUERY layer here, not the migration tool.
+//
+// The schema itself lives in ../../supabase/migrations/*.sql and is applied with the
+// Supabase CLI/MCP, because Prisma's schema language cannot express what this database
+// actually depends on: RLS policies, the SECURITY DEFINER handle_new_user() trigger,
+// the set_updated_at triggers, the storage bucket and its object policies, or the
+// foreign keys into Supabase's own auth.users table. Running `prisma migrate` against
+// this database would diff against a model that is blind to all of it and generate a
+// migration that DROPS it — RLS off, triggers gone. So: never `prisma migrate` here.
+// `prisma generate` only. Models below are hand-kept in sync with the applied SQL.
+//
+// Note this client connects with the database owner role and therefore BYPASSES RLS.
+// Every route that uses it must do its own authorization first — see src/auth.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Mirrors public.profiles. `isAdmin` is the only source of truth for admin rights —
+/// never a JWT claim, which a user could influence.
+model Profile {
+  id        String   @id @db.Uuid
+  isAdmin   Boolean  @default(false) @map("is_admin")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("profiles")
+}
+
+/// Mirrors public.animations. `userId` references auth.users(id), which Prisma cannot
+/// model (different schema, owned by Supabase) — the FK is enforced in Postgres.
+model Animation {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  name         String
+  projectJson  Json     @map("project_json")
+  thumbnailUrl String?  @map("thumbnail_url")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId])
+  @@map("animations")
+}
+
+/// Mirrors public.presets — the curated global library. Readable by anyone once
+/// `published`, writable only through this service (RLS grants no write to anon or
+/// authenticated at all).
+model Preset {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  category     String?
+  source       String?
+  presetJson   Json     @map("preset_json")
+  thumbnailUrl String?  @map("thumbnail_url")
+  published    Boolean  @default(false)
+  createdBy    String?  @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([createdBy])
+  @@map("presets")
+}

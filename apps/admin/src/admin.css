@@ -1,0 +1,27 @@
+/* The admin shell only — everything inside the editor comes from @blooby/studio's own
+   stylesheet, so this file stays small on purpose. */
+.admin { display: flex; flex-direction: column; height: 100vh; }
+
+.admin-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 14px; border-bottom: 1px solid var(--line, #2a2a32);
+}
+.admin-bar .spacer { flex: 1; }
+.admin-who { opacity: 0.6; font-size: 12px; }
+
+.admin-body { padding: 18px; overflow: auto; }
+.admin-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.admin-status { padding: 6px 14px; font-size: 12px; opacity: 0.8; }
+
+.admin-gate {
+  display: flex; flex-direction: column; gap: 12px;
+  align-items: center; justify-content: center; height: 100vh; text-align: center;
+}
+
+.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-table th { text-align: left; opacity: 0.6; font-weight: 500; padding: 6px 10px; }
+.admin-table td { padding: 8px 10px; border-top: 1px solid var(--line, #2a2a32); }
+.admin-table tbody tr { cursor: pointer; }
+.admin-table tbody tr:hover { background: var(--panel-hover, #ffffff0d); }
+
+.warn { color: var(--warn, #e5a44b); }

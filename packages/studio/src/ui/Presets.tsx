@@ -21,8 +21,16 @@ export function Presets() {
   const addBlock = useEditor((s) => s.addBlock);
   const renamePreset = useEditor((s) => s.renamePreset);
   const setPresetColor = useEditor((s) => s.setPresetColor);
+  const catalog = useEditor((s) => s.catalog);
+  const catalogError = useEditor((s) => s.catalogError);
   const [filter, setFilter] = useState<'all' | 'builtin' | 'custom'>('all');
-  const list = project.presets.filter((p) => filter === 'all' || p.source === filter);
+  // the shared library and this file's own presets browse as one list; a catalogue entry
+  // already pulled into the project (addBlock copies it in) must not show up twice
+  const all = useMemo(() => {
+    const own = new Set(project.presets.map((p) => p.id));
+    return [...project.presets, ...catalog.filter((p) => !own.has(p.id))];
+  }, [project.presets, catalog]);
+  const list = all.filter((p) => filter === 'all' || p.source === filter);
 
   return (
     <Panel title="Presets" actions={
@@ -32,6 +40,7 @@ export function Presets() {
         ))}
       </div>
     }>
+      {catalogError && <p className="warn">Preset library unavailable — {catalogError}</p>}
       <div className="chips">
         {list.map((preset) => (
           // a plain <button> can't nest the color swatch's own <input type="color"> without

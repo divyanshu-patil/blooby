@@ -4,6 +4,7 @@ import { readProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
+import { fetchCatalog } from './catalog';
 import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
@@ -19,6 +20,11 @@ const at = (p: Project): Timeline => activeTimeline(p);
 
 export interface Editor {
   project: Project;
+  /** The shared preset library fetched from Supabase, kept separate from
+   *  `project.presets` (which is this file's own embedded/custom list). Browsing reads
+   *  both; adding one copies it into the project so a saved file stays self-contained. */
+  catalog: Preset[];
+  catalogError: string | null;
   selection: string[];
   selectedTrackId: string | null;
   /** the clip currently selected for editing — drives the Effects tab (and future clip
@@ -72,6 +78,7 @@ export interface Editor {
   deleteNode: (id: string) => void;
   updateNode: (id: string, fn: (n: RigNode) => void, label?: string) => void;
 
+  loadCatalog: () => Promise<void>;
   addBlock: (presetId: string, index?: number) => void;
   /** the shared engine behind "another timeline from this project" and "a gallery
    * animation" as a clip source (§8/§12/§13) — one copy-tracks-in-as-a-block routine.
@@ -189,6 +196,8 @@ export function splitKey(key: string): [string, string] {
 
 export const useEditor = create<Editor>((set, get) => ({
   project: load(),
+  catalog: [],
+  catalogError: null,
   selection: [],
   selectedTrackId: null,
   selectedBlockId: null,
@@ -386,14 +395,28 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => { const n = p.rig.nodes[id]; if (n) fn(n); }, label);
   },
 
+  async loadCatalog() {
+    try {
+      set({ catalog: await fetchCatalog(), catalogError: null });
+    } catch (e) {
+      // deliberately NOT a silent fall back to the builtins: with a backend configured,
+      // a library that quietly looks empty is worse than one that says it failed
+      set({ catalogError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
   addBlock(presetId, index) {
-    const { project } = get();
-    const preset = project.presets.find((p) => p.id === presetId);
+    const { project, catalog } = get();
+    const own = project.presets.find((p) => p.id === presetId);
+    const preset = own ?? catalog.find((p) => p.id === presetId);
     if (!preset) return;
     const blockId = uid('b');
     const at0 = index ?? at(project).blocks.length;
     get().commit((p) => {
       const tl = at(p);
+      // a catalogue preset becomes part of the file the moment it is used, so the saved
+      // project keeps working offline and blockSampleTime can still find its natural span
+      if (!own) p.presets = [...p.presets, preset];
       const block: Block = { id: blockId, presetId, name: preset.name, durationMs: preset.durationMs };
       const next = [...tl.blocks];
       next.splice(at0, 0, block);
