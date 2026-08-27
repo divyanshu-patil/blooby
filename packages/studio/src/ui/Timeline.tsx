@@ -163,10 +163,16 @@ export function Timeline() {
     setPlayhead(next ?? (dir < 0 ? 0 : duration));
   };
 
-  /** Scrubbing lives on the ruler only. Dragging across the lanes selects keyframes
-   *  instead, so the two gestures can't fight over the same pixels. */
+  /**
+   * Move the playhead. Scrubbing is the ruler's gesture and only the ruler's — dragging
+   * anywhere else in the timeline selects keyframes instead.
+   *
+   * stopPropagation matters here: the ruler is nested inside `.track-lanes`, which owns
+   * the marquee, so without it a scrub would start a selection box at the same time.
+   */
   const scrub = (e: React.PointerEvent) => {
     if (e.type === 'pointermove' && e.buttons === 0) return;
+    e.stopPropagation();
     const r = lanesRef.current!.getBoundingClientRect();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     setPlayhead(Math.max(0, Math.min(duration, (e.clientX - r.left) / pxPerMs)));
@@ -178,12 +184,15 @@ export function Timeline() {
    * diamond ended up, including inside expanded lanes and horizontal scroll.
    */
   const marqueeDown = (e: React.PointerEvent) => {
-    // let the keyframes, playhead and duration handle their own drags
-    if ((e.target as Element).closest('.kfd, .playhead, .dur-end')) return;
+    // the ruler, keyframes, playhead and duration all handle their own drags and stop
+    // the event before it reaches here
+    if ((e.target as Element).closest('.kfd, .playhead, .dur-end, .ruler')) return;
+
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     const r = lanesRef.current!.getBoundingClientRect();
-    marquee.current = { x0: e.clientX - r.left, y0: e.clientY - r.top, additive: e.shiftKey || e.metaKey || e.ctrlKey };
+    marquee.current = { x0: e.clientX - r.left, y0: e.clientY - r.top, additive };
     lanesRef.current!.setPointerCapture?.(e.pointerId);
-    if (!marquee.current.additive) setSelKeys(new Set());
+    if (!additive) setSelKeys(new Set());
     setBox(null);
   };
 

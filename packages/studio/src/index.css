@@ -641,8 +641,8 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
     border-radius: 2px;
   }
   .track-lanes { position: relative; }
-  /* the ruler owns scrubbing, so it advertises that and the lanes advertise selection */
+  /* the ruler scrubs; everywhere else in the lanes rubber-band selects */
   .ruler { cursor: ew-resize; }
-  .track-lanes { cursor: crosshair; }
+  .track-lanes, .lane { cursor: crosshair; }
   .kfd { cursor: pointer; }
 }
