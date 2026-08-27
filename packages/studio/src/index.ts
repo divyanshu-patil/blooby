@@ -20,7 +20,7 @@ export type { DriveStep } from 'driver.js';
 // cloud
 export { api, ApiError } from './cloud/client';
 export { projectsApi, assetsApi, communityApi, splashApi, adminApi } from './cloud/api';
-export { useSession, auth } from './cloud/auth';
+export { useSession, auth, consumeAuthError } from './cloud/auth';
 export { useAsync } from './cloud/useAsync';
 export { useAutosave } from './cloud/useAutosave';
 export { Splashscreen } from './cloud/Splashscreen';

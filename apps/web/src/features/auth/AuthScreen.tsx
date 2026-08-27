@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BloobyMark, auth } from '@blooby/studio';
+import { useEffect, useState } from 'react';
+import { BloobyMark, auth, consumeAuthError } from '@blooby/studio';
 
 type Mode = 'signin' | 'signup' | 'forgot';
 
@@ -21,6 +21,10 @@ export function AuthScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+
+  // A failed OAuth round-trip is captured at module load, before the route guard
+  // redirects here and drops the query string that explained it.
+  useEffect(() => { const e = consumeAuthError(); if (e) setError(e); }, []);
 
   const go = (next: Mode) => { setMode(next); setError(null); setNote(null); };
 
