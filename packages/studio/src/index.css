@@ -650,16 +650,17 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 @layer blooby {
   /* Publish affordance on a chip. Hidden until hover/focus so a shelf of presets stays
      about the presets, not about a row of upload arrows. */
+  /* Always visible, not hover-revealed: it only ever appears on YOUR OWN presets, so a
+     shelf of builtins stays clean anyway — and an action nobody can find is the same as
+     one that does not exist. */
   .chip-pub {
     position: absolute; top: 3px; right: 3px;
     padding: 2px 7px; display: grid; place-items: center;
     border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
     color: var(--ink-2); font: 500 9px var(--ui); line-height: 1.4; cursor: pointer;
-    opacity: 0; transition: opacity .12s ease;
   }
   .chip { position: relative; }
-  .chip:hover .chip-pub, .chip-pub:focus-visible { opacity: 1; }
-  .chip-pub:hover { border-color: var(--ink); color: var(--ink); }
+  .chip-pub:hover, .chip-pub:focus-visible { border-color: var(--ink); color: var(--ink); background: var(--field); }
 
   /* A filter row of its own, full width under the panel header. Scrolls sideways rather
      than wrapping: a segmented control that wraps inside its own border reads as a

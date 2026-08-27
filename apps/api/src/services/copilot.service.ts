@@ -37,8 +37,19 @@ export async function copilotChat(req: Request, res: Response) {
         });
         if (upstream.ok) return res.json(await upstream.json());
 
-        lastError = `${upstream.status} ${(await upstream.text().catch(() => '')).slice(0, 160)}`;
-        if (upstream.status === 400 || upstream.status === 404) throw HttpError.badRequest(lastError);
+        const detail = (await upstream.text().catch(() => '')).slice(0, 160);
+        lastError = `${upstream.status} ${detail}`;
+
+        // A rejected key is the most likely failure and the raw upstream body says
+        // nothing useful about it, so name the actual problem. Retrying the remaining
+        // keys still makes sense — only THIS one was rejected.
+        if (upstream.status === 401 || upstream.status === 403) {
+          lastError = callerKeys.length
+            ? 'Ollama Cloud rejected that API key. Check it in the copilot settings, or add another.'
+            : 'Ollama Cloud rejected the key configured on this server.';
+          continue;
+        }
+        if (upstream.status === 400 || upstream.status === 404) throw HttpError.badRequest(detail || lastError);
       } catch (e) {
         if (e instanceof HttpError) throw e;
         lastError = e instanceof Error ? e.message : String(e);
