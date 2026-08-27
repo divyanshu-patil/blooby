@@ -40,7 +40,7 @@ export function Overview({ onGoTo }: { onGoTo: (view: string) => void }) {
 
             {/* the one thing an admin should act on immediately, if it is non-zero */}
             {data.overview.pendingReview > 0 && (
-              <button className="callout" onClick={() => onGoTo('moderation')}>
+              <button className="callout" onClick={() => onGoTo('/community')}>
                 <strong>{data.overview.pendingReview}</strong> submission{data.overview.pendingReview === 1 ? '' : 's'} waiting for review
                 <span className="callout-go">Review now →</span>
               </button>
