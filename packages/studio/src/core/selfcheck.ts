@@ -625,23 +625,35 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
 // --- resolveTracks: the loop seam is derived, never written into the file ------
 {
+  type TL = ReturnType<typeof activeTimeline>;
+  /** a project whose active timeline is exactly these tracks/blocks */
+  const fixture = (tracks: TL['tracks'], blocks: TL['blocks'], durationMs: number, loop = true) => {
+    const p = defaultProject();
+    const tl = activeTimeline(p);
+    tl.loop = loop;
+    tl.blocks = blocks;
+    tl.tracks = tracks;
+    tl.timelineDurationMs = durationMs;
+    return p;
+  };
+
   // a fixture that deliberately does NOT return to its start value — the whole point —
   // and whose outgoing easing is deliberately NOT easeOut, to prove the close forces its
   // own easeOut rather than happening to inherit it from the segment before
-  const openTrack = { id: 't1', nodeId: 'body', property: 'surface.rotation', keyframes: [
+  const openTrack = { id: 't1', nodeId: 'body', property: 'transform.rotation', keyframes: [
     { id: 'a', time: 0, value: 10, easingOut: { type: 'linear' as const } },
     { id: 'b', time: 1000, value: 70, easingOut: { type: 'linear' as const } },
   ] };
-  const off = resolveTracks([openTrack], false, 2000);
+  const off = resolveTracks(fixture([openTrack], [], 2000, false));
   ok('loop off: tracks pass through completely unchanged', off[0] === openTrack);
 
-  const looped = resolveTracks([openTrack], true, 2000);
-  const src = looped[0];
+  const looped = resolveTracks(fixture([openTrack], [], 2000));
+  const seam = looped[0];
   ok('loop on: the original track object is not mutated', openTrack.keyframes.length === 2);
-  ok('loop on: a closing keyframe is appended at the very end', src.keyframes.length === 3 && src.keyframes[2].time === 2000);
-  ok('the closing value matches the track\'s own t=0 value', src.keyframes[2].value === 10);
-  ok('so the last frame and the first frame land on the same pose', sampleTrack(src, 2000) === sampleTrack(src, 0));
-  ok('the close always eases in with easeOut, not whatever the outgoing segment used', src.keyframes[2].easingOut.type === 'preset' && (src.keyframes[2].easingOut as { name: string }).name === 'easeOut');
+  ok('loop on: a closing keyframe is appended at the very end', seam.keyframes.length === 3 && seam.keyframes[2].time === 2000);
+  ok('the closing value matches the pose rendered at t=0', seam.keyframes[2].value === 10);
+  ok('so the last frame and the first frame land on the same pose', sampleTrack(seam, 2000) === sampleTrack(seam, 0));
+  ok('the close always eases in with easeOut, not whatever the outgoing segment used', seam.keyframes[2].easingOut.type === 'preset' && (seam.keyframes[2].easingOut as { name: string }).name === 'easeOut');
 
   // even a track already flat at its start value still gets its own closing keyframe —
   // "first frame == last frame" holds unconditionally, not just when there's a gap to close
@@ -649,21 +661,52 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     { id: 'a', time: 0, value: 5, easingOut: { type: 'linear' as const } },
     { id: 'b', time: 1000, value: 5, easingOut: { type: 'linear' as const } },
   ] };
-  const stillClosed = resolveTracks([constTrack], true, 2000);
+  const stillClosed = resolveTracks(fixture([constTrack], [], 2000));
   ok('a track already flat at its start value still gets a closing keyframe', stillClosed[0].keyframes.length === 3 && stillClosed[0].keyframes[2].value === 5);
 
   // evaluateRig actually uses this — the seam is visible in playback, not just in theory.
-  // No blocks on this timeline: a global track like t3 is only ever reachable outside
-  // every block (activeTrackFor seals a clip off from tracks that aren't its own), so
-  // this has to run on a blockless timeline to actually exercise the global-track path.
-  const proj = defaultProject();
-  const ptl2 = activeTimeline(proj);
-  ptl2.loop = true;
-  ptl2.blocks = [];
-  ptl2.tracks = [{ id: 't3', nodeId: 'body', property: 'transform.rotation', keyframes: openTrack.keyframes }];
-  const atEnd = evaluateRig(proj, ptl2.timelineDurationMs).nodes.body.transform.rotation;
+  const proj = fixture([{ id: 't3', nodeId: 'body', property: 'transform.rotation', keyframes: openTrack.keyframes }], [], 2000);
+  const atEnd = evaluateRig(proj, 2000).nodes.body.transform.rotation;
   const atStart = evaluateRig(proj, 0).nodes.body.transform.rotation;
   ok('evaluateRig itself loops the pose, not just the raw track helper', atEnd === atStart, `${atEnd} vs ${atStart}`);
+
+  /** two 1000ms clips, so the tail is owned by a different clip than t=0 is */
+  const twoClips = (tracksFor: (a: string, b: string) => TL['tracks']) => {
+    const p = defaultProject();
+    const tl = activeTimeline(p);
+    tl.loop = true;
+    tl.blocks = tl.blocks.slice(0, 2);
+    for (const b of tl.blocks) { b.durationMs = 1000; b.loop = false; b.speed = 1; }
+    tl.timelineDurationMs = 2000;
+    tl.tracks = tracksFor(tl.blocks[0].id, tl.blocks[1].id);
+    return p;
+  };
+
+  // THE reported bug: yaw/pitch read 0 at t=0 but 9.2/21.0 at the loop point, because the
+  // closing clip owns its own separate track for that property and each track was closing
+  // back to *its own* t=0 rather than to the pose actually on screen at t=0.
+  const crossProj = twoClips((a, b) => [
+    { id: 'ca', nodeId: 'body', property: 'transform.rotation', blockId: a, keyframes: [
+      { id: 'ca1', time: 0, value: 10, easingOut: { type: 'linear' as const } },
+      { id: 'ca2', time: 900, value: 80, easingOut: { type: 'linear' as const } }] },
+    { id: 'cb', nodeId: 'body', property: 'transform.rotation', blockId: b, keyframes: [
+      { id: 'cb1', time: 1200, value: 200, easingOut: { type: 'linear' as const } },
+      { id: 'cb2', time: 1900, value: 250, easingOut: { type: 'linear' as const } }] },
+  ]);
+  const xEnd = evaluateRig(crossProj, 2000).nodes.body.transform.rotation;
+  const xStart = evaluateRig(crossProj, 0).nodes.body.transform.rotation;
+  ok('a property owned by a different clip at the tail still closes onto the t=0 pose', xEnd === xStart, `${xEnd} vs ${xStart}`);
+
+  // and the harder half: a property the closing clip does not animate at all, so there is
+  // no track there to hang the closing keyframe on — one has to be synthesized
+  const orphanProj = twoClips((a) => [
+    { id: 'oa', nodeId: 'body', property: 'surface.pitch', blockId: a, keyframes: [
+      { id: 'oa1', time: 0, value: 15, easingOut: { type: 'linear' as const } },
+      { id: 'oa2', time: 900, value: 60, easingOut: { type: 'linear' as const } }] },
+  ]);
+  const oEnd = evaluateRig(orphanProj, 2000).nodes.body.surface.pitch;
+  const oStart = evaluateRig(orphanProj, 0).nodes.body.surface.pitch;
+  ok('a property the closing clip never animates still gets closed onto the t=0 pose', oEnd === oStart, `${oEnd} vs ${oStart}`);
 
   // a clip-owned track must hold its pose into any padding where the timeline's own
   // duration outlives the sum of block durations — not snap to the rig's bare defaults
