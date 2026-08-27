@@ -4,7 +4,7 @@
    Every motion editor is dark; this one puts the ink only where the mascot is.
    ========================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 
@@ -22,10 +22,11 @@
   --color-signal: var(--signal);
   --color-signal-soft: var(--signal-soft);
   --color-hot: var(--hot);
-  --font-display: 'Bricolage Grotesque', 'Inter Tight', system-ui, sans-serif;
-  --font-ui: 'Inter Tight', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  --radius-panel: 7px;
+  --color-surface-alt: var(--surface-alt);
+  --font-display: 'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-ui: 'Geist', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --radius-panel: 6px;
 }
 
 /* The hand-rolled stylesheet lives in its own layer *below* Tailwind utilities, so a
@@ -33,24 +34,39 @@
 @layer blooby {
 
 :root {
-  --paper: #e4dfd5;
-  --panel: #f1eee8;
-  --field: #faf8f4;
-  --line: #cec6b6;
-  --line-soft: #ded7ca;
-  --ink: #17161b;
-  --ink-2: #46423b;
-  --muted: #857d6d;
-  --signal: #2233e0;
-  --signal-soft: #dfe2fc;
-  --hot: #d9401f;
+  /* Monochrome by default — colour is absence, not expression (DESIGN.md).
+   * The three-tone surface stack canvas -> sidebar -> card does the layering that a
+   * palette would otherwise do, and the single chromatic value is reserved for
+   * destructive states so it never competes with anything. */
+  --paper: #f5f5f5;        /* canvas: page background */
+  --panel: #ffffff;        /* card / panel surface */
+  --surface-alt: #fafafa;  /* sidebar, one step off canvas */
+  --field: #f5f5f5;        /* input fill at rest */
+  --line: #e5e5e5;         /* hairline border */
+  --line-soft: #efefef;
+  --ink: #0a0a0a;          /* primary text */
+  --ink-2: #171717;        /* filled-button background, secondary text */
+  --muted: #737373;        /* muted body, placeholders, helper labels */
 
-  --display: 'Bricolage Grotesque', 'Inter Tight', system-ui, sans-serif;
-  --ui: 'Inter Tight', system-ui, -apple-system, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* "Signal" is now the dark inversion rather than a hue: a filled primary button is
+   * ink-on-paper. Keeping the token name means every existing use stays correct. */
+  --signal: #0a0a0a;
+  --signal-soft: #f5f5f5;
 
-  --r: 7px;
-  --shadow: 0 1px 0 rgba(23, 22, 27, .06), 0 2px 6px -2px rgba(23, 22, 27, .12);
+  /* The only chromatic value in the system. Destructive and error states only. */
+  --hot: #e7000b;
+
+  --display: 'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --ui: 'Geist', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, monospace;
+
+  /* The editor is a dense tool, so its own controls keep the small radius; the app
+   * shell around it uses the pill/card radii below. */
+  --r: 6px;
+  --r-btn: 18px;
+  --r-card: 24px;
+
+  --shadow: 0 0 0 1px rgba(23, 23, 23, .05), 0 1px 3px rgba(0, 0, 0, .1), 0 1px 2px -1px rgba(0, 0, 0, .1);
   color-scheme: light;
 }
 
@@ -613,4 +629,20 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 }
 .export-pop .btn { justify-content: center; }
 
+}
+
+@layer blooby {
+  /* Rubber-band selection over the timeline lanes. Non-interactive so it can never
+     swallow the pointerup that ends the drag it belongs to. */
+  .marquee {
+    position: absolute; z-index: 5; pointer-events: none;
+    border: 1px solid var(--ink);
+    background: rgba(10, 10, 10, .07);
+    border-radius: 2px;
+  }
+  .track-lanes { position: relative; }
+  /* the ruler owns scrubbing, so it advertises that and the lanes advertise selection */
+  .ruler { cursor: ew-resize; }
+  .track-lanes { cursor: crosshair; }
+  .kfd { cursor: pointer; }
 }

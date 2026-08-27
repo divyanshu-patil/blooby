@@ -34,8 +34,8 @@ export function Dashboard({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <>
       <PageHeader title="Projects" subtitle="Your animations, saved to the cloud.">
-        <SearchBar value={q} onChange={setQ} placeholder="Search projects" />
-        <button className="btn primary" onClick={() => setCreating(true)}>New project</button>
+        <span data-tour="search"><SearchBar value={q} onChange={setQ} placeholder="Search projects" /></span>
+        <button className="btn primary" data-tour="new-project" onClick={() => setCreating(true)}>New project</button>
       </PageHeader>
 
       <div className="page-body">

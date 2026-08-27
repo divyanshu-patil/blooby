@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@blooby/studio/index.css';
 import '@blooby/studio/kit.css';
+import '@blooby/studio/tour.css';
 import './features/auth/auth.css';
 import './app.css';
 import { installPublicApi, useEditor } from '@blooby/studio';

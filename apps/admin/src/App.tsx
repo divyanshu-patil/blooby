@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { EmptyState, Shell, auth, useSession, type NavGroup } from '@blooby/studio';
+import { useEffect, useState } from 'react';
+import { BloobyMark, EmptyState, Shell, auth, startTour, startTourWhenReady, useSession, type DriveStep, type NavGroup } from '@blooby/studio';
 import { Overview } from './features/Overview';
 import { Users } from './features/Users';
 import { Projects } from './features/Projects';
@@ -22,23 +22,32 @@ const NAV: NavGroup[] = [
   ] },
 ];
 
+const ADMIN_TOUR: DriveStep[] = [
+  { popover: { title: 'The admin panel', description: 'A short tour of what you can do here. Skip it with Escape at any time.' } },
+  { element: '[data-tour="overview"]', popover: { title: 'Dashboard', description: 'Usage at a glance, with a growth chart and the assets people actually use. When something is waiting for review, a banner appears here linking straight to it.' } },
+  { element: '[data-tour="users"]', popover: { title: 'Users', description: 'Every account, with project counts and last activity. Open one to see their stats and grant or revoke admin access.' } },
+  { element: '[data-tour="moderation"]', popover: { title: 'Community review', description: 'Submissions from users. Approve to publish, or reject with a reason the creator sees. Nothing is deleted — statuses keep the history.' } },
+  { element: '[data-tour="official"]', popover: { title: 'Editor', description: 'The same editor users have. Build an animation, then publish it as official content or save it as a splashscreen.' } },
+  { element: '[data-tour="splash"]', popover: { title: 'Splashscreen', description: 'Publish the animation everyone sees when the app opens. Only one is live at a time, and swapping it needs no redeploy.' } },
+];
+
 export function App() {
   const { user, ready, isAdmin } = useSession();
   const [view, setView] = useState<View>('overview');
+  useEffect(() => { if (isAdmin) startTourWhenReady('admin', ADMIN_TOUR); }, [isAdmin]);
 
   if (!ready) return <main className="auth"><p className="state-note">Loading…</p></main>;
 
   if (!user) {
     return (
       <main className="auth">
-        <div className="auth-card">
-          <div className="brand" style={{ padding: '0 0 16px' }}>
-            <span className="brand-dot" />
-            <span className="brand-word">blooby admin</span>
+        <div className="auth-inner">
+          <div className="auth-brand"><BloobyMark size={28} /><span>blooby admin</span></div>
+          <div className="auth-card">
+            <h1 className="auth-title">Sign in</h1>
+            <p className="auth-sub">This area is restricted to administrators.</p>
+            <button className="auth-oauth" onClick={() => void auth.signInWithGoogle()}>Continue with Google</button>
           </div>
-          <h1 className="auth-title">Sign in</h1>
-          <p className="auth-sub">This area is restricted to administrators.</p>
-          <button className="btn google" onClick={() => void auth.signInWithGoogle()}>Continue with Google</button>
         </div>
       </main>
     );
@@ -58,11 +67,19 @@ export function App() {
     );
   }
 
+  // The editor needs the whole window for a usable preview, so it opts out of the
+  // fixed shell and brings its own slide-over navigation instead.
+  if (view === 'official') {
+    return <OfficialEditor nav={NAV} active={view} onNavigate={(id) => setView(id as View)} />;
+  }
+
   return (
-    <Shell nav={NAV} active={view} onNavigate={(id) => setView(id as View)}
+    <Shell nav={NAV} active={view} brand="blooby admin" onNavigate={(id) => setView(id as View)}
       footer={
         <div className="who">
           <span className="who-name">{user.email ?? 'Admin'}</span>
+          <button className="btn ghost sm" title="Replay the tour"
+            onClick={() => startTour('admin', ADMIN_TOUR, { force: true })}>?</button>
           <button className="btn ghost sm" onClick={() => void auth.signOut()}>Sign out</button>
         </div>
       }>
@@ -70,7 +87,6 @@ export function App() {
       {view === 'users' && <Users />}
       {view === 'projects' && <Projects />}
       {view === 'moderation' && <Moderation />}
-      {view === 'official' && <OfficialEditor />}
       {view === 'splash' && <Splashscreens />}
     </Shell>
   );

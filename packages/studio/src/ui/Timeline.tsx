@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useEditor, keyframeTimes } from '../core/store';
+import { useEditor, keyframeTimes, writeKeyframe } from '../core/store';
 import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
-import { activeTimeline, PROP_LABEL, type Block, type Track, type Transition } from '../core/types';
+import { activeTimeline, PROP_LABEL, type Block, type EasingCurve, type Keyframe, type KeyValue, type Track, type Transition } from '../core/types';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
@@ -63,6 +63,13 @@ export function Timeline() {
   // shift/cmd-click to add or remove one from the set. `sel` (below) is the *primary* one
   // — the easing/curve editor in the transport only makes sense for exactly one at a time.
   const [selKeys, setSelKeys] = useState<Set<string>>(new Set());
+  // rubber-band selection over the lanes. `box` is null except while dragging, so the
+  // overlay only exists mid-gesture.
+  const marquee = useRef<{ x0: number; y0: number; additive: boolean } | null>(null);
+  const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // copied keyframes, held relative to the earliest one so a paste lands as a group at
+  // the playhead rather than snapping back to wherever it was cut from
+  const clipboard = useRef<{ nodeId: string; property: string; offset: number; value: KeyValue; easingOut: EasingCurve }[]>([]);
   const sel = selKeys.size === 1 ? parseKfKey([...selKeys][0]) : null;
   const setSel = (s: { trackId: string; kfId: string } | null) => setSelKeys(s ? new Set([kfKey(s.trackId, s.kfId)]) : new Set());
   const [curveOpen, setCurveOpen] = useState(false);
@@ -156,12 +163,103 @@ export function Timeline() {
     setPlayhead(next ?? (dir < 0 ? 0 : duration));
   };
 
+  /** Scrubbing lives on the ruler only. Dragging across the lanes selects keyframes
+   *  instead, so the two gestures can't fight over the same pixels. */
   const scrub = (e: React.PointerEvent) => {
     if (e.type === 'pointermove' && e.buttons === 0) return;
     const r = lanesRef.current!.getBoundingClientRect();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     setPlayhead(Math.max(0, Math.min(duration, (e.clientX - r.left) / pxPerMs)));
   };
+
+  /**
+   * Rubber-band select. Hit-testing reads the rendered `.kfd` rects rather than
+   * recomputing row geometry from track order — the DOM already knows where every
+   * diamond ended up, including inside expanded lanes and horizontal scroll.
+   */
+  const marqueeDown = (e: React.PointerEvent) => {
+    // let the keyframes, playhead and duration handle their own drags
+    if ((e.target as Element).closest('.kfd, .playhead, .dur-end')) return;
+    const r = lanesRef.current!.getBoundingClientRect();
+    marquee.current = { x0: e.clientX - r.left, y0: e.clientY - r.top, additive: e.shiftKey || e.metaKey || e.ctrlKey };
+    lanesRef.current!.setPointerCapture?.(e.pointerId);
+    if (!marquee.current.additive) setSelKeys(new Set());
+    setBox(null);
+  };
+
+  const marqueeMove = (e: React.PointerEvent) => {
+    const m = marquee.current;
+    if (!m || e.buttons === 0) return;
+    const r = lanesRef.current!.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    setBox({ x: Math.min(m.x0, x), y: Math.min(m.y0, y), w: Math.abs(x - m.x0), h: Math.abs(y - m.y0) });
+  };
+
+  const marqueeUp = () => {
+    const m = marquee.current;
+    marquee.current = null;
+    // a click with no drag is "clear the selection", already done on pointerdown
+    if (!m || !box || (box.w < 3 && box.h < 3)) { setBox(null); return; }
+
+    const r = lanesRef.current!.getBoundingClientRect();
+    const hits = new Set(m.additive ? selKeys : []);
+    for (const el of lanesRef.current!.querySelectorAll<HTMLElement>('.kfd[data-k]')) {
+      const b = el.getBoundingClientRect();
+      const cx = b.left + b.width / 2 - r.left, cy = b.top + b.height / 2 - r.top;
+      if (cx >= box.x && cx <= box.x + box.w && cy >= box.y && cy <= box.y + box.h) hits.add(el.dataset.k!);
+    }
+    setSelKeys(hits);
+    setBox(null);
+  };
+
+  /** Copy/paste of a keyframe selection. Times are stored relative to the earliest key
+   *  in the set, so pasting reproduces the group's shape starting at the playhead. */
+  const copyKeys = () => {
+    const picked = [...selKeys].map(parseKfKey)
+      .map(({ trackId, kfId }) => {
+        const track = tl.tracks.find((x) => x.id === trackId);
+        const kf = track?.keyframes.find((x) => x.id === kfId);
+        return track && kf ? { track, kf } : null;
+      })
+      .filter((x): x is { track: Track; kf: Keyframe } => x !== null);
+    if (!picked.length) return;
+
+    const base = Math.min(...picked.map((p) => p.kf.time));
+    clipboard.current = picked.map(({ track, kf }) => ({
+      nodeId: track.nodeId,
+      property: track.property,
+      offset: kf.time - base,
+      value: kf.value,
+      easingOut: kf.easingOut,
+    }));
+  };
+
+  const pasteKeys = () => {
+    if (!clipboard.current.length) return;
+    commit((p) => {
+      for (const c of clipboard.current) {
+        writeKeyframe(p, c.nodeId, c.property, playhead + c.offset, c.value, c.easingOut);
+      }
+    }, 'paste keyframes');
+  };
+
+  // Timeline-wide shortcuts. Ignored while typing so a name field still receives ⌘C.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && e.key === 'c') { copyKeys(); }
+      else if (mod && e.key === 'v') { e.preventDefault(); pasteKeys(); }
+      else if (mod && e.key === 'a') {
+        e.preventDefault();
+        setSelKeys(new Set(tl.tracks.flatMap((t) => t.keyframes.map((k) => kfKey(t.id, k.id)))));
+      } else if (e.key === 'Escape') setSelKeys(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   const selKf = sel && tl.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
   const isolatedBlock = isolatedBlockId ? tl.blocks.find((b) => b.id === isolatedBlockId) : null;
@@ -386,9 +484,11 @@ export function Timeline() {
               {!visible.length && <div className="empty-note" style={{ padding: 10 }}>Click a stopwatch to animate a property.</div>}
             </div>
 
-            <div className="track-lanes" ref={lanesRef} style={{ width: laneW }} onPointerDown={scrub} onPointerMove={scrub}>
+            <div className="track-lanes" ref={lanesRef} style={{ width: laneW }}
+              onPointerDown={marqueeDown} onPointerMove={marqueeMove} onPointerUp={marqueeUp}>
+              {box && <div className="marquee" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
               <div style={{ position: 'relative' }}>
-                <div className="ruler">
+                <div className="ruler" onPointerDown={scrub} onPointerMove={scrub}>
                   {tl.blocks.map((b, i) => (
                     <div key={b.id} className="blockband" title={b.name}
                       style={{ left: starts[i] * pxPerMs, width: b.durationMs * pxPerMs, borderLeftColor: clipColor(project, b) || undefined }}>
@@ -408,7 +508,8 @@ export function Timeline() {
                           <span className="seg-fill" style={{ left: t.keyframes[0].time * pxPerMs, width: (t.keyframes[t.keyframes.length - 1].time - t.keyframes[0].time) * pxPerMs }} />
                         )}
                         {t.keyframes.map((k) => (
-                          <span key={k.id} className="kfd" data-sel={selKeys.has(kfKey(t.id, k.id))} data-shape={easingShape(k.easingOut)}
+                          <span key={k.id} className="kfd" data-k={kfKey(t.id, k.id)}
+                            data-sel={selKeys.has(kfKey(t.id, k.id))} data-shape={easingShape(k.easingOut)}
                             style={{ left: k.time * pxPerMs }}
                             title={`${(k.time / 1000).toFixed(2)}s · ${easingLabel(k.easingOut)} — shift/cmd-click to select several`}
                             onPointerDown={(e) => {

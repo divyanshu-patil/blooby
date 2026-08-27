@@ -40,7 +40,7 @@ export const adminController = {
     });
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
-    res.json({ items: items.map((p) => ({ ...p, sizeBytes: Number(p.sizeBytes) })), nextCursor: hasMore ? items[items.length - 1]!.id : null });
+    res.json({ items, nextCursor: hasMore ? items[items.length - 1]!.id : null });
   },
 
   moderationQueue: (req: Request, res: Response) => {

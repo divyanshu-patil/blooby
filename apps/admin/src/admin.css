@@ -47,3 +47,34 @@
 .ranked li:first-child, .plain-list li:first-child { border-top: 0; }
 .ranked-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ranked-num { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+
+/* --- full-bleed editor -------------------------------------------------- */
+/* The preview is the point of this screen, so navigation is a slide-over rather than a
+   permanent column eating 236px of it. */
+.full-editor { display: flex; flex-direction: column; height: 100vh; }
+
+.full-bar {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  padding: 10px 16px; background: var(--surface-alt); border-bottom: 1px solid var(--line);
+}
+.full-bar .spacer { flex: 1; }
+.full-title { font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+
+.icon-btn {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: var(--r-btn); background: var(--panel);
+  border: 1px solid var(--line); color: var(--ink); cursor: pointer; font-size: 14px;
+}
+.icon-btn:hover { background: var(--field); }
+
+.full-body { flex: 1; min-height: 0; }
+
+.slide-scrim { position: fixed; inset: 0; background: rgba(10, 10, 10, .32); z-index: 80; }
+.slide-nav {
+  position: fixed; inset: 0 auto 0 0; z-index: 81; width: 248px;
+  padding: 16px 12px; background: var(--surface-alt); border-right: 1px solid var(--line);
+  box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px;
+  animation: slide-in .16s ease;
+}
+@keyframes slide-in { from { transform: translateX(-100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .slide-nav { animation: none; } }

@@ -10,6 +10,12 @@ export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
+
+  // Postgres bigint columns (projects.size_bytes) arrive as JS BigInt, which
+  // JSON.stringify throws on. Handled once here rather than mapped in every controller
+  // that happens to return a project — a route added later cannot forget it.
+  app.set('json replacer', (_key: string, value: unknown) =>
+    typeof value === 'bigint' ? Number(value) : value);
   app.use(cors({ origin: env.corsOrigins, credentials: true }));
   // the ceiling is enforced again in storage.service against the serialized payload;
   // this one just stops an oversized body being buffered in the first place

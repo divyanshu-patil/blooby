@@ -11,6 +11,8 @@ export type { Project, Preset, Expression, Timeline } from './core/types';
 
 // shared app shell
 export * from './kit';
+export { startTour, startTourWhenReady, hasSeenTour } from './kit/tour';
+export type { DriveStep } from 'driver.js';
 
 // cloud
 export { api, ApiError } from './cloud/client';

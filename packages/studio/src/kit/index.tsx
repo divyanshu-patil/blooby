@@ -13,11 +13,22 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 export interface NavItem { id: string; label: string; glyph: string; count?: number }
 export interface NavGroup { title?: string; items: NavItem[] }
 
-export function Shell({ nav, active, onNavigate, footer, children }: {
+/** The mascot reduced to its silhouette: body, two eyes. Same shapes the editor draws,
+ *  so the mark and the product are literally the same thing. */
+export const BloobyMark = ({ size = 20 }: { size?: number }) => (
+  <svg className="brand-mark" width={size} height={size} viewBox="0 0 20 20" aria-hidden>
+    <circle cx="10" cy="10" r="9" fill="currentColor" />
+    <circle cx="6.8" cy="8.6" r="1.9" fill="var(--panel)" />
+    <circle cx="13.2" cy="8.6" r="1.9" fill="var(--panel)" />
+  </svg>
+);
+
+export function Shell({ nav, active, onNavigate, footer, brand, children }: {
   nav: NavGroup[];
   active: string;
   onNavigate: (id: string) => void;
   footer?: ReactNode;
+  brand?: string;
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('blooby.side') === '1');
@@ -32,10 +43,9 @@ export function Shell({ nav, active, onNavigate, footer, children }: {
   return (
     <div className="shell">
       <aside className="side" data-collapsed={collapsed} data-open={open}>
-        <button className="brand" onClick={toggle} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          style={{ background: 'none', border: 0, cursor: 'pointer' }}>
-          <span className="brand-dot" />
-          <span className="brand-word">blooby</span>
+        <button className="brand" onClick={toggle} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <BloobyMark />
+          <span className="brand-word">{brand ?? 'blooby'}</span>
         </button>
 
         {nav.map((group, gi) => (
@@ -43,7 +53,7 @@ export function Shell({ nav, active, onNavigate, footer, children }: {
             {group.title && <div className="side-group-title">{group.title}</div>}
             {group.items.map((item) => (
               <button key={item.id} className="side-item" aria-current={active === item.id}
-                title={item.label}
+                data-tour={item.id} title={item.label}
                 onClick={() => { onNavigate(item.id); setOpen(false); }}>
                 <span className="side-glyph" aria-hidden>{item.glyph}</span>
                 <span className="side-label">{item.label}</span>
@@ -57,9 +67,7 @@ export function Shell({ nav, active, onNavigate, footer, children }: {
       </aside>
 
       <main className="main">
-        <button className="btn ghost sm" onClick={() => setOpen((v) => !v)}
-          style={{ position: 'fixed', top: 10, left: 10, zIndex: 70 }}
-          data-mobile-only aria-label="Toggle navigation">☰</button>
+        <button className="side-trigger" onClick={() => setOpen((v) => !v)} aria-label="Toggle navigation">☰</button>
         {children}
       </main>
     </div>

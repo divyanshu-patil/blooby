@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./index.css": "./src/index.css",
-    "./kit.css": "./src/kit/kit.css"
+    "./kit.css": "./src/kit/kit.css",
+    "./tour.css": "./src/kit/tour.css"
   },
   "scripts": {
     "check": "npx esbuild src/core/selfcheck.ts --bundle --format=esm | node --input-type=module",
@@ -16,6 +17,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
+    "driver.js": "^1.8.0",
     "gif.js.optimized": "^1.0.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
