@@ -110,6 +110,11 @@ point by point. `lerpValue` calls it, so `shape.path` keyframes morph for free.
 It is all arithmetic on purpose: `SVGPathElement.getPointAtLength` only exists in a
 browser, and the selfcheck, the exporter and any headless render need identical results.
 
+An outline is also editable by hand: `pathAnchors` returns the points that define it (not
+resampled ones — dragging one of 64 even samples would fight the seven that actually shape
+it) and `movePathAnchor` moves one, carrying its control handles rigidly so curvature
+survives. Hand-editing clears the primitive's dials, because they no longer describe it.
+
 Two rules if you touch the parser:
 
 - **Every loop iteration must consume a token.** A malformed path left `cmd` on `Z`, which

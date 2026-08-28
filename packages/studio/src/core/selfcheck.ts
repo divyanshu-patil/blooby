@@ -9,7 +9,7 @@ import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, composeScene, emitterFrame, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, sceneAt, scopeSpan, scopeTime, valueAt } from './scene';
 import { builtinPresets, confetti, defaultProject, makeTimeline, presetPreviewProject } from './defaults';
 import { CONFETTI_COLORS, shapeById, shapeResolver, SHAPE_LIBRARY } from './emitters';
-import { flattenPath, morphPath, naturalShape, primitivePath, PRIMITIVE_SHAPES } from './path';
+import { flattenPath, morphPath, movePathAnchor, naturalShape, pathAnchors, primitivePath, PRIMITIVE_SHAPES } from './path';
 import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
@@ -2520,6 +2520,40 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('and clears the old glyph line so nothing is thrown twice', em.glyphs.length === 0);
 
   ed().loadProject(defaultProject());
+}
+
+// --- the outline is an editable spline -------------------------------------------
+{
+  const area = (pts: { x: number; y: number }[]) =>
+    Math.abs(pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + (p.x * q.y - q.x * p.y); }, 0) / 2);
+
+  // anchors are the points that define the outline, not resampled ones: dragging one of
+  // 64 even samples would fight the seven that actually shape it
+  ok('a circle has its spline points', pathAnchors(primitivePath('circle')).length === 8);
+  ok('a rect has four', pathAnchors(primitivePath('rect')).length === 4);
+  ok('a five-pointed star has ten', pathAnchors(primitivePath('star', { points: 5 })).length === 10);
+  ok('and a closed path counts its start once',
+    pathAnchors('M 0 0 L 1 0 L 1 1 L 0 1 Z').length === 4);
+
+  const circle = primitivePath('circle');
+  const before = pathAnchors(circle);
+  const pulled = movePathAnchor(circle, 0, { x: before[0].x, y: before[0].y - 0.4 });
+  const after = pathAnchors(pulled);
+
+  ok('moving a point moves that point', Math.abs(after[0].y - (before[0].y - 0.4)) < 1e-6);
+  ok('and leaves the others alone', JSON.stringify(before.slice(1)) === JSON.stringify(after.slice(1)));
+  ok('curvature survives the edit — a pulled circle is still curved', pulled.includes('C'));
+  ok('and the shape is still closed and sane',
+    area(flattenPath(pulled, 128)) > area(flattenPath(circle, 128)),
+    `${area(flattenPath(circle, 128)).toFixed(3)} -> ${area(flattenPath(pulled, 128)).toFixed(3)}`);
+
+  ok('an out-of-range index changes nothing', movePathAnchor(circle, 99, { x: 0, y: 0 }) === circle);
+  ok('and junk does not throw', movePathAnchor('nonsense', 0, { x: 0, y: 0 }).length >= 0);
+
+  // an edited outline still morphs, which is the point of keeping it a path
+  const star = primitivePath('star', { points: 5 });
+  const mid = morphPath(pulled, star, 0.5);
+  ok('a hand-edited outline still morphs', mid !== pulled && mid !== star && flattenPath(mid, 32).length === 32);
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------

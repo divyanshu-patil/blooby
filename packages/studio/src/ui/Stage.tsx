@@ -3,6 +3,7 @@ import { useEditor } from '../core/store';
 import { COMP } from '../core/defaults';
 import { composeScene, evaluateRig, evaluateWithTransition, type SceneItem } from '../core/scene';
 import { TrajectoryHandles } from './TrajectoryHandles';
+import { ShapeHandles } from './ShapeHandles';
 import { bodyTurnScale, screenToSurface } from '../core/curvature';
 import { Shapes } from './Mascot';
 import { activeTimeline } from '../core/types';
@@ -242,6 +243,11 @@ export function Stage() {
 
         {/* the emitter being edited gets its path drawn over the mascot, with the ends and
             the fade point draggable — otherwise it is a dozen numbers aiming at nothing */}
+        {/* the selected layer's outline as draggable points, when it has one */}
+        {sel?.path && showGuides && selection.length === 1 && (
+          <ShapeHandles nodeId={selection[0]} item={sel} path={sel.path} toComp={toComp} />
+        )}
+
         {selectedEmitter && showGuides && (
           <TrajectoryHandles emitter={selectedEmitter} rig={rig} scene={scene} view={COMP} toComp={toComp} />
         )}

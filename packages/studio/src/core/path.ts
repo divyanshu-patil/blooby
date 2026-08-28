@@ -89,6 +89,60 @@ function segments(d: string): Seg[] {
   return segs;
 }
 
+/**
+ * Back to a `d` string, faithfully enough to edit.
+ *
+ * H/V/S/T come back as L/C and an arc as a line, which is what `segments` already
+ * normalised them to — visually identical for anything this app draws, and it means one
+ * representation to move a point in rather than a parser that must preserve every spelling.
+ */
+function serialise(segs: Seg[]): string {
+  if (!segs.length) return '';
+  const f = (v: Vec2) => `${round(v.x)} ${round(v.y)}`;
+  let d = `M ${f(segs[0].p0)}`;
+  for (const s of segs) d += s.c1 && s.c2 ? ` C ${f(s.c1)} ${f(s.c2)} ${f(s.p1)}` : ` L ${f(s.p1)}`;
+  return `${d} Z`;
+}
+
+/**
+ * The on-curve points of a path, in order — what a user grabs to reshape it.
+ *
+ * Anchors, not the resampled points `flattenPath` produces: dragging one of 64 evenly
+ * spaced samples would fight the seven that actually define the outline.
+ */
+export function pathAnchors(d: string): Vec2[] {
+  const segs = segments(d);
+  if (!segs.length) return [];
+  const pts = [segs[0].p0, ...segs.map((s) => s.p1)];
+  // a closed path ends where it started; that is one anchor, not two
+  if (pts.length > 1 && dist(pts[0], pts[pts.length - 1]) < 1e-9) pts.pop();
+  return pts;
+}
+
+/**
+ * Moves one anchor, carrying its adjacent control handles with it.
+ *
+ * Translating the handles rigidly rather than leaving them behind keeps the curvature
+ * either side of the point — otherwise dragging a corner of a circle flattens the two
+ * arcs meeting there and the shape collapses as you edit it.
+ */
+export function movePathAnchor(d: string, index: number, to: Vec2): string {
+  const segs = segments(d).map((s) => ({ ...s }));
+  if (!segs.length) return d;
+  const anchors = pathAnchors(d);
+  if (index < 0 || index >= anchors.length) return d;
+  const from = anchors[index];
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const shift = (p: Vec2 | undefined) => (p ? { x: p.x + dx, y: p.y + dy } : p);
+  const same = (p: Vec2) => dist(p, from) < 1e-9;
+
+  for (const s of segs) {
+    if (same(s.p0)) { s.p0 = shift(s.p0)!; s.c1 = shift(s.c1); }
+    if (same(s.p1)) { s.p1 = shift(s.p1)!; s.c2 = shift(s.c2); }
+  }
+  return serialise(segs);
+}
+
 const along = (s: Seg, t: number): Vec2 => {
   if (!s.c1 || !s.c2) return { x: lerp(s.p0.x, s.p1.x, t), y: lerp(s.p0.y, s.p1.y, t) };
   const u = 1 - t;

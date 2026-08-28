@@ -836,3 +836,6 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .fxband.on { background: color-mix(in oklab, var(--signal) 42%, transparent); border-color: var(--signal); }
 .fxband span { font: 600 9px var(--display); letter-spacing: .06em; text-transform: uppercase;
   color: var(--ink); padding: 0 4px; white-space: nowrap; }
+.shapepts circle { fill: var(--paper); stroke: var(--signal); stroke-width: 2; cursor: grab; }
+.shapepts circle:hover { fill: var(--signal); }
+.shapepts circle:active { cursor: grabbing; }
