@@ -7,6 +7,7 @@ import { Presets, Expressions, OtherTimelines } from './Presets';
 import { NodeInspector, CameraPanel, ClipInspector } from './Inspector';
 import { EyePanel } from './EyePanel';
 import { Effects } from './Effects';
+import { Collapsible } from './Collapsible';
 import { Timeline, DurationField } from './Timeline';
 import { Copilot } from './Copilot';
 import { ExportBar } from './ExportBar';
@@ -166,11 +167,16 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
                       )
                     )}
                     {tab === 'eyes' && <EyePanel />}
+                    {/* folds, not a split: a split gives every section a share of the
+                        height whether or not it has anything in it, so the one you are
+                        working in never gets enough */}
                     {tab === 'fx' && (
-                      <Split direction="column" storageKey="rail-fx" panes={[
-                        { min: 160, content: <Effects /> },
-                        { min: 140, content: <CameraPanel /> },
-                      ]} />
+                      <>
+                        <Effects />
+                        <Collapsible title="Camera" storageKey="camera" defaultOpen={false}>
+                          <CameraPanel bare />
+                        </Collapsible>
+                      </>
                     )}
                     {tab === 'states' && <StateMachine />}
                     {tab === 'ai' && <Copilot />}

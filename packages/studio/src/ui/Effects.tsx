@@ -1,9 +1,14 @@
+import { useState } from 'react';
 import { useEditor } from '../core/store';
 import { activeTimeline, MODIFIER_AXES, MODIFIER_KINDS, MODIFIERS, type Emitter, type ModifierKind } from '../core/types';
 import { scopeSpan } from '../core/scene';
 import { blockStarts } from '../core/timeline';
 import { hexColor, parseHex } from '../core/color';
-import { NumberField, Panel } from './bits';
+import { NumberField } from './bits';
+import { Collapsible } from './Collapsible';
+import { PartEditor } from './PartEditor';
+import { confetti } from '../core/defaults';
+import { EASING_NAMES, namedEasing } from '../core/easing';
 import { RangeBar } from './RangeBar';
 
 /** Ready-made emitters — the same record with different numbers, which is the point. */
@@ -64,6 +69,7 @@ export function Effects() {
   const selection = useEditor((s) => s.selection);
   const selectedBlockId = useEditor((s) => s.selectedBlockId);
   const playhead = useEditor((s) => s.playhead);
+  const [targetId, setTargetId] = useState<string | null>(null);
   const selectBlock = useEditor((s) => s.selectBlock);
   const addModifier = useEditor((s) => s.addModifier);
   const updateModifier = useEditor((s) => s.updateModifier);
@@ -76,7 +82,6 @@ export function Effects() {
   const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
 
   const tl = activeTimeline(project);
-  const target = selection[0] ?? project.rig.rootId;
   const nodeName = (id: string) => project.rig.nodes[id]?.name ?? id;
 
   const block = selectedBlockId ? tl.blocks.find((b) => b.id === selectedBlockId) : null;
@@ -85,6 +90,9 @@ export function Effects() {
   const clipScoped = !!selectedBlockId && !!block;
   const list = tl.modifiers.filter((m) => (clipScoped ? m.blockId === selectedBlockId : !m.blockId));
   const scope = clipScoped ? selectedBlockId! : undefined;
+  // which layer a NEW effect lands on. Sticky, so adding three effects to the eyes is
+  // three clicks rather than six, and clearable back to the body with a second click.
+  const target = targetId && project.rig.nodes[targetId] ? targetId : (selection[0] ?? project.rig.rootId);
   const emitters = (tl.emitters ?? []).filter((e) => (clipScoped ? e.blockId === selectedBlockId : !e.blockId));
   const span = scopeSpan(tl, scope)[1];
   const add = (kind: ModifierKind, nodeId: string) =>
@@ -125,32 +133,41 @@ export function Effects() {
   const localPlayhead = Math.max(0, Math.min(span, Math.round(playhead - clipStart)));
 
   return (
-    <Panel title="Effects" actions={
-      <>
-        {MODIFIER_KINDS.map((k) => (
-          <button key={k} className="btn sm" title={MODIFIERS[k].help} onClick={() => add(k, target)}>+ {MODIFIERS[k].label}</button>
-        ))}
-      </>
-    }>
-      <div className="flex items-center gap-2 rounded-md border border-line-soft bg-field px-2.5 py-1.5 text-[11px]">
+    <>
+      <div className="scopebar">
         {clipScoped ? (
           <>
-            <span className="inline-block h-1.5 w-1.5 flex-none rounded-full bg-signal" />
-            <span className="text-ink-2">Editing effects for clip <strong className="font-semibold text-ink">{block!.name}</strong> only</span>
-            <span className="flex-1" />
-            <button className="text-muted underline decoration-dotted underline-offset-2 hover:text-ink" onClick={() => selectBlock(null)}>
-              Switch to global
-            </button>
+            <span className="dot-status ok" />
+            <span>Scoped to <strong>{block!.name}</strong></span>
+            <span className="spacer" />
+            <button className="btn ghost sm" onClick={() => selectBlock(null)}>Make global</button>
           </>
         ) : (
-          <span className="text-muted">Global — applies everywhere. Select a clip on the timeline to scope effects to just it.</span>
+          <span>Global — select a clip on the strip to scope new effects to it.</span>
         )}
       </div>
 
+      {/* which layer a new effect lands on. Clicking the one already chosen clears it back
+          to the body, so "just the eyes" and "the whole thing" are both one click away. */}
+      <div className="row targetbar">
+        <span className="prop-label" style={{ flex: 1 }}>Apply to</span>
+        {Object.values(project.rig.nodes).map((n) => (
+          <button key={n.id} className="btn sm" aria-pressed={target === n.id}
+            title={target === n.id ? `${n.name} — click to go back to the body` : `New effects go on ${n.name}`}
+            onClick={() => setTargetId(target === n.id ? null : n.id)}>{n.name}</button>
+        ))}
+      </div>
+
+      <Collapsible title="Modifiers" storageKey="modifiers" badge={list.length || undefined} actions={
+        <>{MODIFIER_KINDS.map((k) => (
+          <button key={k} className="btn sm" title={MODIFIERS[k].help} onClick={() => add(k, target)}>+ {MODIFIERS[k].label}</button>
+        ))}</>
+      }>
       {!list.length && (
         <p className="empty-note">
-          Shake jitters with noise, float bobs on a sine, stretch pulses the whole rig's size.
-          All three stack on whatever the keyframes are doing{clipScoped ? ', for as long as this clip plays' : ''}.
+          Shake jitters with noise, float bobs on a sine, stretch pulses the whole rig's size,
+          pendulum swings one axis. They stack on whatever the keyframes are
+          doing{clipScoped ? ', for as long as this clip plays' : ''}.
         </p>
       )}
       {list.map((m) => (
@@ -202,19 +219,22 @@ export function Effects() {
         </div>
       ))}
 
-      <div className="divider" />
-      <div className="row">
-        <span className="panel-title" style={{ flex: 1 }}>Emitters</span>
-        {EMITTER_PRESETS.map((e) => (
-          <button key={e.label} className="btn sm" title={e.hint}
+      </Collapsible>
+
+      <Collapsible title="Effects" storageKey="effects" badge={emitters.length || undefined} actions={
+        <>
+          <button className="btn sm" title="A burst of paper confetti, starting at the playhead"
             onClick={() => addEmitter({
-              ...e.make(project.rig.rootId), blockId: scope,
-              // a burst goes off where the playhead is, which is the whole gesture: park
-              // the playhead, click, done. A stream defaults to its whole scope instead.
-              ...(e.burstMs ? { startMs: localPlayhead, endMs: Math.min(span, localPlayhead + e.burstMs) } : {}),
-            })}>+ {e.label}</button>
-        ))}
-      </div>
+              ...confetti(target), blockId: scope,
+              // the whole gesture: park the playhead, click, done
+              startMs: localPlayhead, endMs: Math.min(span, localPlayhead + 1500),
+            })}>+ Confetti</button>
+          {EMITTER_PRESETS.map((e) => (
+            <button key={e.label} className="btn sm" title={e.hint}
+              onClick={() => addEmitter({ ...e.make(target), blockId: scope })}>+ {e.label}</button>
+          ))}
+        </>
+      }>
 
       {!emitters.length && (
         <p className="empty-note">
@@ -258,16 +278,16 @@ export function Effects() {
           </div>
 
           <div className="row">
-            <input className="txt" style={{ flex: 1 }} value={em.glyphs.join(' ')} aria-label="Glyphs"
-              title="Cycled in order, one per particle — separate with spaces"
-              onChange={(e) => updateEmitter(em.id, (x) => { x.glyphs = e.target.value.split(/\s+/).filter(Boolean); })} />
+            <span className="prop-label" style={{ flex: 1 }}>Path</span>
             <select className="sel" value={em.path} aria-label="Path"
               onChange={(e) => updateEmitter(em.id, (x) => { x.path = e.target.value as typeof x.path; })}>
-              <option value="arc">arc</option>
-              <option value="orbit">orbit</option>
-              <option value="fall">fall</option>
+              <option value="arc">arc — drifts</option>
+              <option value="fall">fall — drops</option>
+              <option value="orbit">orbit — circles</option>
             </select>
           </div>
+
+          <PartEditor emitter={em} />
 
           {/* endpoints. Pinning to a layer is what makes a tear leave the eye rather than
               a fixed point in space the head has since moved away from. */}
@@ -300,14 +320,30 @@ export function Effects() {
           <Dial label="Grows to" value={em.scaleTo} min={0.1} max={3} step={0.05} onChange={(v) => updateEmitter(em.id, (x) => { x.scaleTo = v; })} />
           <Dial label="Spin" value={em.spin} min={-360} max={360} step={5} onChange={(v) => updateEmitter(em.id, (x) => { x.spin = v; })} />
           <Dial label="Wander" value={em.wobble} min={0} max={40} step={0.5} onChange={(v) => updateEmitter(em.id, (x) => { x.wobble = v; })} />
+          <Dial label="Speed spread" value={em.speedJitter ?? 0} min={0} max={1} step={0.05}
+            onChange={(v) => updateEmitter(em.id, (x) => { x.speedJitter = v; })} />
+          <div className="prop">
+            <span /><label className="prop-label"><span className="t">Travel</span></label>
+            <select className="sel" value={easingName(em.easing)} aria-label="Travel easing"
+              onChange={(e) => updateEmitter(em.id, (x) => {
+                x.easing = e.target.value === 'linear' ? { type: 'linear' } : namedEasing(e.target.value);
+              })}>
+              <option value="linear">linear</option>
+              {EASING_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
 
           <RangeBar spanMs={span} startMs={em.startMs} endMs={em.endMs} label={clipScoped ? 'Runs in clip' : 'Runs in timeline'}
             onChange={(a, b) => updateEmitter(em.id, (x) => { x.startMs = a; x.endMs = b; })} />
         </div>
       ))}
-    </Panel>
+      </Collapsible>
+    </>
   );
 }
+
+/** The easing curve's name, for the picker. */
+const easingName = (e?: { type: string; name?: string }) => (e?.type === 'preset' ? e.name! : 'linear');
 
 /** One labelled slider + number, which is most of this panel. */
 function Dial({ label, value, min, max, step, onChange }: {

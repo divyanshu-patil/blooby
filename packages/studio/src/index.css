@@ -769,3 +769,57 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .traj-label { font: 700 10px var(--display); letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
 .fxcard.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
 .pathdata { min-height: 62px; font: 400 10.5px/1.5 var(--mono); resize: vertical; }
+
+/* ---- collapsible rail sections -------------------------------------------- */
+.fold {
+  border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel);
+  overflow: hidden; flex: none;
+}
+.fold + .fold { margin-top: 8px; }
+.fold-head { display: flex; align-items: center; gap: 6px; padding: 5px 7px 5px 4px; }
+.fold[data-open='true'] .fold-head { border-bottom: 1px solid var(--line-soft); }
+.fold-toggle {
+  display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
+  border: 0; background: none; padding: 3px 4px; cursor: pointer; text-align: left;
+}
+.fold-caret { color: var(--muted); font-size: 13px; line-height: 1; transition: transform .12s ease; }
+.fold[data-open='true'] .fold-caret { transform: rotate(90deg); }
+.fold-title { font: 700 10px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); }
+.fold-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.fold-body { display: flex; flex-direction: column; gap: 8px; padding: 9px; }
+@media (prefers-reduced-motion: reduce) { .fold-caret { transition: none; } }
+
+/* ---- what an emitter throws ----------------------------------------------- */
+.partrow { display: flex; gap: 8px; padding: 6px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel); }
+.partart {
+  width: 34px; height: 34px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--line-soft); border-radius: 5px; background: var(--field);
+}
+.partart svg { width: 22px; height: 22px; }
+.partglyph { font-size: 17px; }
+.partbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.partdials { gap: 8px; }
+.partdials label { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.partdials label > span { font: 500 10px var(--ui); color: var(--muted); }
+
+.shapepick { max-width: 460px; width: min(92vw, 460px); max-height: 86vh; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.shapepick-head { display: flex; align-items: center; gap: 8px; }
+.shapepick-head .spacer { flex: 1; }
+.shapepick-preview {
+  height: 130px; display: grid; place-items: center;
+  border: 1px solid var(--line-soft); border-radius: 8px; background: var(--field);
+}
+.shapepick-preview svg { width: 88px; height: 88px; }
+.shapepick-name { text-align: center; font: 500 11.5px var(--ui); color: var(--muted); min-height: 15px; }
+.shapepick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 6px; margin-top: 4px; }
+.shapepick-cell {
+  aspect-ratio: 1; display: grid; place-items: center; cursor: pointer;
+  border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel); color: var(--ink);
+}
+.shapepick-cell:hover, .shapepick-cell:focus-visible { border-color: var(--ink); outline: none; }
+.shapepick-cell svg { width: 24px; height: 24px; }
+.scopebar { display: flex; align-items: center; gap: 8px; padding: 6px 9px; font-size: 11px;
+  border: 1px solid var(--line-soft); border-radius: 7px; background: var(--field); color: var(--muted); }
+.scopebar strong { color: var(--ink); font-weight: 600; }
+.scopebar .spacer { flex: 1; }
+.targetbar { flex-wrap: wrap; }

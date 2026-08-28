@@ -308,14 +308,16 @@ export function ClipInspector() {
   );
 }
 
-export function CameraPanel() {
-  return (
-    <Panel title="Camera">
+/** `bare` drops the panel chrome, for when it is already inside a collapsible section. */
+export function CameraPanel({ bare }: { bare?: boolean } = {}) {
+  const rows = (
+    <>
       <PropRow nodeId={CAMERA_ID} property="camera.fov" />
       <PropRow nodeId={CAMERA_ID} property="camera.distance" />
       <PropRow nodeId={CAMERA_ID} property="camera.offset.x" />
       <PropRow nodeId={CAMERA_ID} property="camera.offset.y" />
       <p className="hint">Perspective 0° is orthographic — features slide flat across the face. Open it up and the near side swells while the rim hides behind the silhouette.</p>
-    </Panel>
+    </>
   );
+  return bare ? rows : <Panel title="Camera">{rows}</Panel>;
 }
