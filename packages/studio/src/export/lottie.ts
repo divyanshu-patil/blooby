@@ -1,6 +1,6 @@
 import { COMP } from '../core/defaults';
 import { sceneAt, type SceneItem } from '../core/scene';
-import { flattenPath, pathFromPoints } from '../core/path';
+import { flattenPath, pathFromPoints, primitivePath } from '../core/path';
 import { outlinesOf } from '../core/emitters';
 import { activeTimeline } from '../core/types';
 import type { Project } from '../core/types';
@@ -125,7 +125,13 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     // SVG whose paths we can read — becomes real Lottie bezier shapes. Constant outlines
     // are written once; only an outline that actually CHANGES gets per-frame vertices,
     // which is what makes a morph cost what it costs.
-    const outlines = outlinesFor(first);
+    //
+    // Scanned across ALL frames, not just the first: a layer can GAIN an outline partway
+    // through, which is exactly what a morph clip late in a timeline does. Deciding from
+    // frame 0 exported those eyes as plain pills and dropped the morph without a word.
+    const outlines = frames
+      .map((scene) => scene.find((it) => it.id === id))
+      .reduce<string[] | null>((found, it) => found ?? (it ? outlinesFor(it) : null), null);
     if (outlines) { baked.add(first.name); }
 
     // base geometry: the largest the shape ever gets, so scale stays <= 100%
@@ -242,6 +248,13 @@ function rebase(d: string, vx: number, vy: number, vw: number, vh: number, k: nu
   })));
 }
 
+/** The layer's plain shape as a unit-box outline, for frames before a morph begins. */
+function primitiveOutline(item: SceneItem): string[] {
+  return [item.shape === 'ellipse'
+    ? primitivePath('circle')
+    : primitivePath('rect', { cornerRadius: 0.5 })];
+}
+
 const VERTS = 48;
 
 /**
@@ -259,8 +272,10 @@ function bezierShapes(
   return outlines.map((_, oi) => {
     const perFrame = frames.map((scene) => {
       const it = scene.find((s) => s.id === id);
-      const outs = it ? outlinesFor(it) : null;
-      const d = outs?.[oi] ?? outlines[oi];
+      // a frame where this layer has no outline of its own still needs one, or its
+      // geometry would jump; use the primitive it is drawing at that instant
+      const outs = it ? outlinesFor(it) ?? primitiveOutline(it) : null;
+      const d = outs?.[oi] ?? outs?.[0] ?? outlines[oi];
       // scaled into the layer's own base box: the transform channel handles the rest
       return flattenPath(d, VERTS).map((p) => [round(p.x * w0, 3), round(p.y * h0, 3)]);
     });

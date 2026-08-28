@@ -243,6 +243,11 @@ input.txt:focus { border-color: var(--signal); outline: none; }
   border: 1px solid transparent; border-radius: 5px; background: var(--field);
   font: 500 11px var(--mono); color: var(--ink);
 }
+/* .prop-num is width:100% because the .prop grid gives it a fixed 60px column. In a plain
+   .row there is no such column, so it took the whole width and collapsed the label beside
+   it to zero — which wrapped "Stacking order" one letter per line. */
+.row > .prop-num { flex: 0 0 62px; width: 62px; }
+.partdials label > .prop-num { flex: 1 1 auto; width: auto; min-width: 42px; }
 .prop-num:hover { border-color: var(--line); }
 .prop-num:focus { border-color: var(--signal); outline: none; background: #fff; }
 
@@ -581,6 +586,7 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 }
 .hint { font: 400 11px var(--ui); color: var(--muted); }
 .row { display: flex; align-items: center; gap: 6px; }
+.row.wrap { flex-wrap: wrap; row-gap: 5px; }
 .divider { height: 1px; background: var(--line-soft); margin: 2px 0; }
 
 .swatches { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -785,7 +791,10 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .fold-caret { color: var(--muted); font-size: 13px; line-height: 1; transition: transform .12s ease; }
 .fold[data-open='true'] .fold-caret { transform: rotate(90deg); }
 .fold-title { font: 700 10px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); }
-.fold-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+/* wraps: four add-buttons do not fit the rail on one line, and the clipped one is
+   always the last kind added */
+.fold-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 62%; }
+.fold-head { flex-wrap: wrap; row-gap: 4px; }
 .fold-body { display: flex; flex-direction: column; gap: 8px; padding: 9px; }
 @media (prefers-reduced-motion: reduce) { .fold-caret { transition: none; } }
 
@@ -827,9 +836,9 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .snap circle { fill: var(--signal); }
 
 /* ---- effect spans on the strip -------------------------------------------- */
-.fxbands { position: relative; height: 15px; margin: 2px 0 1px; }
+.fxbands { position: relative; margin: 2px 0 1px; }
 .fxband {
-  position: absolute; top: 0; height: 13px; display: flex; align-items: center;
+  position: absolute; height: 13px; display: flex; align-items: center;
   border-radius: 3px; background: color-mix(in oklab, var(--signal) 22%, transparent);
   border: 1px solid color-mix(in oklab, var(--signal) 55%, transparent); overflow: hidden;
 }

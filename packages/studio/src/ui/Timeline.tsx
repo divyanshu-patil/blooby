@@ -154,6 +154,17 @@ export function Timeline() {
     };
   }).filter((e) => e.to > e.from);
 
+  // Stack overlapping spans into rows. Two effects running at once drew on top of each
+  // other, so "SHAKE" and "CONFETTI" came out as one unreadable smear. Greedy: each band
+  // takes the first row where it does not touch one already there.
+  const effectRows: number[] = [];
+  const laneOf = effectSpans.map((e) => {
+    let lane = effectRows.findIndex((busyUntil) => busyUntil <= e.from);
+    if (lane < 0) { lane = effectRows.length; effectRows.push(0); }
+    effectRows[lane] = e.to;
+    return lane;
+  });
+
   // a focused track can fall out of `visible` (layer selection changed, track deleted) —
   // an orphaned focus set would just dim every remaining track with nothing emphasized,
   // so drop whatever no longer applies instead of leaving a confusing all-dim view.
@@ -531,11 +542,11 @@ export function Timeline() {
                     the inspector moves a bar here, so "runs from 0.3s to 1.4s" is a thing
                     you can see against the clips rather than two numbers to picture. */}
                 {effectSpans.length > 0 && (
-                  <div className="fxbands">
-                    {effectSpans.map((e) => (
+                  <div className="fxbands" style={{ height: effectRows.length * 15 }}>
+                    {effectSpans.map((e, i) => (
                       <div key={e.id} className={`fxband${e.id === selectedEmitterId ? ' on' : ''}`}
                         title={`${e.label} — ${fmtSec(e.from)} to ${fmtSec(e.to)}`}
-                        style={{ left: e.from * pxPerMs, width: Math.max(2, (e.to - e.from) * pxPerMs) }}>
+                        style={{ left: e.from * pxPerMs, width: Math.max(2, (e.to - e.from) * pxPerMs), top: laneOf[i] * 15 }}>
                         <span>{e.label}</span>
                       </div>
                     ))}

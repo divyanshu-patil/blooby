@@ -2456,6 +2456,16 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   const otherEye = shapes(morph, 'Right eye');
   ok('while an untouched layer keeps a primitive', otherEye.length === 0);
 
+  // THE BUG the app test found: a layer that gains an outline PARTWAY through. The
+  // exporter judged from frame 0, where the eye is still a plain pill, so a morph clip at
+  // the end of a timeline exported as a pill and was dropped without a word.
+  ed().loadProject(defaultProject());
+  ed().commit((p2) => { p2.presets = builtinPresets(); });
+  ed().addBlock('p_excited');                       // appended AFTER the four default clips
+  const late = bakeLottie(P(), { from: 0, to: activeTimeline(P()).timelineDurationMs, background: '', name: 'probe' });
+  ok('an outline that appears late is still baked', late.baked.includes('Left eye'), late.baked.join() || '(nothing)');
+  ok('and the layer exports as a bezier for the whole clip', kinds(late).has('sh'));
+
   // an emitter's artwork exports too, rebased out of its own viewBox
   ed().loadProject(defaultProject());
   ed().addEmitter({

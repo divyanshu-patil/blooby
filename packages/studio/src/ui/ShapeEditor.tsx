@@ -65,7 +65,9 @@ export function ShapeEditor({ node }: { node: RigNode }) {
         <KeyNav nodeId={node.id} property="shape.path" onToggle={() => toggleKeyframe(node.id, 'shape.path')} />
       </div>
 
-      <div className="row">
+      {/* wraps: five shapes plus Clear overflow the rail on one line, and the clipped
+          button is the one that undoes the change */}
+      <div className="row wrap">
         {PRIMITIVE_SHAPES.map((k) => (
           <button key={k} className="btn sm" aria-pressed={current === k}
             title={k === natural ? `${k} — this layer's natural shape` : `Use a ${k}`}
