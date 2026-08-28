@@ -2373,6 +2373,113 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ed().loadProject(defaultProject());
 }
 
+// --- a snapped anchor rides the shape it is pinned to -----------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+  const frameNow = () => {
+    const rig = evaluateRig(P(), 0);
+    return { f: emitterFrame(rig, buildScene(rig, VIEW), VIEW), scene: buildScene(rig, VIEW) };
+  };
+
+  const { f, scene } = frameNow();
+  const eye = scene.find((i) => i.id === 'eyeL')!;
+
+  // relative: (1,0) is the layer's right edge, whatever that edge currently is
+  const snapped = { nodeId: 'eyeL', x: 1, y: 0, rel: true };
+  const at0 = f.anchor(snapped);
+  ok('a snapped point sits on the edge it was dropped on',
+    Math.abs(at0.x - (eye.cx + eye.w / 2)) < 0.01 && Math.abs(at0.y - eye.cy) < 0.01,
+    `${at0.x.toFixed(1)} vs ${(eye.cx + eye.w / 2).toFixed(1)}`);
+
+  // the whole point: it must move when the shape changes size, not stay where the edge was
+  ed().commit((p) => { p.rig.nodes.eyeL.transform.scale.x = 2.2; });
+  const after = frameNow();
+  const eye2 = after.scene.find((i) => i.id === 'eyeL')!;
+  ok('and follows that edge when the layer is scaled',
+    Math.abs(after.f.anchor(snapped).x - (eye2.cx + eye2.w / 2)) < 0.01
+    && Math.abs(after.f.anchor(snapped).x - at0.x) > 4,
+    `${at0.x.toFixed(1)} -> ${after.f.anchor(snapped).x.toFixed(1)}`);
+
+  // an unsnapped point measures in rig units and does NOT follow the size
+  const free = { nodeId: 'eyeL', x: 20, y: 0 };
+  const freeBefore = after.f.anchor(free);
+  ed().commit((p) => { p.rig.nodes.eyeL.transform.scale.x = 3.4; });
+  const after2 = frameNow();
+  ok('while a free point keeps its own offset', Math.abs(after2.f.anchor(free).x - freeBefore.x) < 0.01);
+
+  // and the round trip a drag performs still holds for both kinds
+  ok('a snapped offset round-trips', (() => {
+    const o = after2.f.toOffset(snapped, after2.f.anchor(snapped));
+    return Math.abs(o.x - 1) < 1e-6 && Math.abs(o.y) < 1e-6;
+  })());
+
+  ed().loadProject(defaultProject());
+}
+
+// --- Lottie carries shapes now, and says what that cost ---------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  // a plain rig still exports as primitives, with nothing baked and nothing skipped
+  const plain = bakeLottie(P(), { from: 0, to: 600, background: '', name: 'probe' });
+  ok('a plain rig needs no baking', plain.baked.length === 0 && plain.skipped.length === 0,
+    `${plain.baked.join()} / ${plain.skipped.join()}`);
+  const kinds = (b: typeof plain) => new Set(
+    (b.json.layers as { shapes?: { it: { ty: string }[] }[] }[])
+      .flatMap((l) => l.shapes?.[0]?.it.map((i) => i.ty) ?? []));
+  ok('and uses real primitives', kinds(plain).has('el') || kinds(plain).has('rc'));
+
+  // a morphing outline becomes bezier vertices, and is reported as baked
+  ed().addTimeline('Morph');
+  ed().setPlayhead(0);
+  ed().setValue('eyeL', 'shape.path', primitivePath('pill'), 'a');
+  ed().toggleKeyframe('eyeL', 'shape.path');
+  ed().setPlayhead(500);
+  ed().setValue('eyeL', 'shape.path', primitivePath('star', { points: 5 }), 'b');
+
+  const morph = bakeLottie(P(), { from: 0, to: 500, background: '', name: 'probe' });
+  ok('a morphing outline exports as a bezier shape', kinds(morph).has('sh'));
+  ok('and is named as baked, so the note can warn about it', morph.baked.includes('Left eye'), morph.baked.join());
+  ok('a glyph is still the one thing with no equivalent', morph.skipped.length === 0);
+
+  // and it really is animated: a static outline must not pay the per-frame cost
+  const shapes = (b: typeof plain, name: string) =>
+    (b.json.layers as { nm: string; shapes?: { it: Record<string, unknown>[] }[] }[])
+      .find((l) => l.nm === name)?.shapes?.[0]?.it.filter((i) => i.ty === 'sh') ?? [];
+  const eyeShape = shapes(morph, 'Left eye')[0] as { ks: { a: number } };
+  ok('a changing outline is animated', eyeShape.ks.a === 1);
+  const otherEye = shapes(morph, 'Right eye');
+  ok('while an untouched layer keeps a primitive', otherEye.length === 0);
+
+  // an emitter's artwork exports too, rebased out of its own viewBox
+  ed().loadProject(defaultProject());
+  ed().addEmitter({
+    name: 'drops', glyphs: [], color: { r: 40, g: 90, b: 200, a: 1 }, size: 20,
+    parts: [{ id: 'p1', shapeId: 'drop', weight: 1, speed: 1, sizeScale: 1, spin: 0 }],
+    path: 'fall', from: { nodeId: 'body', x: 0, y: 0 }, to: { nodeId: 'body', x: 0, y: 120 }, bow: 0,
+    rateMs: 200, lifeMs: 600, count: 3, fadeStart: 0.9,
+    scaleFrom: 1, scaleTo: 1, spin: 0, wobble: 0, wobbleFrequency: 1,
+  });
+  const withArt = bakeLottie(P(), { from: 0, to: 600, background: '', name: 'probe' });
+  ok('emitter artwork exports as shapes rather than being dropped',
+    withArt.baked.includes('drops') && withArt.skipped.length === 0,
+    `baked ${withArt.baked.join()} / skipped ${withArt.skipped.join()}`);
+
+  // a plain character has no bezier, and must still be named rather than vanish
+  ed().updateEmitter(activeTimeline(P()).emitters!.at(-1)!.id, (e) => {
+    e.parts = [{ id: 'g', glyph: 'z', weight: 1, speed: 1, sizeScale: 1, spin: 0 }];
+  });
+  ok('a glyph is reported as having no Lottie equivalent',
+    bakeLottie(P(), { from: 0, to: 600, background: '', name: 'probe' }).skipped.includes('drops'));
+
+  ed().loadProject(defaultProject());
+}
+
 // --- zip: the CRC everything downstream depends on -----------------------------
 ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as Uint8Array<ArrayBuffer>) === 0xcbf43926);
 

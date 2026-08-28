@@ -1,5 +1,7 @@
 import { COMP } from '../core/defaults';
 import { sceneAt, type SceneItem } from '../core/scene';
+import { flattenPath, pathFromPoints } from '../core/path';
+import { outlinesOf } from '../core/emitters';
 import { activeTimeline } from '../core/types';
 import type { Project } from '../core/types';
 
@@ -74,6 +76,8 @@ export interface BakeResult {
   frames: number;
   keyframeCount: number;
   skipped: string[];
+  /** names whose geometry was written as bezier vertices rather than a primitive */
+  baked: string[];
 }
 
 export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
@@ -102,6 +106,8 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
   });
 
   const skipped: string[] = [];
+  /** layers whose outline had to be written as vertices — what "baked" means in the note */
+  const baked = new Set<string>();
   const layers: Record<string, unknown>[] = [];
   let keyframeCount = 0;
 
@@ -111,11 +117,16 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     // emitter's particles are glyphs, which would need a text layer with an embedded font
     // descriptor. Both are named in `skipped` rather than silently dropped — GIF and MP4
     // go through the real renderer and keep them.
-    // Lottie has no shape for any of these: SVG markup is arbitrary, a glyph would need an
-    // embedded font descriptor, and a morphing outline would need per-frame bezier data.
-    // All are named in `skipped` rather than silently dropped — GIF and MP4 go through the
-    // real renderer and keep them.
-    if (first.svg || first.text !== undefined || first.path) { skipped.push(first.name); return; }
+    // A glyph is the one thing with no bezier to bake: it would need an embedded font
+    // descriptor. Named in `skipped` rather than silently dropped.
+    if (first.text !== undefined) { skipped.push(first.name); return; }
+
+    // Everything with an outline — a morphing shape, an emitter's artwork, an imported
+    // SVG whose paths we can read — becomes real Lottie bezier shapes. Constant outlines
+    // are written once; only an outline that actually CHANGES gets per-frame vertices,
+    // which is what makes a morph cost what it costs.
+    const outlines = outlinesFor(first);
+    if (outlines) { baked.add(first.name); }
 
     // base geometry: the largest the shape ever gets, so scale stays <= 100%
     let w0 = 0, h0 = 0;
@@ -138,9 +149,11 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       ch.c.push([round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4), 1]);
     }
 
-    const shape = first.shape === 'ellipse'
-      ? { ty: 'el', d: 1, s: { a: 0, k: [w0, h0] }, p: { a: 0, k: [0, 0] }, nm: 'body' }
-      : { ty: 'rc', d: 1, s: { a: 0, k: [w0, h0] }, p: { a: 0, k: [0, 0] }, r: { a: 0, k: Math.min(w0, h0) / 2 }, nm: 'pill' };
+    const geometry: Record<string, unknown>[] = outlines
+      ? bezierShapes(id, frames, outlines, w0, h0, (n2) => { keyframeCount += n2; })
+      : [first.shape === 'ellipse'
+        ? { ty: 'el', d: 1, s: { a: 0, k: [w0, h0] }, p: { a: 0, k: [0, 0] }, nm: 'body' }
+        : { ty: 'rc', d: 1, s: { a: 0, k: [w0, h0] }, p: { a: 0, k: [0, 0] }, r: { a: 0, k: Math.min(w0, h0) / 2 }, nm: 'pill' }];
 
     const ks = {
       o: prop(ch.o, EPS.o, 0),
@@ -159,7 +172,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       shapes: [{
         ty: 'gr', nm: first.name, np: 2, cix: 2, bm: 0, hd: false,
         it: [
-          shape,
+          ...geometry,
           { ty: 'fl', c: fill, o: { a: 0, k: 100 }, r: 1, bm: 0, nm: 'fill', hd: false },
           { ty: 'tr', p: { a: 0, k: [0, 0] }, a: { a: 0, k: [0, 0] }, s: { a: 0, k: [100, 100] }, r: { a: 0, k: 0 }, o: { a: 0, k: 100 }, sk: { a: 0, k: 0 }, sa: { a: 0, k: 0 }, nm: 'transform' },
         ],
@@ -189,6 +202,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     frames: total,
     keyframeCount,
     skipped,
+    baked: [...baked],
   };
 }
 
@@ -196,3 +210,77 @@ const round = (v: number, d: number) => {
   const m = 10 ** d;
   return Math.round(v * m) / m;
 };
+
+/* ---- outlines -------------------------------------------------------------- */
+
+/**
+ * The path(s) this item draws, in its own unit box, or null when it has none.
+ *
+ * A `path` is already a unit-box outline. An `svg` is artwork with its own viewBox, so its
+ * `d` strings are re-based into the unit box first — an emitter's teardrop is authored in
+ * a 24×32 frame and has to come out the same size as everything else.
+ */
+function outlinesFor(item: SceneItem): string[] | null {
+  if (item.path) return [item.path];
+  if (!item.svg) return null;
+  const ds = outlinesOf(item.svg.sourceMarkup);
+  if (!ds.length) return null;
+  const [vx, vy, vw, vh] = item.svg.viewBox.trim().split(/[\s,]+/).map(Number);
+  if (![vx, vy, vw, vh].every(Number.isFinite) || vw <= 0 || vh <= 0) return null;
+  // preserveAspectRatio="xMidYMid meet" is what the renderer uses, so match it or the
+  // exported shape is a stretched version of what the preview showed
+  const k = 1 / Math.max(vw, vh);
+  return ds.map((d) => rebase(d, vx, vy, vw, vh, k));
+}
+
+/** Re-writes a path's coordinates from a viewBox into a -0.5..0.5 box. */
+function rebase(d: string, vx: number, vy: number, vw: number, vh: number, k: number): string {
+  const pts = flattenPath(d, 96);
+  return pathFromPoints(pts.map((p) => ({
+    x: (p.x - vx - vw / 2) * k,
+    y: (p.y - vy - vh / 2) * k,
+  })));
+}
+
+const VERTS = 48;
+
+/**
+ * One Lottie `sh` per outline, with vertices baked per frame only when they change.
+ *
+ * A static outline costs one path; a morph costs `VERTS` points per frame, which is the
+ * whole reason the export note warns about it. Corners are written with zero-length
+ * tangents (`i`/`o` all zero) — the flattened points are dense enough that the result is
+ * indistinguishable, and solving real tangents per frame would not survive a morph anyway.
+ */
+function bezierShapes(
+  id: string, frames: SceneItem[][], outlines: string[], w0: number, h0: number,
+  countKeys: (n: number) => void,
+): Record<string, unknown>[] {
+  return outlines.map((_, oi) => {
+    const perFrame = frames.map((scene) => {
+      const it = scene.find((s) => s.id === id);
+      const outs = it ? outlinesFor(it) : null;
+      const d = outs?.[oi] ?? outlines[oi];
+      // scaled into the layer's own base box: the transform channel handles the rest
+      return flattenPath(d, VERTS).map((p) => [round(p.x * w0, 3), round(p.y * h0, 3)]);
+    });
+
+    const zeros = perFrame[0].map(() => [0, 0]);
+    const same = perFrame.every((f) => JSON.stringify(f) === JSON.stringify(perFrame[0]));
+    if (same) {
+      return { ty: 'sh', ind: oi, ks: { a: 0, k: { i: zeros, o: zeros, v: perFrame[0], c: true } }, nm: `path${oi}`, hd: false };
+    }
+    countKeys(perFrame.length);
+    return {
+      ty: 'sh', ind: oi, nm: `path${oi}`, hd: false,
+      ks: {
+        a: 1,
+        k: perFrame.map((v, f) => ({
+          t: f,
+          s: [{ i: zeros, o: zeros, v, c: true }],
+          ...(f < perFrame.length - 1 ? { i: { x: [0.5], y: [1] }, o: { x: [0.5], y: [0] } } : {}),
+        })),
+      },
+    };
+  });
+}

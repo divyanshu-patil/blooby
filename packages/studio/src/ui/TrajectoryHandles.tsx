@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { emitterFrame, type SceneItem, type Viewport } from '../core/scene';
 import { useEditor } from '../core/store';
 import { cssColor } from '../core/color';
@@ -23,7 +23,11 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
   toComp: (e: { clientX: number; clientY: number }) => Vec2;
 }) {
   const updateEmitter = useEditor((s) => s.updateEmitter);
+  const [snap, setSnap] = useState<SnapTarget | null>(null);
   const f = emitterFrame(rig, scene, view);
+  // every point an endpoint can latch onto: each drawn layer's centre and eight points
+  // round its edge. Latching stores the offset in half-widths, so it rides that layer.
+  const targets = snapTargets(scene, rig.rootId);
   const a = f.anchor(emitter.from);
   const b = f.anchor(emitter.to);
   const stroke = cssColor({ ...emitter.color, a: 1 });
@@ -33,18 +37,28 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
     down.stopPropagation();
     const move = (ev: PointerEvent) => {
       const at = toComp(ev);
+      const near = nearest(targets, at, SNAP_PX);
+      setSnap(near);
       updateEmitter(emitter.id, (x) => {
-        const o = f.toOffset(x[end], at);
-        x[end] = { ...x[end], x: Math.round(o.x), y: Math.round(o.y) };
+        if (near) {
+          // snapping IS parenting: the offset is stored in the layer's own half-widths,
+          // so the point follows it when it scales rather than staying where the edge was
+          x[end] = { nodeId: near.nodeId, x: near.u, y: near.v, rel: true };
+          return;
+        }
+        const free = { ...x[end], rel: undefined };
+        const o = f.toOffset(free, at);
+        x[end] = { ...free, x: Math.round(o.x), y: Math.round(o.y) };
       });
     };
     const up = () => {
+      setSnap(null);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-  }, [emitter.id, f, toComp, updateEmitter]);
+  }, [emitter.id, f, targets, toComp, updateEmitter]);
 
   // the fade knob rides the straight line between the ends — dragging it along projects
   // onto that line, so it cannot be pulled off the path it is describing
@@ -89,6 +103,7 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
     const ry = (emitter.radiusY ?? emitter.radiusX ?? Math.hypot(b.x - a.x, b.y - a.y) / f.unit) * f.unit;
     return (
       <g className="traj">
+        {snap && <SnapRing target={snap} />}
         <ellipse cx={a.x} cy={a.y} rx={rx} ry={ry} fill="none" stroke={stroke} strokeWidth={1.25} strokeDasharray="5 5" opacity={0.8} />
         <circle className="traj-dot" cx={a.x} cy={a.y} r={6} fill={stroke}
           pointerEvents="all" onPointerDown={dragEnd('from')} />
@@ -110,6 +125,9 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
 
   return (
     <g className="traj">
+      {/* the outline being latched onto, so it is obvious what the point is about to
+          belong to rather than only obvious afterwards */}
+      {snap && <SnapRing target={snap} />}
       <path d={`M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`} fill="none" stroke={stroke} strokeWidth={1.25}
         strokeDasharray="5 5" opacity={0.85} markerEnd="url(#traj-arrow)" />
       <defs>
@@ -130,6 +148,71 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
         <title>End{emitter.to.nodeId ? ` — pinned to ${rig.nodes[emitter.to.nodeId]?.name ?? emitter.to.nodeId}` : ''}</title>
       </circle>
       <text x={b.x} y={b.y - 12} textAnchor="middle" className="traj-label" fill={stroke}>{emitter.name}</text>
+    </g>
+  );
+}
+
+/* ---- snapping -------------------------------------------------------------- */
+
+/** How close the pointer has to get before an endpoint latches on. */
+const SNAP_PX = 20;
+
+interface SnapTarget {
+  nodeId: string;
+  /** in the layer's own half-widths: (0,0) centre, (1,0) right edge */
+  u: number; v: number;
+  x: number; y: number;
+  /** the layer's drawn box, for the ring that highlights it */
+  cx: number; cy: number; w: number; h: number; rotation: number;
+}
+
+/**
+ * Every point an endpoint can latch onto.
+ *
+ * Each drawn layer contributes its centre and eight points round its edge — enough that
+ * "the bottom of the eye" and "the left side of the body" are both reachable without
+ * offering so many that the pointer snaps to something it did not mean.
+ *
+ * Emitter particles are excluded: latching a stream onto one of its own particles would
+ * be a loop, and they are not part of the rig anyway.
+ */
+function snapTargets(scene: SceneItem[], rootId: string): SnapTarget[] {
+  const out: SnapTarget[] = [];
+  for (const item of scene) {
+    if (item.id.includes('#')) continue;                  // an emitter particle
+    const rx = item.w / 2, ry = item.h / 2;
+    if (!Number.isFinite(rx) || !Number.isFinite(ry)) continue;
+    const spots: [number, number][] = [[0, 0], [0, -1], [1, 0], [0, 1], [-1, 0], [0.7, -0.7], [0.7, 0.7], [-0.7, 0.7], [-0.7, -0.7]];
+    // the body's edge points are useful, its centre less so — it is where everything
+    // already defaults to, and it would shadow a small feature sitting on top of it
+    for (const [u, v] of spots) {
+      if (item.id === rootId && u === 0 && v === 0) continue;
+      out.push({
+        nodeId: item.id, u, v,
+        x: item.cx + u * rx, y: item.cy + v * ry,
+        cx: item.cx, cy: item.cy, w: item.w, h: item.h, rotation: item.rotation,
+      });
+    }
+  }
+  return out;
+}
+
+function nearest(targets: SnapTarget[], at: Vec2, within: number): SnapTarget | null {
+  let best: SnapTarget | null = null, bestD = within;
+  for (const t of targets) {
+    const d = Math.hypot(t.x - at.x, t.y - at.y);
+    if (d < bestD) { bestD = d; best = t; }
+  }
+  return best;
+}
+
+function SnapRing({ target }: { target: SnapTarget }) {
+  return (
+    <g pointerEvents="none" className="snap">
+      <rect x={target.cx - target.w / 2 - 4} y={target.cy - target.h / 2 - 4}
+        width={target.w + 8} height={target.h + 8} rx={Math.min(target.w, target.h) / 2 + 4}
+        transform={`rotate(${target.rotation} ${target.cx} ${target.cy})`} />
+      <circle cx={target.x} cy={target.y} r={5} />
     </g>
   );
 }

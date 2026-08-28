@@ -823,3 +823,16 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .scopebar strong { color: var(--ink); font-weight: 600; }
 .scopebar .spacer { flex: 1; }
 .targetbar { flex-wrap: wrap; }
+.snap rect { fill: none; stroke: var(--signal); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.snap circle { fill: var(--signal); }
+
+/* ---- effect spans on the strip -------------------------------------------- */
+.fxbands { position: relative; height: 15px; margin: 2px 0 1px; }
+.fxband {
+  position: absolute; top: 0; height: 13px; display: flex; align-items: center;
+  border-radius: 3px; background: color-mix(in oklab, var(--signal) 22%, transparent);
+  border: 1px solid color-mix(in oklab, var(--signal) 55%, transparent); overflow: hidden;
+}
+.fxband.on { background: color-mix(in oklab, var(--signal) 42%, transparent); border-color: var(--signal); }
+.fxband span { font: 600 9px var(--display); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink); padding: 0 4px; white-space: nowrap; }

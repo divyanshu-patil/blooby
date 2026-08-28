@@ -166,6 +166,13 @@ export interface Anchor {
   nodeId?: string;
   x: number;
   y: number;
+  /**
+   * When set, x/y are multiples of the layer's own half-size rather than rig units — so
+   * (1, 0) is its right edge whatever that edge currently is. This is what "snapped to
+   * part of a shape" means: the point rides the shape as it scales, squashes and blinks,
+   * instead of sitting where the edge used to be.
+   */
+  rel?: boolean;
 }
 
 /**

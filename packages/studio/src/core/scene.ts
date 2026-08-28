@@ -522,21 +522,28 @@ export function emitterFrame(rig: Rig, base: SceneItem[], view: Viewport) {
     x: body?.cx ?? view.width / 2 + rig.camera.offset.x,
     y: body?.cy ?? view.height / 2 + rig.camera.offset.y,
   };
+  const itemOf = (a: Anchor) => (a.nodeId ? base.find((i) => i.id === a.nodeId) : undefined);
   const originOf = (a: Anchor) => {
-    const on = a.nodeId ? base.find((i) => i.id === a.nodeId) : undefined;
+    const on = itemOf(a);
     return { x: on?.cx ?? centre.x, y: on?.cy ?? centre.y };
+  };
+  // a relative anchor measures in half-widths of the layer it is pinned to, so the point
+  // rides that layer as it scales, squashes and blinks
+  const scaleOf = (a: Anchor) => {
+    const on = itemOf(a);
+    return a.rel && on ? { x: Math.max(1e-6, on.w / 2), y: Math.max(1e-6, on.h / 2) } : { x: unit, y: unit };
   };
   return {
     unit,
     /** where this endpoint actually is on screen */
     anchor: (a: Anchor) => {
-      const o = originOf(a);
-      return { x: o.x + a.x * unit, y: o.y + a.y * unit };
+      const o = originOf(a), s = scaleOf(a);
+      return { x: o.x + a.x * s.x, y: o.y + a.y * s.y };
     },
     /** the inverse: what offset would put this endpoint at that screen point */
     toOffset: (a: Anchor, screen: Vec2) => {
-      const o = originOf(a);
-      return { x: (screen.x - o.x) / unit, y: (screen.y - o.y) / unit };
+      const o = originOf(a), s = scaleOf(a);
+      return { x: (screen.x - o.x) / s.x, y: (screen.y - o.y) / s.y };
     },
   };
 }

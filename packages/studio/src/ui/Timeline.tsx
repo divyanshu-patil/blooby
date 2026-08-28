@@ -5,7 +5,7 @@ import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
-import { activeTimeline, type Block, type EasingCurve, type Keyframe, type KeyValue, type Track, type Transition } from '../core/types';
+import { activeTimeline, MODIFIERS, type Block, type EasingCurve, type Keyframe, type KeyValue, type Track, type Transition } from '../core/types';
 import { PROP_LABEL } from '../core/props';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
@@ -136,6 +136,23 @@ export function Timeline() {
   );
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
   const starts = blockStarts(tl);
+  const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
+
+  // where each effect actually runs, in absolute timeline time: its scope, narrowed by
+  // its own range. One list for modifiers and emitters — they are scoped identically.
+  const effectSpans = [
+    ...tl.modifiers.map((m) => ({ ...m, label: MODIFIERS[m.kind].label })),
+    ...(tl.emitters ?? []).map((e) => ({ ...e, label: e.name })),
+  ].map((e) => {
+    const i = e.blockId ? tl.blocks.findIndex((b) => b.id === e.blockId) : -1;
+    const origin = i >= 0 ? blockStarts(tl)[i] : 0;
+    const limit = i >= 0 ? tl.blocks[i].durationMs : tl.timelineDurationMs;
+    return {
+      id: e.id, label: e.label,
+      from: origin + Math.max(0, e.startMs ?? 0),
+      to: origin + Math.min(limit, e.endMs ?? limit),
+    };
+  }).filter((e) => e.to > e.from);
 
   // a focused track can fall out of `visible` (layer selection changed, track deleted) —
   // an orphaned focus set would just dim every remaining track with nothing emphasized,
@@ -509,6 +526,21 @@ export function Timeline() {
                     <span key={t} style={{ left: t * pxPerMs }}>{(t / 1000).toFixed(t % 1000 ? 1 : 0)}s</span>
                   ))}
                 </div>
+
+                {/* every effect's span, drawn where it actually runs. Dragging a range in
+                    the inspector moves a bar here, so "runs from 0.3s to 1.4s" is a thing
+                    you can see against the clips rather than two numbers to picture. */}
+                {effectSpans.length > 0 && (
+                  <div className="fxbands">
+                    {effectSpans.map((e) => (
+                      <div key={e.id} className={`fxband${e.id === selectedEmitterId ? ' on' : ''}`}
+                        title={`${e.label} — ${fmtSec(e.from)} to ${fmtSec(e.to)}`}
+                        style={{ left: e.from * pxPerMs, width: Math.max(2, (e.to - e.from) * pxPerMs) }}>
+                        <span>{e.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {visible.map((t) => {
                   const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                   return (
