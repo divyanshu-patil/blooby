@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { useEditor } from '../core/store';
 import { PROP_RANGE } from '../core/props';
-import { activeTimeline, PROP_LABEL } from '../core/types';
+import { activeTimeline } from '../core/types';
+import { PROP_LABEL } from '../core/props';
 import { activeTrackFor, valueAt } from '../core/scene';
 
 export function Panel({ title, actions, children, flush }: { title: string; actions?: ReactNode; children: ReactNode; flush?: boolean }) {

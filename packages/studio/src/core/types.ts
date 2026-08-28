@@ -79,10 +79,30 @@ export interface Track {
   blockId?: string;
 }
 
+/**
+ * Every effect, with the description the copilot's prompt is built from.
+ *
+ * Same contract as PROPS in ./props: one row here plus a branch in scene.ts's
+ * applyModifier is the whole job, and both the Effects panel and the agent pick it up.
+ * `stretch` shipped working and stayed invisible to the copilot for exactly as long as
+ * this list was written out by hand in three places. See COPILOT.md.
+ */
+export const MODIFIERS = {
+  shake: { label: 'Shake', maxFrequency: 30,
+    help: 'Jitters the node with noise. frequency 6-20 Hz, amplitude 3-15 (degrees, or px on the body).' },
+  float: { label: 'Float', maxFrequency: 6,
+    help: 'Bobs the node on a slow sine. frequency 0.3-1.5 Hz, amplitude 3-15.' },
+  stretch: { label: 'Stretch', maxFrequency: 6,
+    help: 'Pulses the node and everything mapped onto it as one \u2014 squash-and-stretch for the whole rig. frequency 0.3-1.5 Hz, amplitude 3-15.' },
+} as const;
+
+export type ModifierKind = keyof typeof MODIFIERS;
+export const MODIFIER_KINDS = Object.keys(MODIFIERS) as ModifierKind[];
+
 export interface Modifier {
   id: string;
   nodeId: string;
-  kind: 'shake' | 'float' | 'stretch';
+  kind: ModifierKind;
   /** 0–200 %, the intensity dial */
   amount: number;
   frequency: number;
@@ -200,44 +220,9 @@ export interface Project {
 
 export const CAMERA_ID = '__camera';
 
-/** Every animatable path. Anything not here is not keyframeable. */
-export const NODE_PROPS = [
-  'surface.yaw',
-  'surface.pitch',
-  'flatOffset.x',
-  'flatOffset.y',
-  'transform.scale.x',
-  'transform.scale.y',
-  'transform.rotation',
-  'transform.length',
-  'eye.openness',
-  'eye.distanceFromCenter',
-  'size.x',
-  'size.y',
-  'color',
-] as const;
-
-export const CAMERA_PROPS = ['camera.fov', 'camera.distance', 'camera.offset.x', 'camera.offset.y'] as const;
-
-export const PROP_LABEL: Record<string, string> = {
-  'surface.yaw': 'Yaw',
-  'surface.pitch': 'Pitch',
-  'flatOffset.x': 'Offset X',
-  'flatOffset.y': 'Offset Y',
-  'transform.scale.x': 'Scale X',
-  'transform.scale.y': 'Scale Y',
-  'transform.rotation': 'Roll',
-  'transform.length': 'Length',
-  'eye.openness': 'Openness',
-  'eye.distanceFromCenter': 'Eye distance',
-  'size.x': 'Width',
-  'size.y': 'Height',
-  color: 'Color',
-  'camera.fov': 'Perspective',
-  'camera.distance': 'Distance',
-  'camera.offset.x': 'Pan X',
-  'camera.offset.y': 'Pan Y',
-};
+// NODE_PROPS, CAMERA_PROPS, PROP_LABEL and PROP_RANGE all derive from the one PROPS
+// table in ./props — import them from there. They lived here as four hand-kept lists,
+// which is how the copilot came to reject a `stretch` the renderer already supported.
 
 /** The one timeline every editor action and every renderer actually reads/writes. */
 export function activeTimeline(p: Project): Timeline {

@@ -2,7 +2,7 @@ import { applyEasing } from './easing';
 import { lerpColor } from './color';
 import { noise1d } from './noise';
 import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
-import { getCameraProp, getProp, PROP_RANGE, readProp, setCameraProp, setProp, writeProp } from './props';
+import { CAMERA_PROPS, getCameraProp, getProp, NUMERIC_PROPS, readProp, setCameraProp, setProp, writeProp } from './props';
 import { activeTimeline } from './types';
 import { activeTransitionAt, blockAt, blockStarts } from './timeline';
 import type { ColorStop, EasingCurve, KeyValue, Modifier, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
@@ -257,8 +257,9 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
   return rig;
 }
 
-const ANIMATABLE_PROPS = Object.keys(PROP_RANGE).filter((p) => !p.startsWith('camera.'));
-const CAMERA_PROPS = Object.keys(PROP_RANGE).filter((p) => p.startsWith('camera.'));
+// numeric only: color is keyframeable in the editor but there is nothing to interpolate
+// it into here, and a baked export has no slot for it
+const ANIMATABLE_PROPS = NUMERIC_PROPS.filter((p) => !CAMERA_PROPS.includes(p));
 
 /** Lerp (lerpAngle for rotation-ish paths, matching sampleTrack's own convention) every
  * animatable property of `to` toward `from`, in place on `to`. */

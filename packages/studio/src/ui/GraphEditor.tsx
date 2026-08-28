@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '../core/store';
 import { applyEasing, curveHandles } from '../core/easing';
-import { activeTimeline, PROP_LABEL, type Project, type Track } from '../core/types';
+import { activeTimeline, type Project, type Track } from '../core/types';
+import { PROP_LABEL } from '../core/props';
 import { clipColor } from './Timeline';
 
 const PAD = { l: 40, r: 14, t: 14, b: 20 };

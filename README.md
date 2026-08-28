@@ -102,3 +102,6 @@ The exported files were checked against `lottie-web` and `unzip`.
 | `⌘↵` in the copilot | send |
 
 Design notes and every deliberate shortcut are in [ASSUMPTIONS.md](./ASSUMPTIONS.md).
+Visual tokens are in [DESIGN.md](./DESIGN.md). Before adding an animatable property, an
+effect, or a copilot tool, read [COPILOT.md](./COPILOT.md) — those all come from single
+tables now, and it says which one.

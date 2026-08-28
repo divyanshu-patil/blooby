@@ -12,8 +12,9 @@ import { activeTransitionAt, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
-import { readProp } from './props';
-import { applyCalls, describe, normaliseCall, validate, type ToolCall } from '../copilot/tools';
+import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readProp, resolveProp, writeProp } from './props';
+import { MODIFIER_KINDS, MODIFIERS } from './types';
+import { applyCalls, describe, normaliseCall, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
 import { baseUrl, CLOUD_CATALOGUE, LOCAL_URL, needsKey, resolveModel, usesBackend } from '../copilot/pool';
 import { listModels } from '../copilot/client';
@@ -1275,6 +1276,89 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     String(valueAt(P(), 'eyeL', 'transform.scale.x', start + 400)));
   ok('the body actually rotates mid-clip',
     Math.abs(valueAt(P(), 'body', 'transform.rotation', start + 800) as number) > 5);
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- the registries: one table, and everything downstream derives from it -------
+{
+  // The contract COPILOT.md states: add a row to PROPS plus a case in
+  // getProp/setProp, and the property is animatable, inspectable AND known to the agent.
+  // These two checks are what make that a guarantee rather than a note in a file.
+  const rig = defaultProject().rig;
+  const missing = NUMERIC_PROPS.filter((path) => {
+    const spec = PROPS[path];
+    const nodeId = spec.on === 'camera' ? '__camera' : (path.startsWith('eye.') ? 'eyeL' : rig.rootId);
+    const probe = (spec.range![0] + spec.range![1]) / 2;
+    writeProp(rig, nodeId, path, probe);
+    return readProp(rig, nodeId, path) !== probe;
+  });
+  ok('every PROPS row round-trips through get/setProp', missing.length === 0, missing.join(', '));
+
+  ok('every PROPS row has a help line the prompt can use',
+    Object.entries(PROPS).every(([, s]) => s.help.length > 20 && s.label.length > 0));
+
+  // a short name must resolve, and an ambiguous one must NOT be guessed
+  ok('"openness" resolves to eye.openness', resolveProp('openness') === 'eye.openness');
+  ok('"rotation" resolves to transform.rotation', resolveProp('rotation') === 'transform.rotation');
+  ok('"scale.x" resolves to transform.scale.x', resolveProp('scale.x') === 'transform.scale.x');
+  ok('a full path resolves to itself', resolveProp('surface.yaw') === 'surface.yaw');
+  ok('an ambiguous tail is refused, not guessed', PROP_ALIAS.x === undefined && PROP_ALIAS.y === undefined);
+  ok('junk stays junk', resolveProp('vibes') === undefined);
+
+  // every effect the renderer implements must be one the copilot may ask for
+  const proj = defaultProject();
+  const unreachable = MODIFIER_KINDS.filter((kind) =>
+    validate(proj, { name: 'add_modifier', args: { nodeId: 'body', kind, amount: 100, frequency: 1, amplitude: 6 } }) !== null);
+  ok('every MODIFIERS kind is accepted by the copilot', unreachable.length === 0, unreachable.join(', '));
+  ok('every MODIFIERS kind has a help line', MODIFIER_KINDS.every((k) => MODIFIERS[k].help.length > 20));
+  ok('and an unknown effect is still refused',
+    validate(proj, { name: 'add_modifier', args: { nodeId: 'body', kind: 'wobble' } }) !== null);
+}
+
+// --- copilot: the two ways the "big eye" turn actually failed -------------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  // 1. the model wrote the short name inside a preset track, because that is what
+  //    set_eye_params documents. Rejected as `"openness" is not an animatable property`.
+  const short = normaliseCall(P(), { name: 'create_preset', args: { name: 'CatEyes', durationMs: 900, tracks: [
+    { nodeId: 'Left eye', property: 'openness', keyframes: [{ time: 0, value: 1 }, { time: 400, value: 0.2 }] },
+    { nodeId: 'body', property: 'rotation', keyframes: [{ time: 0, value: 0 }, { time: 400, value: 8 }] },
+  ] } });
+  const tracks = short.args.tracks as Record<string, string>[];
+  ok('a short property name inside a preset track is resolved',
+    tracks[0].property === 'eye.openness' && tracks[0].nodeId === 'eyeL' && tracks[1].property === 'transform.rotation',
+    JSON.stringify(tracks.map((t) => `${t.nodeId}.${t.property}`)));
+  ok('and then validates', validate(P(), short) === null, String(validate(P(), short)));
+
+  // and the same in an expression snapshot
+  const snap = normaliseCall(P(), { name: 'create_expression', args: { name: 'Wide', snapshot: { 'Left eye.openness': 1, 'body.rotation': 4 } } });
+  ok('a snapshot key is resolved on both halves',
+    Object.keys(snap.args.snapshot as object).join() === 'eyeL.eye.openness,body.transform.rotation',
+    Object.keys(snap.args.snapshot as object).join());
+  ok('and validates', validate(P(), snap) === null, String(validate(P(), snap)));
+
+  // 2. create_preset then add_preset_to_timeline in ONE turn: the second call named a
+  //    preset the first had not made yet, so it was rejected as `no preset "cat eyes"`
+  const batch = [
+    { name: 'create_preset', args: { name: 'cat eyes', durationMs: 900, tracks: [
+      { nodeId: 'eyeL', property: 'eye.openness', keyframes: [{ time: 0, value: 1 }, { time: 400, value: 0.2 }] },
+    ] } },
+    { name: 'add_preset_to_timeline', args: { preset: 'cat eyes' } },
+  ].map((c) => normaliseCall(P(), c as ToolCall));
+  ok('call-by-call validation rejects the correct batch', validate(P(), batch[1]) !== null);
+  ok('batch validation accepts it', validateBatch(P(), batch).every((x) => x === null),
+    validateBatch(P(), batch).join('|'));
+  applyCalls(batch);
+  ok('and it applies: the preset exists and is on the strip',
+    P().presets.some((x) => x.name === 'cat eyes')
+    && activeTimeline(P()).blocks.some((b) => b.name === 'cat eyes'));
+
+  // a batch must still reject a preset nobody ever creates
+  ok('a preset that is never created is still rejected',
+    validateBatch(P(), [{ name: 'add_preset_to_timeline', args: { preset: 'nope' } }])[0] !== null);
 
   useEditor.getState().loadProject(defaultProject());
 }

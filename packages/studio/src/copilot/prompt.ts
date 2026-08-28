@@ -1,7 +1,23 @@
 import { fmtSec } from '../core/timeline';
 import { TOOL_DOCS } from './tools';
 import { activeTimeline } from '../core/types';
+import { NUMERIC_PROPS, PROPS } from '../core/props';
 import type { Project } from '../core/types';
+
+/**
+ * The property reference the model gets, generated from the one PROPS table.
+ *
+ * Hand-written, this list went stale the first time a property was added — which is how
+ * the copilot ended up being told about properties it could not set and not told about
+ * ones it could. See COPILOT.md.
+ */
+const PROPERTY_DOCS = NUMERIC_PROPS
+  .filter((path) => PROPS[path].on === 'node')
+  .map((path) => {
+    const [min, max, , unit] = PROPS[path].range!;
+    return `  ${path.padEnd(24)} ${min}..${max}${unit ? ` ${unit}` : ''}  ${PROPS[path].help}`;
+  })
+  .join('\n');
 
 /** Compact enough to fit any context window, complete enough to act on. */
 export function systemPrompt(p: Project): string {
@@ -18,9 +34,9 @@ are NOT positioned in pixels — they use two angles:
 A feature near the rim foreshortens automatically; past ~90° it hides behind the silhouette.
 Roll (transform.rotation) is ordinary in-plane 2D rotation.
 
-Animatable properties: surface.yaw, surface.pitch, flatOffset.x, flatOffset.y,
-transform.scale.x, transform.scale.y, transform.rotation, transform.length,
-eye.openness (0 closed, 1 open), eye.distanceFromCenter, size.x, size.y.
+Animatable properties — these exact paths, nothing else. Every keyframe, every preset
+track and every expression snapshot key uses the full path, never the short name:
+${PROPERTY_DOCS}
 
 Layers:
 ${nodes}
@@ -37,6 +53,8 @@ ${TOOL_DOCS}
 
 Rules:
 - Refer to layers by the ids above (body, eyeL, eyeR), not by their display names.
+- A preset track's "property" is a full path from the list above: "eye.openness", not
+  "openness". The short names in set_eye_params are that one tool's own shorthand.
 - Prefer existing presets for common beats (Blink, Talk, Happy, Surprised, Thinking, Notify).
 - Times are milliseconds from the start of the timeline.
 - Keep "reply" to one or two sentences. Put every change in "calls" — never describe a change you did not emit.

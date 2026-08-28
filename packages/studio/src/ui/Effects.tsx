@@ -1,8 +1,10 @@
 import { useEditor } from '../core/store';
-import { activeTimeline } from '../core/types';
+import { activeTimeline, MODIFIER_KINDS, MODIFIERS, type ModifierKind } from '../core/types';
 import { NumberField, Panel } from './bits';
 
-const DEFAULTS = {
+/** Starting dial positions. Keyed by ModifierKind, so a new effect will not compile
+ *  until it has one — the same "add the row, the rest follows" contract as PROPS. */
+const DEFAULTS: Record<ModifierKind, { amount: number; frequency: number; amplitude: number; seed?: number; phase?: number }> = {
   shake: { amount: 100, frequency: 12, amplitude: 6, seed: 1 },
   float: { amount: 100, frequency: 0.6, amplitude: 8, phase: 0 },
   stretch: { amount: 100, frequency: 0.8, amplitude: 12, phase: 0 },
@@ -33,15 +35,15 @@ export function Effects() {
   // fall back to global rather than silently offering to add effects to a dead clip.
   const clipScoped = !!selectedBlockId && !!block;
   const list = tl.modifiers.filter((m) => (clipScoped ? m.blockId === selectedBlockId : !m.blockId));
-  const add = (kind: 'shake' | 'float' | 'stretch', nodeId: string) =>
+  const add = (kind: ModifierKind, nodeId: string) =>
     addModifier({ nodeId, kind, ...DEFAULTS[kind], blockId: clipScoped ? selectedBlockId! : undefined });
 
   return (
     <Panel title="Effects" actions={
       <>
-        <button className="btn sm" onClick={() => add('shake', target)}>+ Shake</button>
-        <button className="btn sm" onClick={() => add('float', target)}>+ Float</button>
-        <button className="btn sm" onClick={() => add('stretch', target)}>+ Stretch</button>
+        {MODIFIER_KINDS.map((k) => (
+          <button key={k} className="btn sm" title={MODIFIERS[k].help} onClick={() => add(k, target)}>+ {MODIFIERS[k].label}</button>
+        ))}
       </>
     }>
       <div className="flex items-center gap-2 rounded-md border border-line-soft bg-field px-2.5 py-1.5 text-[11px]">
@@ -80,7 +82,7 @@ export function Effects() {
           </div>
           <div className="prop">
             <span /><label className="prop-label"><span className="t">Frequency</span>
-              <input type="range" min={0.05} max={m.kind === 'shake' ? 30 : 6} step={0.05} value={m.frequency} onChange={(e) => updateModifier(m.id, (x) => { x.frequency = +e.target.value; })} />
+              <input type="range" min={0.05} max={MODIFIERS[m.kind].maxFrequency} step={0.05} value={m.frequency} onChange={(e) => updateModifier(m.id, (x) => { x.frequency = +e.target.value; })} />
             </label><NumberField value={m.frequency} step={0.1} onChange={(v) => updateModifier(m.id, (x) => { x.frequency = v; })} />
           </div>
           <div className="prop">

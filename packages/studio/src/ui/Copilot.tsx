@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { chatJson, listModels, verifyKeys, type ChatMessage } from '../copilot/client';
 import { acceptsKeys, baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, resolveModel, saveSettings, usesBackend, type CopilotSettings, type KeyStatus } from '../copilot/pool';
-import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate } from '../copilot/tools';
+import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validateBatch } from '../copilot/tools';
 import { systemPrompt } from '../copilot/prompt';
 import { parseTurn } from '../copilot/parse';
 import { CLOUD_CATALOGUE } from '../copilot/pool';
@@ -83,7 +83,9 @@ export function Copilot() {
       const { content, thinking } = await chatJson(settings, msgs, RESPONSE_SCHEMA, markKey, ac.signal);
       const parsed = parseTurn(content);
       const calls = parsed.calls.map((c) => normaliseCall(project, c));
-      const problems = calls.map((c) => validate(project, c)).filter(Boolean) as string[];
+      // as a batch: create_preset followed by add_preset_to_timeline is correct, and only
+      // reads as "no preset" if each call is judged against the project as it stands now
+      const problems = validateBatch(project, calls).filter(Boolean) as string[];
       if (problems.length) throw new ValidationError(problems.join('; '));
       if (!parsed.reply && !calls.length) throw new ValidationError('no tool calls and nothing to say');
       return { role: 'bot', text: parsed.reply || `${calls.length} change${calls.length === 1 ? '' : 's'} ready.`, calls, thinking };

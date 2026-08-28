@@ -3,8 +3,9 @@ import { makeTimeline, uid } from '../core/defaults';
 import { namedEasing, EASING_NAMES } from '../core/easing';
 import { blocksEnd, relayoutBlocks } from '../core/timeline';
 import { setProp } from '../core/props';
-import { activeTimeline, NODE_PROPS } from '../core/types';
-import type { EasingCurve, Project } from '../core/types';
+import { activeTimeline, MODIFIER_KINDS, MODIFIERS } from '../core/types';
+import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
+import type { EasingCurve, ModifierKind, Project } from '../core/types';
 
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
@@ -44,10 +45,9 @@ create_expression     { name, snapshot: { "<nodeId>.<property>": number } }
 apply_expression      { expression, atMs, easing? }             // expression = id or name
 create_preset         { name, durationMs, tracks: [{ nodeId, property, keyframes: [{ time, value, easing? }] }] }
 add_preset_to_timeline{ preset, index? }                        // preset = id or name; appended if index omitted
-add_modifier          { nodeId, kind: "shake"|"float", amount, frequency, amplitude, seed?, phase? }
+add_modifier          { nodeId, kind, amount, frequency, amplitude, seed?, phase? }
                       // amount is an intensity percentage, 0-200, where 100 is normal
-                      // frequency in Hz: shake 6-20, float 0.3-1.5
-                      // amplitude is the swing in degrees (or px on the body): 3-15
+${MODIFIER_KINDS.map((k) => `                      // ${k}: ${MODIFIERS[k].help}`).join('\n')}
 morph_between         { from, to, atMs, durationMs, easing? }   // from/to = expression id or name
 
 set_timeline          { durationMs?, loop?, fps? }             // loop eases the last frame back onto the first
@@ -59,6 +59,10 @@ add_timeline          { name }                                 // a new timeline
 set_camera            { property: "perspective"|"distance", value }  // perspective is the field-of-view angle`.trim();
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+/** A property the copilot may write: on a node, and a number. */
+const numeric = (v: unknown) => { const p = resolveProp(v); return !!p && PROPS[p].on === 'node' && !!PROPS[p].range; };
+const badProp = (v: unknown) =>
+  `"${String(v)}" is not an animatable property. Use one of: ${NUMERIC_PROPS.filter((x) => PROPS[x].on === 'node').join(', ')}`;
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 
 function easingOf(v: unknown): EasingCurve {
@@ -116,14 +120,17 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
   }
   const id = findNode(p, a.nodeId);
   if (id) a.nodeId = id;
+  // set_eye_params documents short names (`openness`), so models write them everywhere.
+  // resolveProp maps any unambiguous short name back onto its full path.
+  const prop = resolveProp(a.property);
+  if (prop) a.property = prop;
 
-  // a layer name is just as likely to show up nested — models write "Left eye" inside a
-  // preset track or an expression snapshot exactly as readily as at the top level
+  // a layer name and a short property name are just as likely to show up nested — models
+  // write "Left eye" and "openness" inside a preset track exactly as readily as at the top
   if (Array.isArray(a.tracks)) {
     a.tracks = (a.tracks as Record<string, unknown>[]).map((t) => {
       if (!t || typeof t !== 'object') return t;
-      const resolved = findNode(p, t.nodeId);
-      return resolved ? { ...t, nodeId: resolved } : t;
+      return { ...t, nodeId: findNode(p, t.nodeId) ?? t.nodeId, property: resolveProp(t.property) ?? t.property };
     });
   }
   if (a.snapshot && typeof a.snapshot === 'object') {
@@ -131,11 +138,33 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
     for (const [k, v] of Object.entries(a.snapshot as Record<string, unknown>)) {
       const i = k.indexOf('.');
       const node = i > 0 ? findNode(p, k.slice(0, i)) : undefined;
-      out[node ? `${node}${k.slice(i)}` : k] = v;
+      const path = i > 0 ? resolveProp(k.slice(i + 1)) : undefined;
+      out[node && path ? `${node}.${path}` : k] = v;
     }
     a.snapshot = out;
   }
   return { name: call.name, args: a };
+}
+
+/**
+ * Validate a whole turn, not each call against the project as it stands.
+ *
+ * A model that writes create_preset then add_preset_to_timeline in one batch is doing
+ * exactly the right thing, but the second call names something that will not exist until
+ * the first one runs — validating against the live project rejected it as `no preset
+ * "cat eyes"`. So walk the batch against a view that includes what the earlier calls
+ * will have made. Cheap because only the name lists matter here.
+ */
+export function validateBatch(p: Project, calls: ToolCall[]): (string | null)[] {
+  const view: Project = { ...p, presets: [...p.presets], expressions: [...p.expressions] };
+  return calls.map((call) => {
+    const problem = validate(view, call);
+    if (problem) return problem;
+    const a = call.args ?? {};
+    if (call.name === 'create_preset') view.presets.push({ id: uid('p'), name: String(a.name), source: 'custom', durationMs: 0, tracks: [] });
+    if (call.name === 'create_expression') view.expressions.push({ id: uid('x'), name: String(a.name), snapshot: {} });
+    return null;
+  });
 }
 
 /** Rejects anything that would corrupt the document. Returns null when the call is fine. */
@@ -148,7 +177,7 @@ export function validate(p: Project, call: ToolCall): string | null {
     case 'add_keyframe': {
       const bad = node(a.nodeId);
       if (bad) return bad;
-      if (!NODE_PROPS.includes(a.property as never)) return `"${String(a.property)}" is not an animatable property`;
+      if (!numeric(a.property)) return badProp(a.property);
       if (num(a.value) === undefined) return 'value must be a number';
       if (call.name === 'add_keyframe' && num(a.atMs) === undefined) return 'atMs must be a number';
       return null;
@@ -159,7 +188,7 @@ export function validate(p: Project, call: ToolCall): string | null {
         const i = key.indexOf('.');
         const bad = node(i > 0 ? key.slice(0, i) : key);
         if (bad) return `${bad} in the snapshot`;
-        if (!NODE_PROPS.includes(key.slice(i + 1) as never)) return `"${key.slice(i + 1)}" is not an animatable property`;
+        if (!numeric(key.slice(i + 1))) return badProp(key.slice(i + 1));
       }
       return null;
     }
@@ -171,7 +200,7 @@ export function validate(p: Project, call: ToolCall): string | null {
       for (const t of a.tracks as Record<string, unknown>[]) {
         const bad = node(t?.nodeId);
         if (bad) return `${bad} in a track of "${String(a.name)}"`;
-        if (!NODE_PROPS.includes(t?.property as never)) return `"${String(t?.property)}" is not an animatable property`;
+        if (!numeric(t?.property)) return badProp(t?.property);
         if (!Array.isArray(t?.keyframes) || !t.keyframes.length) return `a track of "${String(a.name)}" has no keyframes`;
       }
       return null;
@@ -181,7 +210,7 @@ export function validate(p: Project, call: ToolCall): string | null {
     case 'add_modifier': {
       const bad = node(a.nodeId);
       if (bad) return bad;
-      return a.kind === 'shake' || a.kind === 'float' ? null : 'kind must be shake or float';
+      return MODIFIER_KINDS.includes(a.kind as ModifierKind) ? null : `kind must be one of ${MODIFIER_KINDS.join(', ')}`;
     }
     case 'set_timeline': {
       if (a.durationMs === undefined && a.loop === undefined && a.fps === undefined) return 'set_timeline needs at least one of durationMs, loop, fps';
