@@ -1990,6 +1990,69 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ed().loadProject(defaultProject());
 }
 
+// --- the stopwatch means "a keyframe HERE" ---------------------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  // body.surface.pitch, because nothing in the default four-clip strip animates it —
+  // transform.rotation looked free until the rebuilt Happy started using it
+  const keysOn = () => activeTimeline(P()).tracks
+    .filter((t) => t.nodeId === 'body' && t.property === 'surface.pitch')
+    .flatMap((t) => t.keyframes.map((k) => Math.round(k.time)))
+    .sort((a, b) => a - b);
+  const at = (ms: number) => keysOn().some((t) => Math.abs(t - ms) < 1);
+  const lit = () => {
+    const track = activeTrackFor(activeTimeline(P()), 'body', 'surface.pitch', ed().playhead);
+    return !!track?.keyframes.some((k) => Math.abs(k.time - ed().playhead) < 1);
+  };
+
+  ed().setPlayhead(400);
+  ok('an un-animated property starts unlit', !lit() && keysOn().length === 0, keysOn().join());
+
+  ed().toggleKeyframe('body', 'surface.pitch');
+  ok('clicking registers a keyframe here', lit() && at(400), keysOn().join());
+
+  // THE BUG: it used to stay lit anywhere on the timeline, because it meant "there is a
+  // track", and the next click therefore deleted every keyframe on the property
+  ed().setPlayhead(1200);
+  ok('moving the playhead makes it unlit again', !lit(), `keys ${keysOn().join()}`);
+
+  ed().toggleKeyframe('body', 'surface.pitch');
+  ok('and clicking there adds a SECOND rather than wiping the first',
+    lit() && at(1200) && at(400), keysOn().join());
+
+  ed().toggleKeyframe('body', 'surface.pitch');
+  ok('clicking a lit stopwatch removes only that keyframe',
+    !lit() && !at(1200) && at(400), keysOn().join());
+
+  // the chevrons walk this property's keyframes, across whichever clips animate it
+  ed().setPlayhead(3000);
+  ed().toggleKeyframe('body', 'surface.pitch');   // lands in Blink, a different clip
+  const times = keysOn();
+  ok('navigation sees keyframes from every clip, not just the one under the playhead',
+    times.some((t) => t < 2400) && times.some((t) => t >= 2400), times.join());
+
+  // removing the LAST keyframe must not move the mascot. Done on an empty timeline: inside
+  // a clip writeKeyframe anchors a second keyframe at the clip start, so there is never
+  // exactly one to be the last.
+  ed().addTimeline('Blank');
+  ed().setPlayhead(0);
+  ed().toggleKeyframe('body', 'surface.pitch');   // at 0 there is no anchor, so exactly one
+  ed().setValue('body', 'surface.pitch', 17, 'probe');
+  const posed = valueAt(P(), 'body', 'surface.pitch', 0) as number;
+  ok('the probe actually posed it', Math.abs(posed - 17) < 1e-6, String(posed));
+  ok('and left exactly one keyframe to be the last one', keysOn().length === 1, keysOn().join());
+  ed().toggleKeyframe('body', 'surface.pitch');   // lit -> remove the only one
+  ok('removing the last keyframe bakes the pose instead of snapping back',
+    Math.abs((valueAt(P(), 'body', 'surface.pitch', 0) as number) - posed) < 1e-6,
+    `${posed} -> ${valueAt(P(), 'body', 'surface.pitch', 0)}`);
+  ok('and drops the empty track rather than leaving a blank lane',
+    !activeTimeline(P()).tracks.some((t) => t.nodeId === 'body' && t.property === 'surface.pitch'));
+
+  ed().loadProject(defaultProject());
+}
+
 // --- zip: the CRC everything downstream depends on -----------------------------
 ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as Uint8Array<ArrayBuffer>) === 0xcbf43926);
 

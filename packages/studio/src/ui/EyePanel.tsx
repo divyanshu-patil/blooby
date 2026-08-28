@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useEditor } from '../core/store';
 import { activeTrackFor, valueAt } from '../core/scene';
 import { activeTimeline } from '../core/types';
-import { NumberField, Panel, PropRow } from './bits';
+import { KeyNav, NumberField, Panel, PropRow } from './bits';
 import type { RigNode } from '../core/types';
 
 const PAD_RANGE = 42; // degrees at the pad's edge
@@ -15,7 +15,7 @@ export function EyePanel() {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const setValue = useEditor((s) => s.setValue);
-  const toggleTrack = useEditor((s) => s.toggleTrack);
+  const toggleKeyframe = useEditor((s) => s.toggleKeyframe);
   const updateNode = useEditor((s) => s.updateNode);
   const select = useEditor((s) => s.select);
   const selection = useEditor((s) => s.selection);
@@ -36,9 +36,14 @@ export function EyePanel() {
     for (const e of eyes) if (!e.eye.linkedToId) setValue(e.id, property, value, label);
   };
   const toggleBoth = (property: string) => {
-    for (const e of eyes) if (!e.eye.linkedToId) toggleTrack(e.id, property);
+    for (const e of eyes) if (!e.eye.linkedToId) toggleKeyframe(e.id, property);
   };
-  const trackedLeft = (property: string) => !!activeTrackFor(activeTimeline(project), left.id, property, playhead);
+  /** whether there is a keyframe at the playhead — the gaze pad's own stopwatch, which
+   *  drives two properties at once and so cannot use KeyNav's single-property version */
+  const keyHere = (property: string) => {
+    const track = activeTrackFor(activeTimeline(project), left.id, property, playhead);
+    return !!track?.keyframes.some((k) => Math.abs(k.time - playhead) < 1);
+  };
 
   const setSeparation = (deg: number) => {
     if (left === right) { setValue(left.id, 'eye.distanceFromCenter', deg, 'sep'); return; }
@@ -84,15 +89,14 @@ export function EyePanel() {
           </svg>
         </div>
         <button className="stopwatch" style={{ position: 'absolute', top: 6, left: 6, background: 'rgba(23,22,27,.55)' }}
-          aria-pressed={trackedLeft('surface.yaw') || trackedLeft('surface.pitch')}
+          aria-pressed={keyHere('surface.yaw') || keyHere('surface.pitch')}
           title="Animate the gaze (yaw + pitch)"
           onClick={() => { toggleBoth('surface.yaw'); toggleBoth('surface.pitch'); }} />
       </div>
       <p className="hint">Drag to aim the eyes. They ride the sphere, so the path curves and the far eye narrows.</p>
 
       <div className="prop">
-        <button className="stopwatch" aria-pressed={trackedLeft('eye.distanceFromCenter')} title="Animate distance apart"
-          onClick={() => toggleBoth('eye.distanceFromCenter')} />
+        <KeyNav nodeId={left.id} property="eye.distanceFromCenter" onToggle={() => toggleBoth('eye.distanceFromCenter')} />
         <label className="prop-label"><span className="t">Distance apart</span>
           <input type="range" min={0} max={60} step={0.5} value={separation} onChange={(e) => setSeparation(+e.target.value)} />
         </label>
@@ -100,8 +104,7 @@ export function EyePanel() {
       </div>
 
       <div className="prop">
-        <button className="stopwatch" aria-pressed={trackedLeft('eye.openness')} title="Animate openness"
-          onClick={() => toggleBoth('eye.openness')} />
+        <KeyNav nodeId={left.id} property="eye.openness" onToggle={() => toggleBoth('eye.openness')} />
         <label className="prop-label"><span className="t">Openness</span>
           <input type="range" min={0} max={1} step={0.01} value={num(left, 'eye.openness')}
             onChange={(e) => setBoth('eye.openness', +e.target.value, 'open')} />
@@ -110,8 +113,7 @@ export function EyePanel() {
       </div>
 
       <div className="prop">
-        <button className="stopwatch" aria-pressed={trackedLeft('transform.length')} title="Animate eye length"
-          onClick={() => toggleBoth('transform.length')} />
+        <KeyNav nodeId={left.id} property="transform.length" onToggle={() => toggleBoth('transform.length')} />
         <label className="prop-label"><span className="t">Eye length</span>
           <input type="range" min={0.2} max={3} step={0.01} value={num(left, 'transform.length')}
             onChange={(e) => setBoth('transform.length', +e.target.value, 'len')} />
@@ -120,8 +122,7 @@ export function EyePanel() {
       </div>
 
       <div className="prop">
-        <button className="stopwatch" aria-pressed={trackedLeft('transform.scale.x')} title="Animate eye width"
-          onClick={() => toggleBoth('transform.scale.x')} />
+        <KeyNav nodeId={left.id} property="transform.scale.x" onToggle={() => toggleBoth('transform.scale.x')} />
         <label className="prop-label"><span className="t">Eye width</span>
           <input type="range" min={0.2} max={2.5} step={0.01} value={num(left, 'transform.scale.x')}
             onChange={(e) => setBoth('transform.scale.x', +e.target.value, 'wide')} />

@@ -55,25 +55,24 @@ export function PropRow({ nodeId, property, label }: { nodeId: string | string[]
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const setValue = useEditor((s) => s.setValue);
-  const toggleTrack = useEditor((s) => s.toggleTrack);
+  const toggleKeyframe = useEditor((s) => s.toggleKeyframe);
   const selectTrack = useEditor((s) => s.selectTrack);
 
   const ids = Array.isArray(nodeId) ? nodeId : [nodeId];
   const primary = ids[0];
-  const track = activeTrackFor(activeTimeline(project), primary, property, playhead);
+  const tl = activeTimeline(project);
+  const track = activeTrackFor(tl, primary, property, playhead);
   const v = valueAt(project, primary, property, playhead);
   if (typeof v !== 'number') return null;
   const [min, max, step] = PROP_RANGE[property] ?? [-100, 100, 1];
   const driver = track ? (track.blockId ? 'clip' : 'keyframes') : 'base';
 
   const writeAll = (n: number) => { for (const id of ids) setValue(id, property, n, `multi.${property}`); };
-  const toggleAll = () => { for (const id of ids) toggleTrack(id, property); };
+  const toggleAll = () => { for (const id of ids) toggleKeyframe(id, property); };
 
   return (
     <div className="prop" data-driver={driver}>
-      <button className="stopwatch" aria-pressed={!!track}
-        title={track ? (track.blockId ? 'Driven by a clip on this timeline — click to detach and take manual control here' : 'Remove keyframes') : 'Animate this property'}
-        onClick={() => { toggleAll(); selectTrack(null); }} />
+      <KeyNav nodeId={primary} property={property} onToggle={() => { toggleAll(); selectTrack(null); }} />
       <label className="prop-label"><span className="t">{label ?? PROP_LABEL[property] ?? property}</span>
         <input type="range" min={min} max={max} step={step} value={v}
           onChange={(e) => writeAll(parseFloat(e.target.value))} />
@@ -84,3 +83,52 @@ export function PropRow({ nodeId, property, label }: { nodeId: string | string[]
 }
 
 const clampTo = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+
+/**
+ * The stopwatch, and the chevrons for walking this property's keyframes.
+ *
+ * Lit means "there is a keyframe HERE", not "this property is animated somewhere" — the
+ * old meaning stayed on after the playhead moved off the keyframe, so a second click
+ * looked like it would add one and instead deleted the whole track. Every panel with a
+ * stopwatch uses this, so none of them can drift back to the old behaviour.
+ */
+export function KeyNav({ nodeId, property, onToggle }: {
+  nodeId: string; property: string; onToggle: () => void;
+}) {
+  const project = useEditor((s) => s.project);
+  const playhead = useEditor((s) => s.playhead);
+  const setPlayhead = useEditor((s) => s.setPlayhead);
+
+  // across whichever clips animate it: navigating should walk the property, not stop at
+  // the edge of the clip that happens to own the keyframe under the playhead
+  const times = [...new Set(
+    activeTimeline(project).tracks
+      .filter((t) => t.nodeId === nodeId && t.property === property)
+      .flatMap((t) => t.keyframes.map((k) => Math.round(k.time))),
+  )].sort((a, b) => a - b);
+
+  const here = times.some((t) => Math.abs(t - playhead) < 1);
+  const prev = [...times].reverse().find((t) => t < playhead - 1);
+  const next = times.find((t) => t > playhead + 1);
+  const secs = (t: number) => `${(t / 1000).toFixed(2)}s`;
+
+  return (
+    <span className="keynav">
+      {/* only once there is something to walk to, so an un-animated property keeps the
+          row it always had */}
+      {!!times.length && (
+        <button className="keychev" disabled={prev === undefined} aria-label="Previous keyframe"
+          title={prev === undefined ? 'No earlier keyframe' : `Go to ${secs(prev)}`}
+          onClick={() => prev !== undefined && setPlayhead(prev)}>‹</button>
+      )}
+      <button className="stopwatch" aria-pressed={here}
+        title={here ? 'Keyframe here — click to remove it' : 'Add a keyframe here'}
+        onClick={onToggle} />
+      {!!times.length && (
+        <button className="keychev" disabled={next === undefined} aria-label="Next keyframe"
+          title={next === undefined ? 'No later keyframe' : `Go to ${secs(next)}`}
+          onClick={() => next !== undefined && setPlayhead(next)}>›</button>
+      )}
+    </span>
+  );
+}

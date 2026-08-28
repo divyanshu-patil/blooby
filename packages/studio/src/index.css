@@ -226,7 +226,16 @@ input.txt {
 input.txt:focus { border-color: var(--signal); outline: none; }
 
 /* ---- property row ------------------------------------------------------- */
-.prop { display: grid; grid-template-columns: 15px 1fr 60px; align-items: center; gap: 7px; }
+/* the first column holds the stopwatch alone until the property has keyframes, then the
+   two chevrons appear either side of it — `min-content` so the row does not jump */
+.prop { display: grid; grid-template-columns: min-content 1fr 60px; align-items: center; gap: 7px; }
+.keynav { display: flex; align-items: center; gap: 1px; }
+.keychev {
+  width: 13px; height: 17px; padding: 0; border: 0; border-radius: 3px;
+  background: none; color: var(--muted); font: 600 13px var(--ui); line-height: 1; cursor: pointer;
+}
+.keychev:hover:not(:disabled) { background: var(--field); color: var(--ink); }
+.keychev:disabled { opacity: .25; cursor: default; }
 .prop-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; font: 500 11.5px var(--ui); color: var(--ink-2); }
 .prop-label > .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prop-num {

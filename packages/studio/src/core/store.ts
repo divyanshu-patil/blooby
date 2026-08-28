@@ -67,6 +67,7 @@ export interface Editor {
   setValue: (nodeId: string, property: string, value: KeyValue, label?: string) => void;
   trackFor: (nodeId: string, property: string) => Track | undefined;
   toggleTrack: (nodeId: string, property: string) => void;
+  toggleKeyframe: (nodeId: string, property: string) => void;
   addKeyframeNow: (nodeId: string, property: string) => void;
   moveKeyframe: (trackId: string, kfId: string, time: number) => void;
   /** set several keyframes (from a multi-select drag) to explicit absolute times in one
@@ -291,6 +292,33 @@ export const useEditor = create<Editor>((set, get) => ({
     }, label ?? `${nodeId}.${property}${existing ? '.kf' : ''}`);
   },
 
+  /**
+   * The stopwatch: is there a keyframe at the playhead, and put one there or take it away.
+   *
+   * It used to mean "this property has a track at all", which stayed lit after the
+   * playhead moved off the keyframe and turned an innocent-looking second click into
+   * "delete every keyframe on this property". Now it means exactly what it looks like.
+   */
+  toggleKeyframe(nodeId, property) {
+    const { playhead, project } = get();
+    const track = activeTrackFor(activeTimeline(project), nodeId, property, playhead);
+    // 1ms, matching writeKeyframe's own idea of "the same keyframe"
+    const here = track?.keyframes.find((k) => Math.abs(k.time - playhead) < 1);
+    if (!track || !here) { get().addKeyframeNow(nodeId, property); return; }
+
+    get().commit((p) => {
+      const t = at(p).tracks.find((x) => x.id === track.id);
+      if (!t) return;
+      t.keyframes = t.keyframes.filter((k) => k.id !== here.id);
+      if (t.keyframes.length) return;
+      // the last one: bake the value back down so removing a keyframe never moves the
+      // mascot, then drop the empty track rather than leave a blank lane on the strip
+      const v = sampleTrack(track, playhead);
+      if (v !== undefined) writeProp(p.rig, nodeId, property, v);
+      at(p).tracks = at(p).tracks.filter((x) => x.id !== t.id);
+    });
+  },
+
   toggleTrack(nodeId, property) {
     const existing = get().trackFor(nodeId, property);
     const { playhead } = get();
@@ -311,14 +339,14 @@ export const useEditor = create<Editor>((set, get) => ({
 
   addKeyframeNow(nodeId, property) {
     const { playhead, project } = get();
-    const rig = evaluateRig(project, playhead);
-    const v = readProp(rig, nodeId, property);
+    const v = readProp(evaluateRig(project, playhead), nodeId, property);
     if (v === undefined) return;
-    get().commit((p) => {
-      let track = at(p).tracks.find((t) => t.nodeId === nodeId && t.property === property);
-      if (!track) { track = { id: uid('t'), nodeId, property, keyframes: [] }; at(p).tracks.push(track); }
-      upsertKeyframe(track, playhead, v);
-    });
+    // writeKeyframe rather than a hand-rolled push: it scopes the new track to whichever
+    // clip the playhead is in, and that is the scope activeTrackFor — and therefore the
+    // renderer, and the stopwatch — can actually see. This used to create a GLOBAL track,
+    // which inside a clip is invisible: the keyframe existed and did nothing. It also
+    // grabbed the first track for the property regardless of which clip owned it.
+    get().commit((p) => { writeKeyframe(p, nodeId, property, playhead, v, { type: 'preset', name: 'easeInOut' }); });
   },
 
   moveKeyframe(trackId, kfId, time) {
