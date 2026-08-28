@@ -32,7 +32,7 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
       .then(({ project: meta, data }) => {
         if (!live) return;
         loadProject(data as Project);
-        setBaseVersion(meta.currentVersion);
+        setBaseVersion(meta.currentVersion, meta.name);
         setName(meta.name);
         loadedFor.current = projectId;
         setLoading(false);
@@ -57,16 +57,18 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
 
   return (
     <div className="cloud-editor">
-      <div className="cloud-bar">
-        <button className="btn ghost sm" onClick={onExit}>← Projects</button>
-        <strong className="cloud-name">{name}</strong>
-        <span className="spacer" />
-        <SaveIndicator state={state} savedAt={savedAt} onRetry={() => void saveNow()} />
-        <button className="btn sm" onClick={() => void saveNow()} disabled={state === 'saving'}>Save now</button>
-      </div>
-
       <div className="cloud-editor-body">
-        <Editor />
+        {/* no back button: the browser has one, and this is a route. The project's name
+            is the editor's own name field — there is nothing left for a second bar. */}
+        <Editor cloudBar={
+          <span className="cloudsave">
+            <SaveIndicator state={state} savedAt={savedAt} onRetry={() => void saveNow()} />
+            <button className="btn sm" onClick={() => void saveNow()} disabled={state === 'saving'}
+              title="Save to the cloud now instead of waiting for autosave">
+              <CloudIcon /> Save now
+            </button>
+          </span>
+        } />
       </div>
 
       {/* a lost update is the one save failure the user cannot fix by retrying, so it
@@ -83,5 +85,17 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
         />
       )}
     </div>
+  );
+}
+
+/** Upload-shaped, because that is what "save now" does — matches the arrow in the layers
+ *  panel rather than importing an icon set for one glyph. */
+function CloudIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden
+      stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4.4 12.5a2.9 2.9 0 0 1-.3-5.8 3.7 3.7 0 0 1 7.1-1 2.6 2.6 0 0 1 .5 5.2" />
+      <path d="M8 13.5V7.6M8 7.6 6.2 9.4M8 7.6l1.8 1.8" />
+    </svg>
   );
 }

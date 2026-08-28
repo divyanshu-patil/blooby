@@ -24,13 +24,17 @@ export function useAutosave(projectId: string | null, project: Project, enabled:
   const [conflict, setConflict] = useState(false);
 
   const version = useRef<number | null>(null);
+  const savedName = useRef<string | null>(null);
   const inFlight = useRef(false);
   const pending = useRef(false);
   const latest = useRef(project);
   latest.current = project;
 
-  /** Called by the loader once it knows which version this editor started from. */
-  const setBaseVersion = useCallback((v: number) => { version.current = v; }, []);
+  /** Called by the loader once it knows which version and name this editor started from. */
+  const setBaseVersion = useCallback((v: number, name?: string) => {
+    version.current = v;
+    if (name !== undefined) savedName.current = name;
+  }, []);
 
   const flush = useCallback(async () => {
     if (!projectId || !enabled || inFlight.current) { pending.current = true; return; }
@@ -45,6 +49,16 @@ export function useAutosave(projectId: string | null, project: Project, enabled:
         ...(version.current !== null ? { expectedVersion: version.current } : {}),
       });
       version.current = res.version;
+
+      // the editor's name field IS the project's name — otherwise the dashboard keeps
+      // calling it "Untitled" after you have titled it. Rides the same debounce, and
+      // only after the data save, so a 409 stops both.
+      const name = latest.current.name?.trim();
+      if (name && name !== savedName.current) {
+        await projectsApi.update(projectId, { name });
+        savedName.current = name;
+      }
+
       setSavedAt(Date.parse(res.savedAt));
       setState(pending.current ? 'dirty' : 'saved');
     } catch (e) {

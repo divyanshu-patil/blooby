@@ -18,6 +18,7 @@ import { activeTimeline } from '../core/types';
 import { startTourWhenReady } from '../kit/tour';
 import { TourMenu } from '../kit/TourMenu';
 import { EDITOR_TOURS, INTRO_TOUR } from './tours';
+import type { ReactNode } from 'react';
 import type { Project } from '../core/types';
 
 type Tab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
@@ -25,8 +26,12 @@ type Tab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
 
 /** The whole editor UI — apps/web renders it with no onSave (local-file Save/Open only),
  * apps/admin's Preset Publisher passes onSave/saveLabel to add a second save destination
- * (a cloud table) alongside the local JSON download, which always stays available. */
-export function Editor({ onSave, saveLabel }: { onSave?: (project: Project) => void; saveLabel?: string } = {}) {
+ * (a cloud table) alongside the local JSON download, which always stays available.
+ *
+ * `cloudBar` is whatever owns persisting this project — a save state and a save button.
+ * It sits inside this header rather than in a strip above it: a second bar carrying one
+ * button and a title the editor already shows is a row of chrome for nothing. */
+export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Project) => void; saveLabel?: string; cloudBar?: ReactNode } = {}) {
   // first visit only; skipping counts as seen, and the ? button replays it
   useEffect(() => { startTourWhenReady('editor', INTRO_TOUR); }, []);
   const project = useEditor((s) => s.project);
@@ -113,6 +118,7 @@ export function Editor({ onSave, saveLabel }: { onSave?: (project: Project) => v
           <strong> {activeTimeline(project).blocks.length}</strong> blocks
         </span>
         <DurationField />
+        {cloudBar}
         <span className="spacer" />
         <input ref={file} type="file" accept=".json" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) importProject(f); e.target.value = ''; }} />

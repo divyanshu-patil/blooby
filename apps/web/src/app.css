@@ -1,11 +1,8 @@
 .cloud-editor { display: flex; flex-direction: column; height: 100vh; }
 
-.cloud-bar {
-  display: flex; align-items: center; gap: 11px;
-  padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
-}
-.cloud-bar .spacer { flex: 1; }
-.cloud-name { font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+/* the save state and its button live inside the editor's own header now */
+.cloudsave { display: inline-flex; align-items: center; gap: 8px; }
+.cloudsave .btn { display: inline-flex; align-items: center; gap: 5px; }
 
 .cloud-editor-body { flex: 1; min-height: 0; }
 
