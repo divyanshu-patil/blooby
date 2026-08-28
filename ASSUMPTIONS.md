@@ -193,3 +193,20 @@ empty strip, so the first thing anyone sees is the tool doing its job.
 **Custom easing is edited on the value graph**, not in a separate cubic-bezier widget —
 the graph editor already draws the handles in context, and a second widget showing the
 same two control points would be a second place to keep in sync.
+
+## One object per project in S3, no history
+
+`users/{userId}/projects/{projectId}.json`, overwritten on every save. It used to be
+`.../{projectId}/versions/{n}.json`, one object per save, on the reasoning that a bad
+write could never destroy the last good one. In practice an afternoon of autosaving left
+149 objects for a single project and the bucket grew without bound, so that trade is off.
+
+What is actually lost is narrower than it sounds. S3 `PutObject` is atomic, so an
+interrupted or failed upload still leaves the previous object whole; what is gone is
+recovery from a save that *succeeded* with bad content. `currentVersion` stays in Postgres
+and still does the job that mattered — the compare-and-set that stops two tabs
+overwriting each other — it simply no longer names a key.
+
+`pnpm --filter @blooby/api collapse:versions` migrated the existing bucket (258 objects
+across 3 projects down to 3, dry-run by default). `check:storage` asserts the property
+holds: create, save five times, one object, delete, bucket back where it started.
