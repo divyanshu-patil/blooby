@@ -102,7 +102,7 @@ export function Stage() {
   }, [project, playhead, stateTransition, transitionTick]);
   // composeScene, not buildScene: the stage must draw exactly what the exporter bakes,
   // emitters included, or the preview quietly lies about the finished animation
-  const scene = useMemo(() => composeScene(activeTimeline(project), rig, playhead, COMP), [project, rig, playhead]);
+  const scene = useMemo(() => composeScene(project, rig, playhead, COMP), [project, rig, playhead]);
   const frame = bodyFrame(rig);
   const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
   const selectedEmitter = (activeTimeline(project).emitters ?? []).find((e) => e.id === selectedEmitterId);

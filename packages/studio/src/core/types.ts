@@ -28,7 +28,14 @@ export interface RigNode {
   size: Vec2;
 
   color: ColorStop;
+  /** the layer-list eye: hidden in the editor, and never drawn or exported */
   visible: boolean;
+  /**
+   * How present the layer is, 0–1, and animatable (`visible`). Distinct from the boolean
+   * above, which is a workspace toggle: this one fades AND shrinks, so keyframing it to 0
+   * is how a shape leaves the scene rather than popping out of it. Undefined means 1.
+   */
+  presence?: number;
   zIndex: number;
 
   eye?: {
@@ -169,11 +176,40 @@ export interface Anchor {
  * a glyph or an SVG, a path from somewhere to somewhere, some wander, and a fade. Five
  * separate "systems" would have been five sets of the same bugs.
  */
+/**
+ * One kind of thing an emitter throws.
+ *
+ * An emitter cycles its parts, so a confetti burst is five parts in five colours and a
+ * sleeper's zzz is three of the same at different sizes. Each carries its own speed and
+ * size multipliers, which is what stops a stream reading as a metronome.
+ */
+export interface EmitterPart {
+  id: string;
+  /** a shape from core/emitters SHAPE_LIBRARY */
+  shapeId?: string;
+  /** an SVG kept with the project */
+  svgAssetId?: string;
+  /** a plain character, still supported — the quickest way to try something */
+  glyph?: string;
+  /** its own colour, or the emitter's when absent ("automatic") */
+  color?: ColorStop;
+  /** how often this part comes up relative to the others */
+  weight: number;
+  /** multiplies the emitter's travel speed for this part */
+  speed: number;
+  sizeScale: number;
+  /** degrees over a life, added to the emitter's own spin */
+  spin: number;
+}
+
 export interface Emitter {
   id: string;
   name: string;
-  /** cycled in order, one per particle: ['z','z','z'] or ['♪','♫','♩','♬'] */
+  /** cycled in order, one per particle: ['z','z','z'] or ['♪','♫','♩','♬'].
+   *  Kept for projects saved before `parts`; `parts` wins when present. */
   glyphs: string[];
+  /** what this emitter throws. Undefined falls back to `glyphs`. */
+  parts?: EmitterPart[];
   /** used instead of a glyph when present */
   svg?: { sourceMarkup: string; viewBox: string };
   /** which entry in Project.svgAssets `svg` came from, so the picker can show it selected */
@@ -181,6 +217,14 @@ export interface Emitter {
   color: ColorStop;
   /** glyph size in rig units before scaleFrom/scaleTo */
   size: number;
+  /**
+   * How a particle's progress along its path is shaped, and how much its speed varies.
+   * Linear travel reads as a conveyor belt; `easing` bends one particle's journey and
+   * `speedJitter` spreads the whole stream across a range so no two match.
+   */
+  easing?: EasingCurve;
+  /** 0 = every particle the same speed, 1 = anywhere from half to double */
+  speedJitter?: number;
 
   path: EmitterPath;
   from: Anchor;

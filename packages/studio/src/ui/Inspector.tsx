@@ -89,6 +89,7 @@ function MultiNodeInspector({ ids }: { ids: string[] }) {
       <PropRow nodeId={ids} property="transform.rotation" />
       {nodes.every((n) => n.kind !== 'body') && <PropRow nodeId={ids} property="transform.length" />}
       {nodes.every((n) => n.kind === 'eye') && <PropRow nodeId={ids} property="eye.openness" />}
+      <PropRow nodeId={ids} property="visible" />
 
       <div className="divider" />
       <ColorField value={colorNow ?? nodes[0].color} keyNavFor={ids[0]}
@@ -166,6 +167,8 @@ export function NodeInspector() {
       {node.kind !== 'body' && <PropRow nodeId={node.id} property="transform.length" />}
       <PropRow nodeId={node.id} property="size.x" label={isRoot ? 'Radius' : 'Width'} />
       {!isRoot && <PropRow nodeId={node.id} property="size.y" label="Height" />}
+
+      <PropRow nodeId={node.id} property="visible" />
 
       <div className="divider" />
       <ShapeEditor node={node} />

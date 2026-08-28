@@ -1,6 +1,7 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
 import { morphPath } from './path';
+import { shapeResolver } from './emitters';
 import { noise1d } from './noise';
 import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
 import { CAMERA_PROPS, getCameraProp, getProp, NUMERIC_PROPS, readProp, setCameraProp, setProp, writeProp } from './props';
@@ -428,10 +429,14 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   // rx is the *sphere* radius that features are placed on; the drawn outline is its
   // silhouette, which perspective pushes outward. Keep them separate or features escape.
   const limb = silhouetteScale(rig.camera.fov, rig.camera.distance);
-  if (root.visible) {
+  const rootSeen = root.presence ?? 1;
+  if (root.visible && rootSeen > 0.002) {
     out.push({
-      id: root.id, name: root.name, shape: 'ellipse', cx, cy, w: rx * limb * 2, h: ry * limb * 2,
-      r: Math.min(rx, ry) * limb, rotation: roll, color: root.color, depth: -2, zIndex: root.zIndex,
+      id: root.id, name: root.name, shape: 'ellipse', cx, cy,
+      w: rx * limb * 2 * rootSeen, h: ry * limb * 2 * rootSeen,
+      r: Math.min(rx, ry) * limb * rootSeen, rotation: roll,
+      color: rootSeen < 1 ? { ...root.color, a: root.color.a * rootSeen } : root.color,
+      depth: -2, zIndex: root.zIndex,
       ...(root.shapePath ? { path: root.shapePath } : {}),
     });
   }
@@ -457,11 +462,17 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
       const ax = px + lx * cos - ly * sin;
       const ay = py + lx * sin + ly * cos;
 
-      const w = node.size.x * node.transform.scale.x * p.sx * cum;
-      const h = eyeHeight(node) * node.transform.scale.y * p.sy * cum;
+      // presence fades AND shrinks: a feature keyframed out shrinks away rather than
+      // blinking off, which is what makes it usable as a transition into the next clip
+      const seen = node.presence ?? 1;
+      if (seen <= 0.002) { walk(node, px, py, pr, R, { x: 0, y: 0 }, cum); continue; }
+
+      const w = node.size.x * node.transform.scale.x * p.sx * cum * seen;
+      const h = eyeHeight(node) * node.transform.scale.y * p.sy * cum * seen;
       const rot = pr + node.transform.rotation;
 
-      const color = p.alpha < 1 ? { ...node.color, a: node.color.a * p.alpha } : node.color;
+      const a = p.alpha * seen;
+      const color = a < 1 ? { ...node.color, a: node.color.a * a } : node.color;
       if (node.kind === 'svgLayer' && node.svg) {
         out.push({ id: node.id, name: node.name, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
       } else if (node.kind !== 'group') {
@@ -532,6 +543,8 @@ export function emitterFrame(rig: Rig, base: SceneItem[], view: Viewport) {
 
 export function emitterItems(
   tl: Timeline, rig: Rig, base: SceneItem[], timeMs: number, view: Viewport,
+  /** turns a shape id into markup. Injected so core/scene need not know the library. */
+  resolveShape?: (shapeId?: string, svgAssetId?: string) => { sourceMarkup: string; viewBox: string } | undefined,
 ): SceneItem[] {
   const emitters = tl.emitters ?? [];
   if (!emitters.length) return [];
@@ -555,14 +568,27 @@ export function emitterItems(
     // one revolution per lifeMs, so "lives" reads as "how long a lap takes" on an orbit
     const orbitPhase = (t / life) % 1;
 
+    const parts = e.parts?.length ? e.parts : null;
+
     for (let i = 0; i < slots; i++) {
+      const pt = parts ? parts[i % parts.length] : null;
+
+      // Per-particle speed. A stream where everything travels at one rate reads as a
+      // conveyor belt; jitter spreads it across a range, deterministically by slot so
+      // scrubbing back gives the same picture.
+      const jitter = e.speedJitter ?? 0;
+      const vary = jitter ? 1 + noise1d(i * 3.1 + 11, seed) * jitter : 1;
+      const rateOf = Math.max(0.05, (pt?.speed ?? 1) * vary);
+
       // an orbit never dies and never respawns — it goes round. Everything else is born,
       // travels and fades.
       const age = e.path === 'orbit'
-        ? ((t + (i / slots) * life) % life)
-        : ((t - i * rate) % cycle + cycle) % cycle;
+        ? ((t * rateOf + (i / slots) * life) % life)
+        : ((t * rateOf - i * rate) % cycle + cycle) % cycle;
       if (age >= life) continue;                       // this slot is between spawns
-      const u = age / life;
+      // easing shapes the journey itself: an ease-out drop falls fast and settles, where
+      // linear travel is the same speed the whole way down
+      const u = e.easing ? applyEasing(e.easing, age / life) : age / life;
 
       let x: number, y: number;
       if (e.path === 'orbit') {
@@ -605,14 +631,20 @@ export function emitterItems(
       const alpha = e.color.a * fadeIn * fadeOut;
       if (alpha <= 0.002) continue;
 
-      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * unit;
+      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * (pt?.sizeScale ?? 1) * unit;
+      const tint = pt?.color ?? e.color;
+
+      // what this particle IS: a library/project shape, or a character. `resolveShape` is
+      // passed in rather than looked up here, so core/scene stays free of the library.
+      const art = pt?.shapeId || pt?.svgAssetId ? resolveShape?.(pt.shapeId, pt.svgAssetId) : (e.svg ?? undefined);
+
       out.push({
         id: `${e.id}#${i}`, name: e.name, shape: 'pill',
         cx: x, cy: y, w: size, h: size, r: size / 2,
-        rotation: e.spin * u,
-        color: { ...e.color, a: alpha },
+        rotation: (e.spin + (pt?.spin ?? 0)) * u,
+        color: { ...tint, a: (tint.a ?? 1) * (alpha / Math.max(1e-6, e.color.a)) },
         depth: 3, zIndex: 900,
-        ...(e.svg ? { svg: e.svg } : { text: e.glyphs[i % Math.max(1, e.glyphs.length)] ?? '' }),
+        ...(art ? { svg: art } : { text: pt?.glyph ?? e.glyphs[i % Math.max(1, e.glyphs.length)] ?? '' }),
       });
     }
   }
@@ -626,15 +658,20 @@ export function emitterItems(
  * `sceneAt` — but it must not therefore draw a different picture than the exporter does.
  * Both call this.
  */
-export function composeScene(tl: Timeline, rig: Rig, timeMs: number, view: Viewport): SceneItem[] {
+/**
+ * Takes the whole project rather than a timeline: it needs the imported SVGs to resolve a
+ * particle's artwork, and a call site that had to remember to pass a resolver separately
+ * would eventually forget and render every particle blank.
+ */
+export function composeScene(project: Project, rig: Rig, timeMs: number, view: Viewport): SceneItem[] {
   const base = buildScene(rig, view);
-  const extra = emitterItems(tl, rig, base, timeMs, view);
+  const extra = emitterItems(activeTimeline(project), rig, base, timeMs, view, shapeResolver(project.svgAssets));
   if (!extra.length) return base;
   return [...base, ...extra].sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
 }
 
 export const sceneAt = (project: Project, t: number, view: Viewport): SceneItem[] =>
-  composeScene(activeTimeline(project), evaluateRig(project, t), t, view);
+  composeScene(project, evaluateRig(project, t), t, view);
 
 /** Current value of a property, tracks included — what the inspector shows. Mirrors
  * evaluateRig's own per-track sampling (block speed/loop included) so the inspector can

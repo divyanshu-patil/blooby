@@ -8,9 +8,15 @@ export function Shapes({ scene }: { scene: SceneItem[] }) {
       {scene.map((s) => {
         const spin = s.rotation ? `rotate(${s.rotation} ${s.cx} ${s.cy})` : undefined;
         if (s.svg) {
+          // `color` + opacity rather than a fill: the built-in artwork paints with
+          // currentColor, so one emitter colour reaches every path inside it — while an
+          // imported SVG that carries its own colours keeps them, which is what
+          // "automatic" means in the picker.
           return (
-            <g key={s.id} transform={`${spin ?? ''} translate(${s.cx - s.w / 2} ${s.cy - s.h / 2})`}>
+            <g key={s.id} transform={`${spin ?? ''} translate(${s.cx - s.w / 2} ${s.cy - s.h / 2})`}
+              style={{ color: cssColor({ ...s.color, a: 1 }) }} opacity={s.color.a}>
               <svg width={s.w} height={s.h} viewBox={s.svg.viewBox} overflow="visible"
+                preserveAspectRatio="xMidYMid meet"
                 dangerouslySetInnerHTML={{ __html: s.svg.sourceMarkup }} />
             </g>
           );

@@ -41,16 +41,6 @@ const EMITTER_PRESETS: {
       scaleFrom: 0.85, scaleTo: 1, spin: 40, wobble: 3, wobbleFrequency: 1.2, seed: 5,
     }),
   },
-  {
-    label: 'Confetti', hint: 'A burst raining down — put the playhead where you want it and click', burstMs: 1500,
-    make: (nodeId) => ({
-      name: 'confetti', glyphs: ['■', '●', '▲', '✦', '■', '●'],
-      color: { r: 232, g: 106, b: 84, a: 1 }, size: 15,
-      path: 'fall', from: { nodeId, x: 0, y: -150 }, to: { nodeId, x: 0, y: 190 }, bow: 150,
-      rateMs: 90, lifeMs: 1500, count: 16, fadeStart: 0.7,
-      scaleFrom: 1, scaleTo: 0.85, spin: 300, wobble: 14, wobbleFrequency: 2.2, seed: 21,
-    }),
-  },
 ];
 
 /** Starting dial positions. Keyed by ModifierKind, so a new effect will not compile

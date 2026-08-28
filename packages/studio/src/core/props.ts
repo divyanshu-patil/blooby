@@ -18,6 +18,7 @@ export function getProp(node: RigNode, path: string): KeyValue | undefined {
     case 'size.y': return node.size.y;
     case 'color': return node.color;
     case 'shape.path': return node.shapePath;
+    case 'visible': return node.presence ?? 1;
     default: return undefined;
   }
 }
@@ -39,6 +40,7 @@ export function setProp(node: RigNode, path: string, v: KeyValue): void {
     case 'size.y': node.size.y = n; break;
     case 'color': node.color = v as ColorStop; break;
     case 'shape.path': node.shapePath = typeof v === 'string' ? v : undefined; break;
+    case 'visible': node.presence = Math.min(1, Math.max(0, n)); break;
   }
 }
 
@@ -129,6 +131,8 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'The authored width in pixels. Prefer transform.scale.x for animation \u2014 this resizes the drawing itself.' },
   'size.y': { on: 'node', label: 'Height', range: [1, 300, 1, 'px'],
     help: 'The authored height in pixels. Prefer transform.scale.y for animation.' },
+  visible: { on: 'node', label: 'Visible', range: [0, 1, 0.01, ''],
+    help: 'How present the layer is. 1 is normal, 0 is gone — it fades AND shrinks to nothing, so keyframing it to 0 is how a feature leaves rather than pops out. Use it to retire a shape before the next clip.' },
   'shape.path': { on: 'node', label: 'Shape',
     help: 'An SVG path outline. Keyframe it and the shape morphs from one to the next. Not a number, so the copilot cannot set it.' },
   color: { on: 'node', label: 'Color',

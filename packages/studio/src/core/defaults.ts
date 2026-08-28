@@ -1,6 +1,7 @@
-import type { EasingCurve, Emitter, Expression, Keyframe, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
+import type { EasingCurve, Emitter, EmitterPart, Expression, Keyframe, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
 import { derivedDuration } from './timeline';
 import { primitivePath } from './path';
+import { CONFETTI_COLORS } from './emitters';
 
 export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -61,12 +62,41 @@ export function defaultRig(): Rig {
  * A preset should read as what makes it different — the glyphs and where they go — not as
  * fourteen fields of which twelve are the same every time.
  */
-const emit = (e: Partial<Omit<Emitter, 'id' | 'blockId'>> & Pick<Emitter, 'name' | 'glyphs' | 'to'>): Omit<Emitter, 'id' | 'blockId'> => ({
-  color: DROWSY, size: 26, path: 'arc', from: { x: 0, y: -40 }, bow: 0,
+const emit = (e: Partial<Omit<Emitter, 'id' | 'blockId'>> & Pick<Emitter, 'name' | 'to'>): Omit<Emitter, 'id' | 'blockId'> => ({
+  glyphs: [], color: DROWSY, size: 26, path: 'arc', from: { x: 0, y: -40 }, bow: 0,
   rateMs: 420, lifeMs: 1800, count: 4, fadeStart: 0.5,
   scaleFrom: 0.6, scaleTo: 1.2, spin: 0, wobble: 3, wobbleFrequency: 1.2, seed: 7,
+  easing: { type: 'preset', name: 'easeOut' }, speedJitter: 0.25,
   ...e,
 });
+
+/** Built-in parts, by shape id — drawn artwork rather than whatever the font renders. */
+const shape = (shapeId: string, over: Partial<EmitterPart> = {}): EmitterPart =>
+  ({ id: `pt_${shapeId}_${over.speed ?? 1}_${over.sizeScale ?? 1}`, shapeId, weight: 1, speed: 1, sizeScale: 1, spin: 0, ...over });
+
+/**
+ * Confetti: paper strips and curled ribbons in five colours, falling and tumbling.
+ *
+ * Its own builder because it is used by the Celebrate preset AND by the one-click button,
+ * and because a burst of squares in one colour does not read as confetti at all — the
+ * variety is the effect.
+ */
+export function confetti(nodeId: string): Omit<Emitter, 'id' | 'blockId'> {
+  return {
+    name: 'confetti',
+    parts: CONFETTI_COLORS.flatMap((color, i) => [
+      { id: `cf${i}a`, shapeId: 'streamer', color, weight: 1, speed: 0.9 + i * 0.06, sizeScale: 1, spin: 0 },
+      { id: `cf${i}b`, shapeId: 'curl', color, weight: 1, speed: 1.1 - i * 0.05, sizeScale: 0.9, spin: 120 },
+      { id: `cf${i}c`, shapeId: 'chip', color, weight: 1, speed: 1 + i * 0.03, sizeScale: 0.75, spin: -90 },
+    ]),
+    glyphs: [], color: CONFETTI_COLORS[0], size: 20, path: 'fall',
+    from: { nodeId, x: 0, y: -170 }, to: { nodeId, x: 0, y: 210 },
+    bow: 170, rateMs: 70, lifeMs: 1700, count: 22, fadeStart: 0.72,
+    scaleFrom: 1, scaleTo: 0.9, spin: 220, wobble: 16, wobbleFrequency: 2.4, seed: 21,
+    // paper falls fast then flutters: linear travel looks like rain
+    easing: { type: 'preset', name: 'easeIn' }, speedJitter: 0.5,
+  };
+}
 
 /** The eye's own drawn outline, as a path — the morph's resting pose, so nothing pops. */
 const PILL = primitivePath('rect', { cornerRadius: 0.5 });
@@ -173,10 +203,13 @@ export function builtinPresets(): Preset[] {
         ...bothEyes('transform.length', [kf(0, 1.55), kf(340, 1.85, 'easeOut'), kf(1000, 1.85), kf(1600, 1.55)]),
       ],
       emitters: [emit({
-        name: 'badge', glyphs: ['!'], color: { r: 226, g: 88, b: 62, a: 1 }, size: 34,
-        from: { nodeId: 'body', x: 42, y: -46 }, to: { nodeId: 'body', x: 58, y: -84 },
-        rateMs: 700, lifeMs: 1300, count: 2, fadeStart: 0.6,
-        scaleFrom: 0.2, scaleTo: 1.15, wobble: 2, startMs: 260,
+        // a drawn exclamation, so its weight is ours rather than the system font's, and
+        // it pops in big rather than drifting up as a thin character
+        name: 'badge', parts: [shape('bang')], color: { r: 226, g: 88, b: 62, a: 1 }, size: 46,
+        from: { nodeId: 'body', x: 42, y: -52 }, to: { nodeId: 'body', x: 54, y: -78 },
+        rateMs: 800, lifeMs: 1300, count: 2, fadeStart: 0.68,
+        scaleFrom: 0.15, scaleTo: 1.35, wobble: 2, startMs: 260,
+        easing: { type: 'preset', name: 'elastic' }, speedJitter: 0,
       })],
     },
 
@@ -193,7 +226,7 @@ export function builtinPresets(): Preset[] {
         track('body', 'flatOffset.y', [kf(900, 0), kf(2000, -5, 'easeInOut'), kf(2650, 0, 'easeOut'), kf(3450, -5, 'easeInOut'), kf(4100, 0, 'easeOut')]),
       ],
       emitters: [emit({
-        name: 'zzz', glyphs: ['z', 'z', 'Z'],
+        name: 'zzz', parts: [shape('zed', { sizeScale: 0.7, speed: 1.1 }), shape('zed', { sizeScale: 0.9 }), shape('zed', { sizeScale: 1.2, speed: 0.85 })],
         from: { nodeId: 'body', x: 46, y: -34 }, to: { nodeId: 'body', x: 118, y: -150 },
         bow: 22, rateMs: 700, lifeMs: 2100, count: 3, fadeStart: 0.42,
         scaleFrom: 0.45, scaleTo: 1.35, spin: -12, wobble: 5, startMs: 900, endMs: 4100,
@@ -263,13 +296,13 @@ export function builtinPresets(): Preset[] {
       // anchors: the drops leave the eyes wherever the head has moved them to
       emitters: [
         emit({
-          name: 'tear L', glyphs: ['\u25cf'], color: TEAR_BLUE, size: 13, path: 'fall',
+          name: 'tear L', parts: [shape('drop'), shape('drop-small', { sizeScale: 0.7, speed: 1.15 })], color: TEAR_BLUE, size: 17, path: 'fall',
           from: { nodeId: 'eyeL', x: -4, y: 12 }, to: { nodeId: 'eyeL', x: -22, y: 150 },
           bow: 8, rateMs: 380, lifeMs: 1200, count: 4, fadeStart: 0.65,
           scaleFrom: 0.7, scaleTo: 1.1, wobble: 2, startMs: 700, endMs: 2500, seed: 2,
         }),
         emit({
-          name: 'tear R', glyphs: ['\u25cf'], color: TEAR_BLUE, size: 13, path: 'fall',
+          name: 'tear R', parts: [shape('drop'), shape('drop-small', { sizeScale: 0.75, speed: 0.9 })], color: TEAR_BLUE, size: 17, path: 'fall',
           from: { nodeId: 'eyeR', x: 4, y: 12 }, to: { nodeId: 'eyeR', x: 22, y: 150 },
           bow: -8, rateMs: 380, lifeMs: 1200, count: 4, fadeStart: 0.65,
           scaleFrom: 0.7, scaleTo: 1.1, wobble: 2, startMs: 900, endMs: 2500, seed: 9,
@@ -287,7 +320,7 @@ export function builtinPresets(): Preset[] {
         ...bothEyes('transform.scale.x', [kf(0, 1), kf(400, 1.28, 'easeInOut'), kf(2800, 1.28), kf(3200, 1)]),
       ],
       emitters: [emit({
-        name: 'notes', glyphs: ['\u266a', '\u266b', '\u2669', '\u266c'],
+        name: 'notes', parts: [shape('quaver'), shape('beamed', { sizeScale: 1.15, speed: 0.9 }), shape('quaver', { sizeScale: 0.8, speed: 1.2 })],
         color: { r: 58, g: 60, b: 90, a: 1 }, size: 30,
         from: { nodeId: 'body', x: -44, y: -26 }, to: { nodeId: 'body', x: -140, y: -134 },
         bow: -26, rateMs: 520, lifeMs: 1900, count: 4, fadeStart: 0.5,
@@ -308,7 +341,7 @@ export function builtinPresets(): Preset[] {
         track('eyeR', 'transform.length', [kf(0, 1.55), kf(400, 1.1, 'easeOut'), kf(2000, 1.1), kf(2400, 1.55)]),
       ],
       emitters: [emit({
-        name: 'question', glyphs: ['?'], color: { r: 70, g: 70, b: 96, a: 1 }, size: 34,
+        name: 'question', parts: [shape('query')], color: { r: 70, g: 70, b: 96, a: 1 }, size: 40,
         from: { nodeId: 'body', x: 52, y: -40 }, to: { nodeId: 'body', x: 96, y: -128 },
         bow: 16, rateMs: 900, lifeMs: 1500, count: 2, fadeStart: 0.55,
         scaleFrom: 0.35, scaleTo: 1.2, spin: 14, wobble: 4, startMs: 500, endMs: 2000,
@@ -347,7 +380,7 @@ export function builtinPresets(): Preset[] {
         ...bothEyes('transform.scale.x', [kf(0, 1), kf(500, 1.2, 'easeOut'), kf(3500, 1.2), kf(4000, 1)]),
       ],
       emitters: [emit({
-        name: 'orbit', glyphs: ['\u2726', '\u25cf', '\u25b2', '\u2726'],
+        name: 'orbit', parts: [shape('spark'), shape('star', { sizeScale: 0.85 }), shape('heart', { sizeScale: 0.9 }), shape('spark', { sizeScale: 1.1 })],
         color: { r: 84, g: 82, b: 112, a: 1 }, size: 20, path: 'orbit',
         from: { nodeId: 'body', x: 0, y: -128 }, to: { x: 0, y: 0 },
         radiusX: 104, radiusY: 34,
@@ -395,14 +428,7 @@ export function builtinPresets(): Preset[] {
         track('body', 'transform.scale.x', [kf(0, 1), kf(180, 1.11, 'easeInOut'), kf(460, 0.91, 'easeOut'), kf(760, 1.09, 'easeIn'), kf(920, 0.98), kf(1140, 1), kf(2400, 1)]),
         track('body', 'transform.rotation', [kf(0, 0), kf(460, -6, 'easeOut'), kf(920, 5), kf(1400, 0, 'elastic'), kf(2400, 0)]),
       ],
-      emitters: [emit({
-        name: 'confetti', glyphs: ['\u25a0', '\u25cf', '\u25b2', '\u2726', '\u25a0', '\u25cf'],
-        color: { r: 232, g: 106, b: 84, a: 1 }, size: 15, path: 'fall',
-        from: { nodeId: 'body', x: 0, y: -150 }, to: { nodeId: 'body', x: 0, y: 190 },
-        bow: 150, rateMs: 90, lifeMs: 1500, count: 16, fadeStart: 0.7,
-        scaleFrom: 1, scaleTo: 0.85, spin: 300, wobble: 14, wobbleFrequency: 2.2,
-        startMs: 380, endMs: 1900, seed: 21,
-      })],
+      emitters: [emit({ ...confetti('body'), startMs: 380, endMs: 1900 })],
     },
   ];
 }

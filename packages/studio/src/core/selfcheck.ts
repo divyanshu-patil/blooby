@@ -7,7 +7,8 @@ import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScree
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, composeScene, emitterFrame, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, sceneAt, scopeSpan, scopeTime, valueAt } from './scene';
-import { builtinPresets, defaultProject, makeTimeline, presetPreviewProject } from './defaults';
+import { builtinPresets, confetti, defaultProject, makeTimeline, presetPreviewProject } from './defaults';
+import { CONFETTI_COLORS, shapeById, shapeResolver, SHAPE_LIBRARY } from './emitters';
 import { flattenPath, morphPath, naturalShape, primitivePath, PRIMITIVE_SHAPES } from './path';
 import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
@@ -1769,7 +1770,7 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
   // emitters must reach the exporter, not just the stage
   ed().updateEmitter(eid, (e) => { e.path = 'arc'; });
-  const composed = composeScene(activeTimeline(P()), evaluateRig(P(), 900), 900, VIEW);
+  const composed = composeScene(P(), evaluateRig(P(), 900), 900, VIEW);
   ok('composeScene carries them alongside the rig',
     composed.some((i) => i.text === 'z') && composed.some((i) => i.id === 'body'));
   ok('and draws them in front of the mascot',
@@ -2166,8 +2167,10 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('a preset preview carries its emitters', (activeTimeline(prevSleepy).emitters ?? []).length === 1);
   ok('and unscopes them, since the preview IS the clip',
     (activeTimeline(prevSleepy).emitters ?? []).every((e) => e.blockId === undefined));
-  ok('the zzz actually render in the preview', sceneAt(prevSleepy, 1800, VIEW).some((i) => i.text === 'z'),
-    String(sceneAt(prevSleepy, 1800, VIEW).length));
+  // drawn shapes, not typed characters: a "z" was whatever the system font decided
+  ok('the zzz actually render in the preview',
+    sceneAt(prevSleepy, 1800, VIEW).some((i) => !!i.svg && i.id.startsWith('pe')),
+    String(sceneAt(prevSleepy, 1800, VIEW).filter((i) => i.svg).length));
 
   const prevAngry = presetPreviewProject(useEditor.getState().project, angryP);
   ok('a preset preview carries its modifiers', activeTimeline(prevAngry).modifiers.length === 1);
@@ -2259,6 +2262,115 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('the body opens on a circle and an eye on a pill',
     naturalShape('body') === 'circle' && naturalShape('eye') === 'pill');
   ok('custom is reachable but never offered', !PRIMITIVE_SHAPES.includes('custom' as never));
+}
+
+// --- a feature can be keyframed out of the scene ---------------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+  const eye = (t: number) => buildScene(evaluateRig(P(), t), VIEW).find((i) => i.id === 'eyeL');
+
+  ed().addTimeline('Leave');
+  ed().setPlayhead(0);
+  ed().toggleKeyframe('eyeL', 'visible');
+  ed().setPlayhead(600);
+  ed().setValue('eyeL', 'visible', 0, 'gone');
+
+  const full = eye(0)!;
+  ok('a layer starts fully present', Math.abs((full.color.a ?? 1) - 1) < 1e-6 && full.w > 0);
+
+  const half = eye(300)!;
+  ok('halfway out it is faded', half.color.a < 0.9 && half.color.a > 0.1, String(half.color.a.toFixed(2)));
+  ok('AND smaller, which is what stops it blinking off', half.w < full.w * 0.9,
+    `${half.w.toFixed(1)} vs ${full.w.toFixed(1)}`);
+
+  ok('at zero it is not drawn at all', !eye(600));
+  ok('and the rest of the rig is untouched',
+    !!buildScene(evaluateRig(P(), 600), VIEW).find((i) => i.id === 'eyeR'));
+
+  // the copilot can drive it, since it is a plain 0-1 number
+  ok('the copilot can retire a feature',
+    validate(P(), { name: 'add_keyframe', args: { nodeId: 'eyeL', property: 'visible', atMs: 100, value: 0 } }) === null);
+
+  ed().loadProject(defaultProject());
+}
+
+// --- emitters throw drawn shapes, at varied speeds, on an eased path -------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+  const items = (t: number) => {
+    const rig = evaluateRig(P(), t);
+    return emitterItems(activeTimeline(P()), rig, buildScene(rig, VIEW), t, VIEW, shapeResolver(P().svgAssets));
+  };
+
+  // every built-in shape must be real, findable artwork
+  ok('the library is populated', SHAPE_LIBRARY.length >= 12);
+  ok('every entry has a viewBox and markup',
+    SHAPE_LIBRARY.every((e) => /\d/.test(e.viewBox) && e.markup.includes('<')));
+  ok('and every one is reachable by id', SHAPE_LIBRARY.every((e) => shapeById(e.id) === e));
+  ok('tintable artwork paints with currentColor',
+    SHAPE_LIBRARY.filter((e) => e.tint).every((e) => e.markup.includes('currentColor')));
+
+  // every part referenced by a built-in preset must resolve, or it renders as nothing
+  const missing: string[] = [];
+  for (const preset of builtinPresets()) {
+    for (const e of preset.emitters ?? []) {
+      for (const pt of e.parts ?? []) {
+        if (pt.shapeId && !shapeById(pt.shapeId)) missing.push(`${preset.name}/${pt.shapeId}`);
+      }
+    }
+  }
+  ok('every built-in preset points at artwork that exists', missing.length === 0, missing.join(', '));
+
+  ed().addEmitter({
+    name: 'probe', glyphs: [], color: { r: 10, g: 10, b: 10, a: 1 }, size: 20,
+    parts: [
+      { id: 'a', shapeId: 'drop', weight: 1, speed: 1, sizeScale: 1, spin: 0 },
+      { id: 'b', shapeId: 'streamer', color: { r: 200, g: 30, b: 30, a: 1 }, weight: 1, speed: 1, sizeScale: 2, spin: 0 },
+    ],
+    path: 'fall', from: { nodeId: 'body', x: 0, y: -80 }, to: { nodeId: 'body', x: 0, y: 120 }, bow: 0,
+    rateMs: 200, lifeMs: 1200, count: 6, fadeStart: 0.9,
+    scaleFrom: 1, scaleTo: 1, spin: 0, wobble: 0, wobbleFrequency: 1, seed: 4,
+  });
+
+  const shown = items(700);
+  ok('parts render as artwork, not characters', shown.length > 0 && shown.every((i) => !!i.svg && i.text === undefined));
+  ok('and cycle through the parts', new Set(shown.map((i) => i.svg!.viewBox)).size === 2,
+    [...new Set(shown.map((i) => i.svg!.viewBox))].join(' | '));
+  ok('a part can carry its own colour', shown.some((i) => i.color.r > 150) && shown.some((i) => i.color.r < 50));
+  ok('and its own size', new Set(shown.map((i) => Math.round(i.w))).size > 1);
+
+  // speed variation is deterministic: scrubbing back must give the same picture
+  const eid = activeTimeline(P()).emitters!.at(-1)!.id;
+  ed().updateEmitter(eid, (x) => { x.speedJitter = 0.6; });
+  const a1 = JSON.stringify(items(900).map((i) => Math.round(i.cy)));
+  items(1500);
+  ok('varied speeds stay deterministic', JSON.stringify(items(900).map((i) => Math.round(i.cy))) === a1);
+  ed().updateEmitter(eid, (x) => { x.speedJitter = 0; });
+  const even = items(900).map((i) => Math.round(i.cy));
+  ed().updateEmitter(eid, (x) => { x.speedJitter = 0.6; });
+  const varied = items(900).map((i) => Math.round(i.cy));
+  ok('and they genuinely vary the stream', JSON.stringify(even) !== JSON.stringify(varied));
+
+  // easing shapes the journey rather than the spawn rate
+  ed().updateEmitter(eid, (x) => { x.speedJitter = 0; x.easing = { type: 'linear' }; });
+  const lin = items(600)[0].cy;
+  ed().updateEmitter(eid, (x) => { x.easing = { type: 'preset', name: 'easeIn' }; });
+  ok('easing changes where a particle is at a given moment', Math.abs(items(600)[0].cy - lin) > 1);
+
+  // confetti is the shared builder, in paper colours
+  const cf = confetti('body');
+  ok('confetti is many parts in many colours',
+    (cf.parts ?? []).length >= 10 && new Set((cf.parts ?? []).map((p) => JSON.stringify(p.color))).size === CONFETTI_COLORS.length);
+  ok('and paper shapes rather than squares',
+    (cf.parts ?? []).every((p) => ['streamer', 'curl', 'chip'].includes(p.shapeId ?? '')));
+
+  ed().loadProject(defaultProject());
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------
