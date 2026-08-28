@@ -129,6 +129,9 @@ The system prompt is generated per turn from the live project, in `copilot/promp
 - **custom presets in full**, because `edit_preset` replaces tracks wholesale and the
   model has to carry over what it is not changing. Built-in preset contents are omitted —
   not worth the tokens.
+- the **craft block** (`copilot/craft.ts`) — timings, easing, anticipation, overshoot,
+  squash ratios and per-emotion recipes, in this rig's own property paths. Where each
+  number comes from is argued in [ANIMATION.md](./ANIMATION.md); change both together.
 
 The keyframe dump is budgeted (`timelineDump`, 4000 chars) and says how many tracks it
 dropped. Chat history is capped at the last 12 turns for the same reason: an unbounded

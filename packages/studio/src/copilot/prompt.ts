@@ -1,5 +1,6 @@
 import { blockStarts, fmtSec } from '../core/timeline';
 import { TOOL_DOCS } from './tools';
+import { ANIMATION_CRAFT } from './craft';
 import { activeTimeline } from '../core/types';
 import { NUMERIC_PROPS, PROPS } from '../core/props';
 import type { Project } from '../core/types';
@@ -98,6 +99,8 @@ Answer with one JSON object and nothing else — no prose, no markdown fence:
 
 Tools:
 ${TOOL_DOCS}
+
+${ANIMATION_CRAFT}
 
 Rules:
 - Refer to layers by the ids above (body, eyeL, eyeR), not by their display names.
