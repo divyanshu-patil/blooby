@@ -194,6 +194,7 @@ export function ClipInspector() {
   const setBlockLoop = useEditor((s) => s.setBlockLoop);
   const removeBlock = useEditor((s) => s.removeBlock);
   const duplicateBlock = useEditor((s) => s.duplicateBlock);
+  const updatePresetFromBlock = useEditor((s) => s.updatePresetFromBlock);
   const selectBlock = useEditor((s) => s.selectBlock);
   const setClipGalleryTimeline = useEditor((s) => s.setClipGalleryTimeline);
 
@@ -204,6 +205,7 @@ export function ClipInspector() {
   // for a gallery-sourced clip, the timeline picker's options come from the gallery entry
   // itself — fetched once per clip selection, not carried in the (lightweight) block data.
   const [galleryEntry, setGalleryEntry] = useState<GalleryEntry | null>(null);
+  const [savedPreset, setSavedPreset] = useState(false);
   useEffect(() => {
     setGalleryEntry(null);
     if (block?.gallerySource) getEntry(block.gallerySource.galleryId).then((e) => setGalleryEntry(e ?? null));
@@ -285,6 +287,12 @@ export function ClipInspector() {
       <div className="row">
         <button className="btn sm" onClick={() => selectBlock(null)}>Done editing this clip</button>
         <span className="spacer" />
+        {preset && (
+          <button className="btn ghost sm" title={`Overwrite the "${preset.name}" preset with this clip's keyframes and length`}
+            onClick={() => { updatePresetFromBlock(block.id); setSavedPreset(true); setTimeout(() => setSavedPreset(false), 1500); }}>
+            {savedPreset ? 'Saved' : 'Save to preset'}
+          </button>
+        )}
         <button className="btn ghost sm" title="Insert a copy right after this clip — its own instance, edits here don't affect it"
           onClick={() => duplicateBlock(block.id)}>Duplicate</button>
         <button className="btn ghost sm" onClick={() => removeBlock(block.id)}>Remove clip</button>

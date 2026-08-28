@@ -104,12 +104,40 @@ follow. `pnpm check` asserts every kind in `MODIFIERS` is accepted by `validate`
 
 4. Add a selfcheck case that applies it and asserts the document actually changed.
 
+If the tool edits something that already exists, it must be reachable from the prompt.
+A tool taking a keyframe time is useless unless `timelineDump` prints that time, and the
+selfcheck asserts exactly that: every time it prints is a time the tools accept.
+
 ### Prefer editing a store action over duplicating it
 
 `applyCalls` runs inside one `commit()`, so it mutates the draft directly and cannot call
 store actions. Reuse the pure helpers those actions use — `relayoutBlocks`,
 `makeTimeline`, `uniqueName`, `writeKeyframe` — rather than reimplementing the logic. A
 strip edit that skips `relayoutBlocks` desynchronises every clip-owned keyframe, silently.
+
+## What the model can see
+
+The system prompt is generated per turn from the live project, in `copilot/prompt.ts`:
+
+- the layers, expressions and presets by name
+- the **property reference**, generated from `PROPS` (see above)
+- the **clip strip** — every block with its index and absolute span
+- **every keyframe on the active timeline**, as `layer.property [clip]: <ms>=<value>`, at
+  absolute times. These are exactly the coordinates `remove_keyframe`, `move_keyframe`
+  and `add_keyframe` take. Without them the copilot could only ever append: it knew the
+  timeline's length and nothing about what was in it.
+- **custom presets in full**, because `edit_preset` replaces tracks wholesale and the
+  model has to carry over what it is not changing. Built-in preset contents are omitted —
+  not worth the tokens.
+
+The keyframe dump is budgeted (`timelineDump`, 4000 chars) and says how many tracks it
+dropped. Chat history is capped at the last 12 turns for the same reason: an unbounded
+thread on top of a full timeline is how a reply gets cut off mid-JSON.
+
+Each of the copilot's own past turns is replayed with **what became of its calls** —
+applied, proposed-not-applied, or rejected — not just its prose. Rejecting keeps the
+calls and sets `rejected`, rather than clearing them, so the model can be told not to
+propose the same thing again.
 
 ## Rules the copilot code itself follows
 

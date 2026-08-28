@@ -134,6 +134,8 @@ export interface Editor {
   morphBetween: (fromId: string, toId: string, atMs: number, durationMs: number, easing: EasingCurve) => void;
   savePreset: (name: string, trackIds: string[], durationMs: number) => void;
   renamePreset: (id: string, name: string) => void;
+  /** Overwrite the preset a clip came from with that clip's current keyframes. */
+  updatePresetFromBlock: (blockId: string) => void;
   setPresetColor: (id: string, color: string | undefined) => void;
 
   /** `galleryId` ties this load to an existing gallery entry — omit it for a project
@@ -769,6 +771,29 @@ export const useEditor = create<Editor>((set, get) => ({
         tracks: picked.map((t) => ({ id: uid('t'), nodeId: t.nodeId, property: t.property, keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })) })),
       };
       p.presets.push(preset);
+    });
+  },
+
+  /**
+   * Editing a preset, the only way that makes sense in a keyframe editor: place it as a
+   * clip, tweak it on the strip where you can see it, then save the clip back over it.
+   *
+   * Clips already on the strip keep the copy they were added with — a preset is a
+   * template, not a live link — so this changes what future placements look like.
+   */
+  updatePresetFromBlock(blockId) {
+    get().commit((p) => {
+      const tl = at(p);
+      const i = tl.blocks.findIndex((b) => b.id === blockId);
+      const block = tl.blocks[i];
+      const preset = block?.presetId ? p.presets.find((x) => x.id === block.presetId) : undefined;
+      if (!preset) return;
+      const start = blockStarts(tl)[i];
+      preset.durationMs = block.durationMs;
+      preset.tracks = tl.tracks.filter((t) => t.blockId === blockId).map((t) => ({
+        id: uid('t'), nodeId: t.nodeId, property: t.property,
+        keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })),
+      }));
     });
   },
 

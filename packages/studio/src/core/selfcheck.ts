@@ -16,6 +16,7 @@ import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readProp, resolveProp, writeProp } fr
 import { MODIFIER_KINDS, MODIFIERS } from './types';
 import { applyCalls, describe, normaliseCall, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
+import { systemPrompt } from '../copilot/prompt';
 import { baseUrl, CLOUD_CATALOGUE, LOCAL_URL, needsKey, resolveModel, usesBackend } from '../copilot/pool';
 import { listModels } from '../copilot/client';
 import { crc32 } from '../export/zip';
@@ -1359,6 +1360,96 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   // a batch must still reject a preset nobody ever creates
   ok('a preset that is never created is still rejected',
     validateBatch(P(), [{ name: 'add_preset_to_timeline', args: { preset: 'nope' } }])[0] !== null);
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- copilot: editing what is already on the timeline ---------------------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const PT = () => activeTimeline(P());
+  const openness = () => PT().tracks.find((t) => t.nodeId === 'eyeL' && t.property === 'eye.openness' && t.blockId === PT().blocks[1].id)!;
+
+  // The prompt must name the exact coordinates the editing tools take, or the copilot can
+  // only ever append. Blink is the second clip, so its keys are absolute, not clip-local.
+  const prompt = systemPrompt(P());
+  const blinkStart = blockStarts(PT())[1];
+  ok('the prompt lists the clips and their spans', prompt.includes(`"Blink" ${Math.round(blinkStart)}-`), 'no clip span');
+  ok('the prompt lists real keyframes at absolute times',
+    prompt.includes(`eyeL.eye.openness [Blink@${Math.round(blinkStart)}]: ${Math.round(blinkStart)}=1`), 'no keyframe line');
+  ok('and the times it prints are the times the tools accept',
+    openness().keyframes.every((k) => prompt.includes(`${Math.round(k.time)}=`)));
+
+  const shut = openness().keyframes[1];
+  ok('a keyframe the prompt lists validates for editing',
+    validate(P(), { name: 'move_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', fromMs: shut.time, toMs: shut.time + 60 } }) === null);
+  ok('a time nothing sits on is refused, and says where to look',
+    /Keyframes/.test(validate(P(), { name: 'remove_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', atMs: shut.time + 7000 } }) ?? ''));
+
+  applyCalls([{ name: 'move_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', fromMs: shut.time, toMs: shut.time + 60 } }]);
+  ok('move_keyframe retimes it and keeps the track sorted',
+    openness().keyframes.some((k) => Math.round(k.time) === Math.round(shut.time + 60))
+    && openness().keyframes.every((k, i, arr) => i === 0 || arr[i - 1].time <= k.time));
+
+  // a short name and a rounded time still land, the way a model writes them
+  applyCalls([normaliseCall(P(), { name: 'add_keyframe', args: { nodeId: 'Left eye', property: 'openness', atMs: shut.time + 60, value: 0.5 } })]);
+  ok('add_keyframe at a listed time overwrites rather than adding a second key',
+    openness().keyframes.filter((k) => Math.abs(k.time - (shut.time + 60)) < 8).length === 1
+    && (valueAt(P(), 'eyeL', 'eye.openness', shut.time + 60) as number) === 0.5);
+
+  const before = openness().keyframes.length;
+  applyCalls([{ name: 'remove_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', atMs: shut.time + 60 } }]);
+  ok('remove_keyframe deletes exactly one', openness().keyframes.length === before - 1);
+
+  // emptying a track must not leave a lane on the strip with nothing in it
+  const tiny = PT().tracks.find((t) => t.blockId === PT().blocks[1].id)!;
+  const id = tiny.id;
+  for (const k of [...tiny.keyframes]) {
+    applyCalls([{ name: 'remove_keyframe', args: { nodeId: tiny.nodeId, property: tiny.property, atMs: k.time } }]);
+  }
+  ok('an emptied track is dropped, not left as a blank lane', !PT().tracks.some((t) => t.id === id));
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- editing a preset, from the copilot and from a clip -------------------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const blink = () => P().presets.find((x) => x.name === 'Blink')!;
+
+  ok('edit_preset needs something to change',
+    validate(P(), { name: 'edit_preset', args: { preset: 'Blink' } }) !== null);
+  ok('and a preset that exists', validate(P(), { name: 'edit_preset', args: { preset: 'nope', durationMs: 500 } }) !== null);
+  ok('a bad layer in replacement tracks is caught, not silently built',
+    validate(P(), { name: 'edit_preset', args: { preset: 'Blink', tracks: [{ nodeId: 'nose', property: 'eye.openness', keyframes: [{ time: 0, value: 1 }] }] } }) !== null);
+
+  const wasDuration = blink().durationMs;
+  applyCalls([normaliseCall(P(), { name: 'edit_preset', args: { preset: 'Blink', durationMs: 400, tracks: [
+    { nodeId: 'Left eye', property: 'openness', keyframes: [{ time: 0, value: 1 }, { time: 200, value: 0 }, { time: 400, value: 1 }] },
+  ] } })]);
+  ok('edit_preset rewrites duration and tracks, with names resolved',
+    blink().durationMs === 400 && wasDuration !== 400
+    && blink().tracks.length === 1 && blink().tracks[0].nodeId === 'eyeL' && blink().tracks[0].property === 'eye.openness');
+
+  // the UI route: place a clip, change it on the strip, save it back over the preset
+  useEditor.getState().loadProject(defaultProject());
+  const ed = () => useEditor.getState();
+  const clip = activeTimeline(P()).blocks[1];
+  const start = blockStarts(activeTimeline(P()))[1];
+  ed().commit((p) => {
+    const tl = activeTimeline(p);
+    const t = tl.tracks.find((x) => x.blockId === clip.id)!;
+    t.keyframes[1].value = 0.9;
+  });
+  ed().updatePresetFromBlock(clip.id);
+  const saved = P().presets.find((x) => x.id === clip.presetId)!;
+  ok('save-to-preset picks up the edit', saved.tracks.some((t) => t.keyframes.some((k) => k.value === 0.9)));
+  ok('and rebases its times to the clip start, so it can be placed anywhere',
+    start > 0 && saved.tracks.every((t) => t.keyframes[0].time === 0));
+  ok('while the clip already on the strip keeps its own copy',
+    activeTimeline(P()).tracks.filter((t) => t.blockId === clip.id).length > 0);
 
   useEditor.getState().loadProject(defaultProject());
 }

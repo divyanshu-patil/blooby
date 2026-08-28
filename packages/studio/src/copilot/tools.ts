@@ -2,6 +2,7 @@ import { uniqueName, useEditor, writeKeyframe } from '../core/store';
 import { makeTimeline, uid } from '../core/defaults';
 import { namedEasing, EASING_NAMES } from '../core/easing';
 import { blocksEnd, relayoutBlocks } from '../core/timeline';
+import { activeTrackFor } from '../core/scene';
 import { setProp } from '../core/props';
 import { activeTimeline, MODIFIER_KINDS, MODIFIERS } from '../core/types';
 import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
@@ -14,7 +15,7 @@ export const TOOL_NAMES = [
   'set_eye_params', 'set_property', 'add_keyframe', 'create_expression', 'apply_expression',
   'create_preset', 'add_preset_to_timeline', 'add_modifier', 'morph_between',
   'set_timeline', 'clear_animation', 'set_block_duration', 'remove_block', 'move_block',
-  'add_timeline', 'set_camera',
+  'add_timeline', 'set_camera', 'remove_keyframe', 'move_keyframe', 'edit_preset',
 ] as const;
 
 /** The JSON the model must produce. Ollama enforces this shape server-side via `format`. */
@@ -56,7 +57,13 @@ set_block_duration    { block, durationMs }                    // block = id, na
 remove_block          { block }
 move_block            { block, index }
 add_timeline          { name }                                 // a new timeline = a new exported Lottie state
-set_camera            { property: "perspective"|"distance", value }  // perspective is the field-of-view angle`.trim();
+set_camera            { property: "perspective"|"distance", value }  // perspective is the field-of-view angle
+
+remove_keyframe       { nodeId, property, atMs }               // atMs must match a keyframe listed under "Keyframes"
+move_keyframe         { nodeId, property, fromMs, toMs }       // retime one keyframe; fromMs must match an existing one
+edit_preset           { preset, name?, durationMs?, tracks? }  // tracks REPLACE the preset's tracks; clips already on
+                      // the strip keep the copy they were added with, so re-add to see the change
+To change a keyframe's VALUE or easing, call add_keyframe at the same atMs \u2014 it overwrites in place.`.trim();
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A property the copilot may write: on a node, and a number. */
@@ -91,6 +98,22 @@ function findBlock(p: Project, ref: unknown) {
   const byName = tl.blocks.find((b) => b.name.toLowerCase() === lower);
   if (byName) return byName;
   return /^\d+$/.test(s) ? tl.blocks[Number(s)] : undefined;
+}
+
+/**
+ * One keyframe, by the coordinates the prompt lists it under.
+ *
+ * Tracks are clip-scoped, so the track holding a given time is not simply
+ * "the one for this node and property" — activeTrackFor is what resolves that, and it is
+ * the same lookup writeKeyframe uses, so edits and writes cannot disagree about which
+ * clip's track they mean. The 8 ms window absorbs a model rounding a time it read back.
+ */
+function findKeyframe(p: Project, nodeId: unknown, property: unknown, atMs: unknown) {
+  const t = num(atMs);
+  if (t === undefined) return undefined;
+  const track = activeTrackFor(activeTimeline(p), String(nodeId), String(property), t);
+  const kf = track?.keyframes.find((k) => Math.abs(k.time - t) < 8);
+  return track && kf ? { track, kf } : undefined;
 }
 
 /** Layer id, or a layer name in any casing — models reach for the visible name. */
@@ -167,6 +190,18 @@ export function validateBatch(p: Project, calls: ToolCall[]): (string | null)[] 
   });
 }
 
+/** Shared by create_preset and edit_preset — an unknown layer here is silent otherwise:
+ *  the track is built, and nothing ever reads it. */
+function checkTracks(p: Project, tracks: unknown, label: string): string | null {
+  for (const t of tracks as Record<string, unknown>[]) {
+    if (!t || typeof t !== 'object') return `a track of "${label}" is not an object`;
+    if (!str(t.nodeId) || !p.rig.nodes[str(t.nodeId)!]) return `no layer "${String(t.nodeId)}" in a track of "${label}"`;
+    if (!numeric(t.property)) return badProp(t.property);
+    if (!Array.isArray(t.keyframes) || !t.keyframes.length) return `a track of "${label}" has no keyframes`;
+  }
+  return null;
+}
+
 /** Rejects anything that would corrupt the document. Returns null when the call is fine. */
 export function validate(p: Project, call: ToolCall): string | null {
   const a = call.args ?? {};
@@ -194,16 +229,29 @@ export function validate(p: Project, call: ToolCall): string | null {
     }
     case 'apply_expression':
       return findExpression(p, a.expression) ? (num(a.atMs) === undefined ? 'atMs must be a number' : null) : `no expression "${String(a.expression)}"`;
-    case 'create_preset': {
+    case 'create_preset':
       if (!str(a.name) || !Array.isArray(a.tracks) || !a.tracks.length) return 'needs a name and at least one track';
-      // an unknown layer here is silent: the track is built, nothing ever reads it
-      for (const t of a.tracks as Record<string, unknown>[]) {
-        const bad = node(t?.nodeId);
-        if (bad) return `${bad} in a track of "${String(a.name)}"`;
-        if (!numeric(t?.property)) return badProp(t?.property);
-        if (!Array.isArray(t?.keyframes) || !t.keyframes.length) return `a track of "${String(a.name)}" has no keyframes`;
+      return checkTracks(p, a.tracks, String(a.name));
+    case 'edit_preset': {
+      if (!findPreset(p, a.preset)) return `no preset "${String(a.preset)}"`;
+      if (a.name === undefined && a.durationMs === undefined && a.tracks === undefined) {
+        return 'edit_preset needs at least one of name, durationMs, tracks';
       }
-      return null;
+      if (a.tracks === undefined) return null;
+      if (!Array.isArray(a.tracks) || !a.tracks.length) return 'tracks must be a non-empty array';
+      return checkTracks(p, a.tracks, String(a.preset));
+    }
+    case 'remove_keyframe':
+    case 'move_keyframe': {
+      const bad = node(a.nodeId);
+      if (bad) return bad;
+      if (!numeric(a.property)) return badProp(a.property);
+      const at = call.name === 'move_keyframe' ? a.fromMs : a.atMs;
+      if (num(at) === undefined) return `${call.name === 'move_keyframe' ? 'fromMs' : 'atMs'} must be a number`;
+      if (call.name === 'move_keyframe' && num(a.toMs) === undefined) return 'toMs must be a number';
+      return findKeyframe(p, a.nodeId, a.property, at)
+        ? null
+        : `no keyframe on ${String(a.nodeId)} ${String(a.property)} at ${String(at)}ms \u2014 use the times listed under "Keyframes"`;
     }
     case 'add_preset_to_timeline':
       return findPreset(p, a.preset) ? null : `no preset "${String(a.preset)}"`;
@@ -273,6 +321,16 @@ export function describe(p: Project, call: ToolCall): string {
     case 'move_block': return `Move clip "${findBlock(p, a.block)?.name}" to slot ${a.index}`;
     case 'add_timeline': return `Add timeline "${a.name}" (a new exported state)`;
     case 'set_camera': return `Set camera ${a.property} to ${a.value}`;
+    case 'remove_keyframe': return `Delete the ${name(a.nodeId)} ${a.property} key at ${at(a.atMs)}`;
+    case 'move_keyframe': return `Move the ${name(a.nodeId)} ${a.property} key from ${at(a.fromMs)} to ${at(a.toMs)}`;
+    case 'edit_preset': {
+      const bits = [
+        str(a.name) ? `rename to "${a.name}"` : null,
+        a.durationMs !== undefined ? `${at(a.durationMs)} long` : null,
+        Array.isArray(a.tracks) ? `replace its tracks with ${a.tracks.length}` : null,
+      ].filter(Boolean);
+      return `Edit preset "${findPreset(p, a.preset)?.name}": ${bits.join(', ')} (clips already on the strip keep their copy)`;
+    }
     case 'morph_between': return `Morph ${findExpression(p, a.from)?.name} → ${findExpression(p, a.to)?.name} at ${at(a.atMs)} over ${a.durationMs}ms`;
     default: return call.name;
   }
@@ -323,14 +381,37 @@ export function applyCalls(calls: ToolCall[]) {
           }
           break;
         }
-        case 'create_preset': {
-          const tracks = (a.tracks as Record<string, unknown>[]).map((t) => ({
-            id: uid('t'), nodeId: String(t.nodeId), property: String(t.property),
-            keyframes: ((t.keyframes ?? []) as Record<string, unknown>[])
-              .map((k) => ({ id: uid('k'), time: num(k.time) ?? 0, value: num(k.value) ?? 0, easingOut: easingOf(k.easing) }))
-              .sort((x, y) => x.time - y.time),
-          })).filter((t) => t.keyframes.length);
-          p.presets.push({ id: uid('p'), name: String(a.name), source: 'custom', durationMs: Math.max(120, num(a.durationMs) ?? 1000), tracks });
+        case 'create_preset':
+          p.presets.push({
+            id: uid('p'), name: String(a.name), source: 'custom',
+            durationMs: Math.max(120, num(a.durationMs) ?? 1000), tracks: presetTracks(a.tracks),
+          });
+          break;
+        case 'edit_preset': {
+          const x = findPreset(p, a.preset)!;
+          const rename = str(a.name);
+          if (rename) x.name = uniqueName(rename, p.presets.filter((y) => y.id !== x.id).map((y) => y.name));
+          const d = num(a.durationMs);
+          if (d !== undefined) x.durationMs = Math.max(120, d);
+          // clips on the strip hold their own copy of the keyframes (add_preset_to_timeline
+          // copies them), so this changes the template, not what is already placed
+          if (Array.isArray(a.tracks)) x.tracks = presetTracks(a.tracks);
+          break;
+        }
+        case 'remove_keyframe': {
+          const hit = findKeyframe(p, a.nodeId, a.property, a.atMs)!;
+          hit.track.keyframes = hit.track.keyframes.filter((k) => k.id !== hit.kf.id);
+          // an empty track is a lane on the strip with nothing in it
+          if (!hit.track.keyframes.length) {
+            const tl = activeTimeline(p);
+            tl.tracks = tl.tracks.filter((t) => t.id !== hit.track.id);
+          }
+          break;
+        }
+        case 'move_keyframe': {
+          const hit = findKeyframe(p, a.nodeId, a.property, a.fromMs)!;
+          hit.kf.time = Math.max(0, num(a.toMs)!);
+          hit.track.keyframes.sort((x, y) => x.time - y.time);
           break;
         }
         case 'add_preset_to_timeline': {
@@ -429,6 +510,16 @@ export function applyCalls(calls: ToolCall[]) {
     // no coalesce label: every Apply is its own undo step. A timestamp label merged two
     // batches applied inside the same millisecond into one.
   });
+}
+
+/** The one place a tool-supplied track list becomes real tracks. */
+function presetTracks(raw: unknown) {
+  return (raw as Record<string, unknown>[]).map((t) => ({
+    id: uid('t'), nodeId: String(t.nodeId), property: String(t.property),
+    keyframes: ((t.keyframes ?? []) as Record<string, unknown>[])
+      .map((k) => ({ id: uid('k'), time: num(k.time) ?? 0, value: num(k.value) ?? 0, easingOut: easingOf(k.easing) }))
+      .sort((x, y) => x.time - y.time),
+  })).filter((t) => t.keyframes.length);
 }
 
 /** A property with a track can't be set statically — the track would just mask it. */

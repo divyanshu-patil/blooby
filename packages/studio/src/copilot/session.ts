@@ -8,6 +8,8 @@ export interface Turn {
   text: string;
   calls?: ToolCall[];
   done?: boolean;
+  /** the user said no. Kept rather than cleared, so the model is told not to re-propose it. */
+  rejected?: boolean;
   /** what the model was reasoning about, when it says so — shown collapsed */
   thinking?: string;
 }

@@ -78,9 +78,11 @@ export function Copilot() {
     const history: ChatMessage[] = [
       // only the real exchange: an error or a "stopped" note is about the copilot, not
       // something the model said, and replaying it just teaches it to say that
+      // Capped, because the system prompt now carries the whole timeline — an unbounded
+      // thread on top of that is how a reply gets cut off mid-JSON.
       { role: 'system', content: systemPrompt(project) },
-      ...turns.filter((t) => t.role === 'user' || t.role === 'bot')
-        .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: t.text })),
+      ...turns.filter((t) => t.role === 'user' || t.role === 'bot').slice(-12)
+        .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: asHistory(t) })),
       { role: 'user', content: text },
     ];
 
@@ -271,7 +273,8 @@ export function Copilot() {
                     {copied === i ? 'Copied' : 'Copy'}
                   </button>
                 </div>
-                {!!t.calls?.length && (
+                {t.rejected && <p className="hint">Rejected — the copilot has been told not to propose it again.</p>}
+                {!!t.calls?.length && !t.rejected && (
                   <div className="proposal" style={{ marginTop: 6 }}>
                     <ul>
                       {t.calls.map((c, n) => <li key={n}>{describe(project, c)} <code>{c.name}</code></li>)}
@@ -280,7 +283,7 @@ export function Copilot() {
                       {t.done ? <span className="hint">Applied — ⌘Z undoes the whole batch.</span> : (
                         <>
                           <button className="btn sm primary" onClick={() => apply(i)}>Apply {t.calls.length}</button>
-                          <button className="btn sm" onClick={() => patchTurn(i, { calls: [] })}>Reject</button>
+                          <button className="btn sm" onClick={() => patchTurn(i, { rejected: true })}>Reject</button>
                         </>
                       )}
                     </div>
@@ -316,3 +319,19 @@ export function Copilot() {
 }
 
 class ValidationError extends Error {}
+
+/**
+ * What the model is shown for one of its own past turns.
+ *
+ * Its reply alone leaves out the part that matters: which changes it actually made. With
+ * only the prose it re-proposes what the user already rejected, and describes edits to a
+ * timeline it does not know it already made.
+ */
+function asHistory(t: Turn): string {
+  if (t.role !== 'bot' || !t.calls?.length) return t.text;
+  const status = t.rejected ? 'the user REJECTED these, do not propose them again'
+    : t.done ? 'applied to the timeline'
+    : 'proposed, the user has not applied them yet';
+  const json = JSON.stringify(t.calls);
+  return `${t.text}\n[${status}] ${json.length > 1200 ? t.calls.map((c) => c.name).join(', ') : json}`;
+}
