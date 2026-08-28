@@ -137,6 +137,7 @@ export function Timeline() {
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
   const starts = blockStarts(tl);
   const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
+  const [showBands, setShowBands] = useState(true);
 
   // where each effect actually runs, in absolute timeline time: its scope, narrowed by
   // its own range. One list for modifiers and emitters — they are scoped identically.
@@ -495,6 +496,17 @@ export function Timeline() {
                   </button>
                 )}
               </div>
+              {/* the effect bands sit above the lanes in the other column, so this side
+                  needs the same height or every label slips out of line with its lane */}
+              {effectSpans.length > 0 && (
+                <button className="fxbands-toggle" aria-expanded={showBands}
+                  style={{ height: showBands ? effectRows.length * 15 + 3 : 18 }}
+                  title={showBands ? 'Hide the effect spans' : 'Show the effect spans'}
+                  onClick={() => setShowBands((v) => !v)}>
+                  <span className="fold-caret" aria-hidden>›</span>
+                  {effectSpans.length} effect{effectSpans.length === 1 ? '' : 's'}
+                </button>
+              )}
               {visible.map((t) => {
                 const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                 return (
@@ -542,11 +554,16 @@ export function Timeline() {
                     the inspector moves a bar here, so "runs from 0.3s to 1.4s" is a thing
                     you can see against the clips rather than two numbers to picture. */}
                 {effectSpans.length > 0 && (
-                  <div className="fxbands" style={{ height: effectRows.length * 15 }}>
-                    {effectSpans.map((e, i) => (
+                  <div className="fxbands" style={{ height: showBands ? effectRows.length * 15 + 3 : 18 }}>
+                    {showBands && effectSpans.map((e, i) => (
                       <div key={e.id} className={`fxband${e.id === selectedEmitterId ? ' on' : ''}`}
                         title={`${e.label} — ${fmtSec(e.from)} to ${fmtSec(e.to)}`}
-                        style={{ left: e.from * pxPerMs, width: Math.max(2, (e.to - e.from) * pxPerMs), top: laneOf[i] * 15 }}>
+                        style={{
+                          left: e.from * pxPerMs, width: Math.max(2, (e.to - e.from) * pxPerMs), top: laneOf[i] * 15,
+                          // a colour per effect, from its own name, so two spans running at
+                          // once are told apart at a glance rather than by reading them
+                          '--fx': effectHue(e.id, e.label),
+                        } as React.CSSProperties}>
                         <span>{e.label}</span>
                       </div>
                     ))}
@@ -773,6 +790,21 @@ function Sparkline({ track, width, height, pxPerMs }: { track: Track; width: num
       {ks.map((k) => <circle key={k.id} cx={k.time * pxPerMs} cy={y(k.value as number)} r={2} fill="var(--signal)" />)}
     </svg>
   );
+}
+
+/**
+ * A stable hue per effect, so two spans running at once are distinguishable.
+ *
+ * Twelve slots 30° apart rather than any hue the hash lands on: an arbitrary hash gave two
+ * neighbouring effects colours a few degrees apart, which is no better than one colour.
+ * Keyed on the id, not the label — two Shakes on different layers are different effects
+ * and should not share a colour just because they share a name.
+ */
+const HUE_SLOTS = 12;
+function effectHue(id: string, label: string): string {
+  let h = 0;
+  for (const ch of id + label) h = (h * 31 + ch.charCodeAt(0)) % 4096;
+  return `${(h % HUE_SLOTS) * (360 / HUE_SLOTS)}`;
 }
 
 export function DurationField() {

@@ -1,4 +1,4 @@
-import type { EasingCurve, Emitter, EmitterPart, Expression, Keyframe, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
+import type { EasingCurve, Emitter, EmitterPart, Expression, Keyframe, Modifier, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
 import { derivedDuration } from './timeline';
 import { primitivePath } from './path';
 import { CONFETTI_COLORS } from './emitters';
@@ -228,8 +228,11 @@ export function builtinPresets(): Preset[] {
       emitters: [emit({
         name: 'zzz', parts: [shape('zed', { sizeScale: 0.7, speed: 1.1 }), shape('zed', { sizeScale: 0.9 }), shape('zed', { sizeScale: 1.2, speed: 0.85 })],
         from: { nodeId: 'body', x: 46, y: -34 }, to: { nodeId: 'body', x: 118, y: -150 },
-        bow: 22, rateMs: 700, lifeMs: 2100, count: 3, fadeStart: 0.42,
-        scaleFrom: 0.45, scaleTo: 1.35, spin: -12, wobble: 5, startMs: 900, endMs: 4100,
+        // stops spawning at 3200 with a 1400ms life, so the last zzz has faded out by the
+        // clip's own end at 4600 — an emitter whose tail outlives its clip gets cut off
+        // mid-flight, which is the one thing the fade exists to avoid
+        bow: 22, rateMs: 620, lifeMs: 1400, count: 3, fadeStart: 0.42,
+        scaleFrom: 0.45, scaleTo: 1.35, spin: -12, wobble: 5, startMs: 900, endMs: 3200,
       })],
     },
     {
@@ -483,6 +486,25 @@ export function presetPreviewProject(project: Project, preset: Preset): Project 
     }],
     activeTimelineId: tl.id,
   };
+}
+
+/**
+ * A throwaway project showing ONE effect on a resting mascot, for a hover preview.
+ *
+ * No tracks and no clips: the point is to see what a shake or a stream of confetti does
+ * on its own, not what it does on top of whatever happens to be on the strip. Two seconds
+ * is long enough for the slowest built-in (a 1.5 Hz float) to complete a cycle.
+ */
+export function effectPreviewProject(
+  project: Project,
+  effect: { modifier?: Omit<Modifier, 'id'>; emitter?: Omit<Emitter, 'id'> },
+): Project {
+  const tl = makeTimeline('preview');
+  tl.timelineDurationMs = 2000;
+  tl.durationOverrideMs = 2000;
+  if (effect.modifier) tl.modifiers = [{ ...effect.modifier, id: 'pm', blockId: undefined }];
+  if (effect.emitter) tl.emitters = [{ ...effect.emitter, id: 'pe', blockId: undefined, startMs: undefined, endMs: undefined }];
+  return { ...project, timelines: [tl], activeTimelineId: tl.id };
 }
 
 /** Appends a preset as a block at the end of a timeline. */

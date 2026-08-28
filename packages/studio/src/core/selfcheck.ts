@@ -1738,10 +1738,16 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('and scrubbing backwards is identical to arriving forwards',
     JSON.stringify(at(700)) === (at(1500), JSON.stringify(at(700))));
 
-  // the fade actually fades
-  const alphas = Array.from({ length: 12 }, (_, i) => at(600 + i * 90)).flat().map((i) => i.color.a);
+  // the fade actually fades, AND shrinks — fading alone reads as popping out
+  const sampled = Array.from({ length: 12 }, (_, i) => at(600 + i * 90)).flat();
+  const alphas = sampled.map((i) => i.color.a);
   ok('particles fade rather than vanishing', Math.min(...alphas) < 0.5 && Math.max(...alphas) > 0.9,
     `${Math.min(...alphas).toFixed(2)}..${Math.max(...alphas).toFixed(2)}`);
+  const faded = sampled.filter((i) => i.color.a < 0.35);
+  const solid = sampled.filter((i) => i.color.a > 0.9);
+  ok('and shrink as they go, so none of them pops out at full size',
+    faded.length > 0 && solid.length > 0 && Math.max(...faded.map((i) => i.w)) < Math.max(...solid.map((i) => i.w)),
+    `faded ${Math.max(...faded.map((i) => i.w)).toFixed(1)} vs solid ${Math.max(...solid.map((i) => i.w)).toFixed(1)}`);
 
   // anchoring is the whole trick behind tears: move the eye, the source moves with it
   const eid = activeTimeline(P()).emitters![0].id;
@@ -1778,7 +1784,13 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
   // scoped like a modifier
   ed().updateEmitter(eid, (e) => { e.startMs = 1000; e.endMs = 1600; });
-  ok('an emitter respects its range too', at(500).length === 0 && at(1200).length > 0 && at(2000).length === 0);
+  ok('an emitter respects its range', at(500).length === 0 && at(1200).length > 0);
+  // it stops SPAWNING at the end; what is already in the air finishes falling. Cutting
+  // mid-flight made a stream vanish rather than trail off.
+  ok('and trails off past the end rather than blinking out',
+    at(1700).length > 0 && at(1700).length <= at(1200).length,
+    `${at(1200).length} inside -> ${at(1700).length} just after`);
+  ok('with everything gone one lifetime later', at(1600 + 2200).length === 0, String(at(3800).length));
 
   ed().loadProject(defaultProject());
   ok('a project with no emitters costs nothing', emitterItems(activeTimeline(P()), P().rig, [], 0, VIEW).length === 0);
@@ -1848,7 +1860,12 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   };
   ok('the zzz appear once the mascot is asleep', glyphs(start + 1800).length > 0, String(glyphs(start + 1800).length));
   ok('and not before its range opens', glyphs(start + 200).length === 0);
-  ok('nor after it closes', glyphs(start + 4500).length === 0);
+  // authored so the tail finishes inside the clip: an emitter whose particles outlive
+  // their clip is cut off mid-flight, which is the thing the fade exists to avoid
+  ok('and the last of them have gone by the end of the clip', glyphs(start + 4590).length === 0,
+    glyphs(start + 4590).map((g) => g.color.a.toFixed(2)).join(' '));
+  ok('while still trailing off after they stop spawning',
+    glyphs(start + 3400).length > 0, String(glyphs(start + 3400).length));
 
   ed().addBlock('p_angry');
   const angry = TL().blocks.at(-1)!;
@@ -1975,7 +1992,10 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     return emitterItems(activeTimeline(P()), rig, buildScene(rig, VIEW), t, VIEW);
   };
   ok('and it actually renders inside the range it was given',
-    glyphs(100).length === 0 && glyphs(900).length > 0 && glyphs(2200).length === 0);
+    glyphs(100).length === 0 && glyphs(900).length > 0);
+  ok('trailing off after it rather than vanishing',
+    glyphs(1900).length > 0 && glyphs(1800 + 1600 + 50).length === 0,
+    `${glyphs(1900).length} just after, ${glyphs(3450).length} a lifetime later`);
 
   // and the range is adjustable by name afterwards, which is what a follow-up asks for
   applyCalls([{ name: 'set_effect_range', args: { effect: 'zzz', startMs: 1200, endMs: 1500 } }]);

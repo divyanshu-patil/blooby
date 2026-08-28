@@ -836,15 +836,54 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .snap circle { fill: var(--signal); }
 
 /* ---- effect spans on the strip -------------------------------------------- */
-.fxbands { position: relative; margin: 2px 0 1px; }
+.fxbands { position: relative; border-bottom: 1px solid var(--line-soft); }
 .fxband {
-  position: absolute; height: 13px; display: flex; align-items: center;
-  border-radius: 3px; background: color-mix(in oklab, var(--signal) 22%, transparent);
-  border: 1px solid color-mix(in oklab, var(--signal) 55%, transparent); overflow: hidden;
+  position: absolute; height: 13px; display: flex; align-items: center; overflow: hidden;
+  border-radius: 3px;
+  /* one hue per effect, so overlapping spans are told apart at a glance */
+  background: hsl(var(--fx) 62% 62% / .3);
+  border: 1px solid hsl(var(--fx) 58% 46% / .75);
 }
-.fxband.on { background: color-mix(in oklab, var(--signal) 42%, transparent); border-color: var(--signal); }
+.fxband.on { background: hsl(var(--fx) 66% 58% / .58); border-color: hsl(var(--fx) 60% 38%); }
 .fxband span { font: 600 9px var(--display); letter-spacing: .06em; text-transform: uppercase;
   color: var(--ink); padding: 0 4px; white-space: nowrap; }
+
+.fxbands-toggle {
+  display: flex; align-items: center; gap: 4px; width: 100%; padding: 0 8px; cursor: pointer;
+  border: 0; border-bottom: 1px solid var(--line-soft); background: none;
+  font: 700 9px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.fxbands-toggle:hover { color: var(--ink); }
+.fxbands-toggle .fold-caret { transition: transform .12s ease; }
+.fxbands-toggle[aria-expanded='true'] .fold-caret { transform: rotate(90deg); }
 .shapepts circle { fill: var(--paper); stroke: var(--signal); stroke-width: 2; cursor: grab; }
 .shapepts circle:hover { fill: var(--signal); }
 .shapepts circle:active { cursor: grabbing; }
+
+/* ---- the add-an-effect drawer --------------------------------------------- */
+.drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(10, 10, 12, .34); display: flex; justify-content: flex-end; }
+.drawer {
+  width: min(340px, 92vw); height: 100%; display: flex; flex-direction: column; gap: 10px;
+  background: var(--panel); border-left: 1px solid var(--line); padding: 12px; overflow: auto;
+  animation: drawer-in .16s ease;
+}
+@keyframes drawer-in { from { transform: translateX(14px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }
+.drawer-head { display: flex; align-items: center; gap: 8px; }
+.drawer-head .spacer { flex: 1; }
+.drawer-preview {
+  height: 168px; flex: none; display: grid; place-items: center; overflow: hidden;
+  border: 1px solid var(--line-soft); border-radius: 10px; background: var(--stage-bg, #17161b);
+}
+.drawer-preview svg { width: 100%; height: 100%; }
+.drawer-caption { display: flex; flex-direction: column; gap: 2px; min-height: 34px; }
+.drawer-caption strong { font-size: 13px; }
+.drawer-caption span { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.drawer-list { display: flex; flex-direction: column; gap: 4px; }
+.drawer-item {
+  display: flex; flex-direction: column; gap: 1px; text-align: left; width: 100%;
+  padding: 7px 9px; border: 1px solid transparent; border-radius: 7px; background: none; cursor: pointer;
+}
+.drawer-item:hover, .drawer-item[aria-pressed='true'] { background: var(--field); border-color: var(--line-soft); }
+.drawer-item-name { font: 500 12.5px var(--ui); color: var(--ink); }
+.drawer-item-help { font-size: 11px; color: var(--muted); line-height: 1.35; }

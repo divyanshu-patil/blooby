@@ -107,13 +107,19 @@ export interface Track {
  * this list was written out by hand in three places. See COPILOT.md.
  */
 export const MODIFIERS = {
+  // `help` is written for the copilot: argument names, units and useful ranges. `blurb` is
+  // written for a person choosing from a list, where a backtick is noise.
   shake: { label: 'Shake', maxFrequency: 30,
+    blurb: 'Jitters it with noise. Fast and small is a shiver; slower and wider is a rattle.',
     help: 'Jitters the node with noise. frequency 6-20 Hz, amplitude 3-15 (degrees, or px on the body).' },
   float: { label: 'Float', maxFrequency: 6,
+    blurb: 'Bobs it up and down on a slow sine — the idle drift of something weightless.',
     help: 'Bobs the node on a slow sine. frequency 0.3-1.5 Hz, amplitude 3-15.' },
   stretch: { label: 'Stretch', maxFrequency: 6,
+    blurb: 'Pulses its size, carrying everything mapped onto it — squash and stretch for the whole rig.',
     help: 'Pulses the node and everything mapped onto it as one \u2014 squash-and-stretch for the whole rig. frequency 0.3-1.5 Hz, amplitude 3-15.' },
   pendulum: { label: 'Pendulum', maxFrequency: 6,
+    blurb: 'Swings it back and forth on one axis, like a hanging weight. Rotation by default; the axis is a dial.',
     help: 'Swings the node back and forth on ONE axis, like a hanging weight \u2014 set `axis` to "rotation" (default), "x", "y", "yaw" or "pitch". frequency 0.3-1.5 Hz, amplitude 6-20.' },
 } as const;
 

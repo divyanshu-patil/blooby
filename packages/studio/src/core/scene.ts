@@ -283,16 +283,28 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
  * rather than picking up mid-swing — and because everything here is relative, dragging a
  * clip elsewhere on the strip cannot change how the effect inside it looks.
  */
-export function scopeTime(tl: Timeline, e: { blockId?: string; startMs?: number; endMs?: number }, timeMs: number): number | null {
+export function scopeTime(
+  tl: Timeline, e: { blockId?: string; startMs?: number; endMs?: number }, timeMs: number,
+  /**
+   * How long past the end this still resolves. Emitters pass a particle's lifetime: when
+   * a range ends they must stop SPAWNING, not kill everything already in the air — cutting
+   * mid-flight makes a stream vanish rather than trail off, which is the one thing the
+   * fade exists to avoid. Modifiers pass nothing; a shake ending is just a shake ending.
+   */
+  graceMs = 0,
+): number | null {
   let originMs = 0;
   if (e.blockId) {
+    // no grace on the CLIP boundary: a clip that has ended has ended, and letting its
+    // particles run on would rain them over whatever clip comes next. Grace applies to
+    // the effect's own range, which is the thing a user sets and expects to trail off.
     const w = blockWindow(tl, e.blockId);
     if (!w || timeMs < w[0] || timeMs > w[1]) return null;
     originMs = w[0];
   }
   const local = timeMs - originMs;
   if (e.startMs !== undefined && local < e.startMs) return null;
-  if (e.endMs !== undefined && local > e.endMs) return null;
+  if (e.endMs !== undefined && local > e.endMs + graceMs) return null;
   return local - (e.startMs ?? 0);
 }
 
@@ -559,11 +571,14 @@ export function emitterItems(
   const { anchor, unit } = emitterFrame(rig, base, view);
   const out: SceneItem[] = [];
   for (const e of emitters) {
-    const t = scopeTime(tl, e, timeMs);
-    if (t === null) continue;
-
     const life = Math.max(1, e.lifeMs);
     const rate = Math.max(1, e.rateMs);
+    // one lifetime of grace, so the last particles finish falling instead of blinking out
+    const t = scopeTime(tl, e, timeMs, life);
+    if (t === null) continue;
+
+    // ...but nothing new is born after the range closes
+    const stopsAt = e.endMs !== undefined ? e.endMs - (e.startMs ?? 0) : Infinity;
     // an orbit uses every slot it was given: they are positions on a ring, not spawns
     const slots = e.path === 'orbit'
       ? Math.max(1, Math.round(e.count))
@@ -593,6 +608,8 @@ export function emitterItems(
         ? ((t * rateOf + (i / slots) * life) % life)
         : ((t * rateOf - i * rate) % cycle + cycle) % cycle;
       if (age >= life) continue;                       // this slot is between spawns
+      // an orbit has no births to stop, so it simply ends with its range
+      if (e.path === 'orbit' ? t > stopsAt : t - age > stopsAt) continue;
       // easing shapes the journey itself: an ease-out drop falls fast and settles, where
       // linear travel is the same speed the whole way down
       const u = e.easing ? applyEasing(e.easing, age / life) : age / life;
@@ -638,7 +655,10 @@ export function emitterItems(
       const alpha = e.color.a * fadeIn * fadeOut;
       if (alpha <= 0.002) continue;
 
-      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * (pt?.sizeScale ?? 1) * unit;
+      // a particle shrinks as it fades rather than staying full size and vanishing. Fading
+      // alone reads as popping out of existence — the same reason a layer keyframed to
+      // `visible: 0` scales away instead of blinking off.
+      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * (pt?.sizeScale ?? 1) * unit * fadeOut;
       const tint = pt?.color ?? e.color;
 
       // what this particle IS: a library/project shape, or a character. `resolveShape` is

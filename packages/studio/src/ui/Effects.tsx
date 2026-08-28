@@ -1,61 +1,81 @@
 import { useState } from 'react';
 import { useEditor } from '../core/store';
-import { activeTimeline, MODIFIER_AXES, MODIFIER_KINDS, MODIFIERS, type Emitter, type ModifierKind } from '../core/types';
+import { activeTimeline, MODIFIER_AXES, MODIFIERS } from '../core/types';
 import { scopeSpan } from '../core/scene';
 import { blockStarts } from '../core/timeline';
 import { hexColor, parseHex } from '../core/color';
 import { NumberField } from './bits';
 import { Collapsible } from './Collapsible';
+import { EffectPicker, MODIFIER_CHOICES, type EffectChoice } from './EffectPicker';
 import { PartEditor } from './PartEditor';
 import { confetti } from '../core/defaults';
 import { EASING_NAMES, namedEasing } from '../core/easing';
 import { RangeBar } from './RangeBar';
 
 /** Ready-made emitters — the same record with different numbers, which is the point. */
-const EMITTER_PRESETS: {
-  label: string; hint: string;
-  /** a burst rather than a stream: starts at the playhead and runs this long */
-  burstMs?: number;
-  make: (nodeId: string) => Omit<Emitter, 'id' | 'blockId'>;
-}[] = [
+/** A sentinel target: not a layer, expanded to every eye when an effect is added. */
+const BOTH_EYES = '__eyes';
+
+/** Everything the Effects drawer offers, with a line each for the list. */
+const EFFECT_CHOICES: EffectChoice[] = [
   {
-    label: 'Glyphs', hint: 'Characters drifting off — zzz, ♪, ?, !',
-    make: (nodeId) => ({
-      name: 'glyphs', glyphs: ['z', 'z', 'Z'], color: { r: 108, g: 106, b: 128, a: 1 }, size: 26,
+    key: 'confetti', label: 'Confetti', group: 'effect', burstMs: 1500,
+    help: 'A burst of paper strips and ribbons in five colours, raining down from the playhead.',
+    emitter: (nodeId) => confetti(nodeId),
+  },
+  {
+    key: 'glyphs', label: 'Glyphs', group: 'effect',
+    help: 'Characters or symbols drifting off and fading — zzz over a sleeper, ♪ over a singer.',
+    emitter: (nodeId) => ({
+      name: 'glyphs', glyphs: [],
+      parts: [
+        { id: 'g1', shapeId: 'zed', weight: 1, speed: 1.1, sizeScale: 0.7, spin: 0 },
+        { id: 'g2', shapeId: 'zed', weight: 1, speed: 1, sizeScale: 0.95, spin: 0 },
+        { id: 'g3', shapeId: 'zed', weight: 1, speed: 0.85, sizeScale: 1.2, spin: 0 },
+      ],
+      color: { r: 108, g: 106, b: 128, a: 1 }, size: 26,
       path: 'arc', from: { nodeId, x: 46, y: -34 }, to: { nodeId, x: 118, y: -150 }, bow: 22,
       rateMs: 700, lifeMs: 2100, count: 3, fadeStart: 0.45,
       scaleFrom: 0.45, scaleTo: 1.3, spin: -10, wobble: 5, wobbleFrequency: 1.2, seed: 7,
+      easing: { type: 'preset', name: 'easeOut' }, speedJitter: 0.25,
     }),
   },
   {
-    label: 'Drops', hint: 'Falling and curving — tears, rain, sweat',
-    make: (nodeId) => ({
-      name: 'drops', glyphs: ['●'], color: { r: 96, g: 160, b: 225, a: 1 }, size: 13,
+    key: 'drops', label: 'Drops', group: 'effect',
+    help: 'Teardrops falling and curving away. Pin the start to an eye and they come out of it.',
+    emitter: (nodeId) => ({
+      name: 'drops', glyphs: [],
+      parts: [
+        { id: 'd1', shapeId: 'drop', weight: 1, speed: 1, sizeScale: 1, spin: 0 },
+        { id: 'd2', shapeId: 'drop-small', weight: 1, speed: 1.15, sizeScale: 0.7, spin: 0 },
+      ],
+      color: { r: 96, g: 160, b: 225, a: 1 }, size: 17,
       path: 'fall', from: { nodeId, x: 0, y: 12 }, to: { nodeId, x: -22, y: 150 }, bow: 8,
       rateMs: 380, lifeMs: 1200, count: 4, fadeStart: 0.65,
       scaleFrom: 0.7, scaleTo: 1.1, spin: 0, wobble: 2, wobbleFrequency: 1.2, seed: 2,
+      easing: { type: 'preset', name: 'easeIn' }, speedJitter: 0.3,
     }),
   },
   {
-    label: 'Orbit', hint: 'Objects circling on an ellipse you can size',
-    make: (nodeId) => ({
-      name: 'orbit', glyphs: ['✦', '●', '▲'], color: { r: 84, g: 82, b: 112, a: 1 }, size: 20,
-      path: 'orbit', from: { nodeId, x: 0, y: -128 }, to: { x: 0, y: 0 }, bow: 0,
-      radiusX: 104, radiusY: 34,
+    key: 'orbit', label: 'Orbit', group: 'effect',
+    help: 'Objects circling overhead on an ellipse you can size, spaced evenly round it.',
+    emitter: (nodeId) => ({
+      name: 'orbit', glyphs: [],
+      parts: [
+        { id: 'o1', shapeId: 'spark', weight: 1, speed: 1, sizeScale: 1, spin: 0 },
+        { id: 'o2', shapeId: 'star', weight: 1, speed: 1, sizeScale: 0.85, spin: 0 },
+        { id: 'o3', shapeId: 'heart', weight: 1, speed: 1, sizeScale: 0.9, spin: 0 },
+      ],
+      color: { r: 84, g: 82, b: 112, a: 1 }, size: 20, path: 'orbit',
+      from: { nodeId, x: 0, y: -128 }, to: { x: 0, y: 0 }, bow: 0, radiusX: 104, radiusY: 34,
       rateMs: 600, lifeMs: 2400, count: 4, fadeStart: 0.85,
       scaleFrom: 0.85, scaleTo: 1, spin: 40, wobble: 3, wobbleFrequency: 1.2, seed: 5,
+      speedJitter: 0,
     }),
   },
 ];
 
-/** Starting dial positions. Keyed by ModifierKind, so a new effect will not compile
- *  until it has one — the same "add the row, the rest follows" contract as PROPS. */
-const DEFAULTS: Record<ModifierKind, { amount: number; frequency: number; amplitude: number; seed?: number; phase?: number }> = {
-  shake: { amount: 100, frequency: 12, amplitude: 6, seed: 1 },
-  float: { amount: 100, frequency: 0.6, amplitude: 8, phase: 0 },
-  stretch: { amount: 100, frequency: 0.8, amplitude: 12, phase: 0 },
-  pendulum: { amount: 100, frequency: 0.7, amplitude: 10, phase: 0 },
-};
+
 
 /**
  * Non-destructive layers on top of the keyframes. Baked to real keys on export.
@@ -70,6 +90,7 @@ export function Effects() {
   const selectedBlockId = useEditor((s) => s.selectedBlockId);
   const playhead = useEditor((s) => s.playhead);
   const [targetId, setTargetId] = useState<string | null>(null);
+  const [picking, setPicking] = useState<'modifier' | 'effect' | null>(null);
   const selectBlock = useEditor((s) => s.selectBlock);
   const addModifier = useEditor((s) => s.addModifier);
   const updateModifier = useEditor((s) => s.updateModifier);
@@ -90,13 +111,25 @@ export function Effects() {
   const clipScoped = !!selectedBlockId && !!block;
   const list = tl.modifiers.filter((m) => (clipScoped ? m.blockId === selectedBlockId : !m.blockId));
   const scope = clipScoped ? selectedBlockId! : undefined;
-  // which layer a NEW effect lands on. Sticky, so adding three effects to the eyes is
-  // three clicks rather than six, and clearable back to the body with a second click.
-  const target = targetId && project.rig.nodes[targetId] ? targetId : (selection[0] ?? project.rig.rootId);
+
+  // The layers a new effect can land on. Body, both eyes together, then each eye — the
+  // three anyone actually wants — and everything else behind a dropdown, so a rig with a
+  // dozen custom layers does not push the useful buttons off the panel.
+  const eyes = Object.values(project.rig.nodes).filter((n) => n.kind === 'eye');
+  const others = Object.values(project.rig.nodes).filter((n) => n.kind !== 'eye' && n.id !== project.rig.rootId);
+  const quick = [
+    { id: project.rig.rootId, label: project.rig.nodes[project.rig.rootId]?.name ?? 'Body' },
+    ...(eyes.length > 1 ? [{ id: BOTH_EYES, label: 'Both eyes' }] : []),
+    ...eyes.map((n) => ({ id: n.id, label: n.name })),
+  ];
+  const known = (id: string | null) => !!id && (id === BOTH_EYES || !!project.rig.nodes[id]);
+  const target = known(targetId) ? targetId! : (selection[0] ?? project.rig.rootId);
+  // BOTH_EYES is not a node, so anything that needs real ids expands it
+  const targetIds = target === BOTH_EYES ? eyes.map((n) => n.id) : [target];
   const emitters = (tl.emitters ?? []).filter((e) => (clipScoped ? e.blockId === selectedBlockId : !e.blockId));
   const span = scopeSpan(tl, scope)[1];
-  const add = (kind: ModifierKind, nodeId: string) =>
-    addModifier({ nodeId, kind, ...DEFAULTS[kind], blockId: scope });
+  /** One per targeted layer, so "both eyes" is one click rather than two identical ones. */
+  const addToTargets = (make: (nodeId: string) => void) => targetIds.forEach(make);
 
   /**
    * Read an .svg off disk, keep it with the project, and point this emitter at it.
@@ -149,25 +182,34 @@ export function Effects() {
 
       {/* which layer a new effect lands on. Clicking the one already chosen clears it back
           to the body, so "just the eyes" and "the whole thing" are both one click away. */}
-      <div className="row targetbar" data-tour="fx-target">
-        <span className="prop-label" style={{ flex: 1 }}>Apply to</span>
-        {Object.values(project.rig.nodes).map((n) => (
-          <button key={n.id} className="btn sm" aria-pressed={target === n.id}
-            title={target === n.id ? `${n.name} — click to go back to the body` : `New effects go on ${n.name}`}
-            onClick={() => setTargetId(target === n.id ? null : n.id)}>{n.name}</button>
+      <div className="row targetbar wrap" data-tour="fx-target">
+        <span className="prop-label">Apply to</span>
+        <span className="spacer" />
+        {quick.map((q) => (
+          <button key={q.id} className="btn sm" aria-pressed={target === q.id}
+            title={target === q.id ? `${q.label} — click again for the body` : `New effects go on ${q.label}`}
+            onClick={() => setTargetId(target === q.id ? null : q.id)}>{q.label}</button>
         ))}
+        {/* only when there is something to choose: a default rig has no other layers, and
+            an empty dropdown is a control that does nothing */}
+        {others.length > 0 && (
+          <select className="sel" aria-label="Another layer"
+            value={others.some((n) => n.id === target) ? target : ''}
+            onChange={(e) => setTargetId(e.target.value || null)}>
+            <option value="">Other…</option>
+            {others.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+          </select>
+        )}
       </div>
 
       <Collapsible title="Modifiers" storageKey="modifiers" badge={list.length || undefined} actions={
-        <>{MODIFIER_KINDS.map((k) => (
-          <button key={k} className="btn sm" title={MODIFIERS[k].help} onClick={() => add(k, target)}>+ {MODIFIERS[k].label}</button>
-        ))}</>
+        <button className="btn sm" onClick={() => setPicking('modifier')}>+ Add…</button>
       }>
       {!list.length && (
         <p className="empty-note">
-          Shake jitters with noise, float bobs on a sine, stretch pulses the whole rig's size,
-          pendulum swings one axis. They stack on whatever the keyframes are
-          doing{clipScoped ? ', for as long as this clip plays' : ''}.
+          Procedural motion stacked on whatever the keyframes are
+          doing{clipScoped ? ', for as long as this clip plays' : ''}. Add one to see them all,
+          each with a preview.
         </p>
       )}
       {list.map((m) => (
@@ -224,18 +266,7 @@ export function Effects() {
       </Collapsible>
 
       <Collapsible title="Effects" storageKey="effects" badge={emitters.length || undefined} actions={
-        <>
-          <button className="btn sm" title="A burst of paper confetti, starting at the playhead"
-            onClick={() => addEmitter({
-              ...confetti(target), blockId: scope,
-              // the whole gesture: park the playhead, click, done
-              startMs: localPlayhead, endMs: Math.min(span, localPlayhead + 1500),
-            })}>+ Confetti</button>
-          {EMITTER_PRESETS.map((e) => (
-            <button key={e.label} className="btn sm" title={e.hint}
-              onClick={() => addEmitter({ ...e.make(target), blockId: scope })}>+ {e.label}</button>
-          ))}
-        </>
+        <button className="btn sm" onClick={() => setPicking('effect')}>+ Add…</button>
       }>
 
       {!emitters.length && (
@@ -255,8 +286,25 @@ export function Effects() {
               onClick={() => selectEmitter(selectedEmitterId === em.id ? null : em.id)}>◎</button>
             <input className="txt" style={{ flex: 1 }} value={em.name} aria-label="Emitter name"
               onChange={(e) => updateEmitter(em.id, (x) => { x.name = e.target.value; })} />
-            <input type="color" className="chip-color" title="Colour" value={hexColor(em.color)}
-              onChange={(e) => updateEmitter(em.id, (x) => { x.color = { ...parseHex(e.target.value), a: x.color.a }; })} />
+            <input type="color" className="chip-color" title="Colour of everything this throws"
+              value={hexColor(em.color)}
+              onChange={(e) => updateEmitter(em.id, (x) => {
+                const c = { ...parseHex(e.target.value), a: x.color.a };
+                x.color = c;
+                // A part with its own colour ignores the emitter's, which made this swatch
+                // look broken on anything placed from a preset — Sleepy's zzz and Crying's
+                // tears both carry per-part colours. Recolour those too, keeping the
+                // relative differences a multi-coloured set (confetti) depends on.
+                for (const pt of x.parts ?? []) if (pt.color) pt.color = { ...c, a: pt.color.a };
+              })} />
+            {/* only when the parts disagree: with everything on auto there is nothing to
+                spread, and a button that does nothing is worse than no button */}
+            {(em.parts ?? []).some((pt) => pt.color) && (
+              <button className="btn ghost sm" title="Let every piece take this colour, instead of its own"
+                onClick={() => updateEmitter(em.id, (x) => { for (const pt of x.parts ?? []) delete pt.color; })}>
+                tint all
+              </button>
+            )}
             <button className="btn ghost sm icon" title="Remove" onClick={() => removeEmitter(em.id)}>✕</button>
           </div>
 
@@ -340,6 +388,25 @@ export function Effects() {
         </div>
       ))}
       </Collapsible>
+
+      {picking && (
+        <EffectPicker
+          project={project}
+          title={picking === 'modifier' ? 'Add a modifier' : 'Add an effect'}
+          choices={picking === 'modifier' ? MODIFIER_CHOICES : EFFECT_CHOICES}
+          onClose={() => setPicking(null)}
+          onPick={(c) => addToTargets((nodeId) => {
+            if (c.modifier) { addModifier({ ...c.modifier, nodeId, blockId: scope }); return; }
+            if (!c.emitter) return;
+            addEmitter({
+              ...c.emitter(nodeId), blockId: scope,
+              // a burst goes off where the playhead is: park it, click, done. A stream
+              // takes its whole scope instead.
+              ...(c.burstMs ? { startMs: localPlayhead, endMs: Math.min(span, localPlayhead + c.burstMs) } : {}),
+            });
+          })}
+        />
+      )}
     </>
   );
 }
