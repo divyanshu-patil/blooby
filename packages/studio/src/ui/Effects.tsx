@@ -1,12 +1,18 @@
 import { useEditor } from '../core/store';
 import { activeTimeline, MODIFIER_AXES, MODIFIER_KINDS, MODIFIERS, type Emitter, type ModifierKind } from '../core/types';
 import { scopeSpan } from '../core/scene';
+import { blockStarts } from '../core/timeline';
 import { hexColor, parseHex } from '../core/color';
 import { NumberField, Panel } from './bits';
 import { RangeBar } from './RangeBar';
 
 /** Ready-made emitters — the same record with different numbers, which is the point. */
-const EMITTER_PRESETS: { label: string; hint: string; make: (nodeId: string) => Omit<Emitter, 'id' | 'blockId'> }[] = [
+const EMITTER_PRESETS: {
+  label: string; hint: string;
+  /** a burst rather than a stream: starts at the playhead and runs this long */
+  burstMs?: number;
+  make: (nodeId: string) => Omit<Emitter, 'id' | 'blockId'>;
+}[] = [
   {
     label: 'Glyphs', hint: 'Characters drifting off — zzz, ♪, ?, !',
     make: (nodeId) => ({
@@ -36,7 +42,7 @@ const EMITTER_PRESETS: { label: string; hint: string; make: (nodeId: string) => 
     }),
   },
   {
-    label: 'Confetti', hint: 'A burst raining down — drop it on the playhead and go',
+    label: 'Confetti', hint: 'A burst raining down — put the playhead where you want it and click', burstMs: 1500,
     make: (nodeId) => ({
       name: 'confetti', glyphs: ['■', '●', '▲', '✦', '■', '●'],
       color: { r: 232, g: 106, b: 84, a: 1 }, size: 15,
@@ -67,6 +73,7 @@ export function Effects() {
   const project = useEditor((s) => s.project);
   const selection = useEditor((s) => s.selection);
   const selectedBlockId = useEditor((s) => s.selectedBlockId);
+  const playhead = useEditor((s) => s.playhead);
   const selectBlock = useEditor((s) => s.selectBlock);
   const addModifier = useEditor((s) => s.addModifier);
   const updateModifier = useEditor((s) => s.updateModifier);
@@ -94,6 +101,10 @@ export function Effects() {
 
   /** Every layer, so an emitter's endpoints can be pinned to one — tears to an eye. */
   const anchors = Object.values(project.rig.nodes);
+  // the playhead in the scope's own frame, so "burst here" means here whichever scope
+  // the panel is currently editing
+  const clipStart = clipScoped ? blockStarts(tl)[tl.blocks.findIndex((b) => b.id === selectedBlockId)] ?? 0 : 0;
+  const localPlayhead = Math.max(0, Math.min(span, Math.round(playhead - clipStart)));
 
   return (
     <Panel title="Effects" actions={
@@ -178,7 +189,12 @@ export function Effects() {
         <span className="panel-title" style={{ flex: 1 }}>Emitters</span>
         {EMITTER_PRESETS.map((e) => (
           <button key={e.label} className="btn sm" title={e.hint}
-            onClick={() => addEmitter({ ...e.make(project.rig.rootId), blockId: scope })}>+ {e.label}</button>
+            onClick={() => addEmitter({
+              ...e.make(project.rig.rootId), blockId: scope,
+              // a burst goes off where the playhead is, which is the whole gesture: park
+              // the playhead, click, done. A stream defaults to its whole scope instead.
+              ...(e.burstMs ? { startMs: localPlayhead, endMs: Math.min(span, localPlayhead + e.burstMs) } : {}),
+            })}>+ {e.label}</button>
         ))}
       </div>
 

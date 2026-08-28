@@ -93,6 +93,14 @@ noise.
 REST. Start and end on the resting pose unless told otherwise, so the clip can sit
 anywhere on the strip and loop. This is the first and last beat of the shape above.
 
+EMITTERS carry the idea when the pose cannot. A sleeping mascot is breathing plus zzz; a
+singing one is a mouth cycle plus ♪. Reach for add_emitter as readily as a keyframe:
+  zzz       glyphs ["z","z","Z"], arc, from the head, rateMs 700, lifeMs 2100, fadeStart 0.45
+  notes     ["♪","♫","♩","♬"], arc, spin 18, wobble 7
+  tears     ["●"], fall, fromNode the eye, small size, bow to curve them off the face
+  confetti  many glyphs, fall, count 16, rateMs 90, big wobble and spin, over about 1500ms
+  orbit     path "orbit" around a point above the head, radiusX wider than radiusY
+
 RECIPES — starting points, not rules. Adjust to what was asked.
   blink         eyeL/eyeR eye.openness 1 → 0.05 → 1
   sleepy        eye.openness ~0.15, body surface.pitch +8..12

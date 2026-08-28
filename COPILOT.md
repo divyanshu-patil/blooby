@@ -26,6 +26,7 @@ lists drifting apart, and both are now derived.
 | `PROPS` | `core/props.ts` | inspector labels + sliders, what the renderer bakes, what the copilot may keyframe, the property reference in the system prompt |
 | `MODIFIERS` | `core/types.ts` | the Effects panel's buttons and dial limits, the effect list in `TOOL_DOCS`, what `validate` accepts |
 | `TOOL_NAMES` | `copilot/tools.ts` | the JSON schema sent to Ollama, the parser's allow-list |
+| `EMITTER_PRESETS` | `ui/Effects.tsx` | the ready-made emitters in the panel |
 
 Nothing downstream of these should ever restate their contents. If you find yourself
 typing `'shake' \|\| 'float'` or a list of property paths, you are re-introducing the bug.
@@ -73,6 +74,27 @@ unique. `x` and `y` are deliberately absent — `size.x`, `flatOffset.x` and
 `transform.scale.x` all end in `x`, so a guess would be wrong more often than right. A
 model that writes a bare `x` gets a rejection naming every valid path, and the re-prompt
 fixes it. Keep it that way; do not add a favourite.
+
+## Emitters
+
+Everything that leaves the mascot — zzz, ♪, tears, a notification badge, confetti, objects
+orbiting overhead — is one `Emitter` record with a different `path` and different numbers.
+Resist adding a second system for the next one; if it does not fit, widen `path`.
+
+Three rules the engine depends on:
+
+- **No simulation.** `sceneAt(t)` must be answerable for any `t` in any order — the
+  timeline scrubs, the exporter jumps, a thumbnail asks for one instant — so a particle is
+  a pure function of its slot index and the time. Never carry state between frames.
+- **`emitterFrame` is the only mapping** between rig-unit offsets and the screen. The stage
+  handles and the evaluator both use it; two copies would drift the moment the body scaled
+  and the handle would sit next to the stream rather than on it.
+- **A particle at u=0 is invisible** (faded in over its first 12%) and dropped. Any check
+  comparing "the newest particle" against the start handle is measuring a different slot.
+
+Lottie cannot represent a glyph without an embedded font descriptor, so emitters join SVG
+layers in the exporter's `skipped` list — named, never silently dropped. GIF and MP4 go
+through the real renderer and keep them.
 
 ## Adding an effect
 

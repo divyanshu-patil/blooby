@@ -121,6 +121,10 @@ Layers:
 ${nodes}
 Expressions: ${p.expressions.map((e) => `${e.name}`).join(', ') || 'none'}
 Presets: ${p.presets.map((e) => `${e.name} (${fmtSec(e.durationMs)}, ${e.tracks.length} tracks)`).join(', ')}
+Effects and emitters running now: ${[
+    ...tl.modifiers.map((m) => `${m.kind} on ${m.nodeId}`),
+    ...(tl.emitters ?? []).map((e) => `"${e.name}" (${e.glyphs.join('')}, ${e.path})`),
+  ].join(', ') || 'none'}
 Active timeline: "${tl.name}" — ${fmtSec(tl.timelineDurationMs)} at ${p.fps} fps, ${tl.blocks.length} blocks${tl.loop ? ', loops' : ''}.
 ${p.timelines.length > 1 ? `Other timelines (separate states, not shown here): ${p.timelines.filter((t) => t.id !== tl.id).map((t) => t.name).join(', ')}.` : ''}
 
@@ -185,6 +189,11 @@ Rules:
   end on the resting value so it can sit anywhere on the strip.
 - Reach for set_timeline, clear_animation, set_block_duration, move_block, remove_block,
   add_timeline and set_camera for everything else — you can drive the whole editor.
+- For anything leaving the mascot — zzz above a sleeper, ♪ for singing, tears, confetti,
+  objects orbiting overhead — use add_emitter rather than trying to keyframe it. Pin an
+  endpoint to a layer with fromNode/toNode when it should come from that layer.
+- add_modifier "pendulum" swings one axis; set_effect_range narrows when any effect or
+  emitter runs, in ms from the start of its own scope.
 - Say it in one sentence. A long "reply" is the one thing that can get your answer cut
   off before the "calls" array is written, which loses all of the work.`;
 }

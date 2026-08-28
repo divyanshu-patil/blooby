@@ -14,7 +14,7 @@ import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
 import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readProp, resolveProp, writeProp } from './props';
 import { MODIFIER_KINDS, MODIFIERS } from './types';
-import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate, validateBatch, type ToolCall } from '../copilot/tools';
+import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, TOOL_DOCS, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
 import { suggestedStart, systemPrompt } from '../copilot/prompt';
 import { critique } from '../copilot/critique';
@@ -1933,6 +1933,59 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     `${scopeSpan(tl, clip.id)[1]} vs ${clip.durationMs}`);
   ok('and a clip that no longer exists falls back to the timeline rather than crashing',
     scopeSpan(tl, 'gone')[1] === tl.timelineDurationMs);
+
+  ed().loadProject(defaultProject());
+}
+
+// --- the copilot can do what the editor can do ----------------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+
+  // COPILOT.md's rule: if the editor can do it, the copilot must be able to, with a
+  // description. Emitters and the pendulum are new, so they have to be reachable.
+  ok('every effect the renderer implements is offerable to the copilot',
+    MODIFIER_KINDS.every((k) => validate(P(), { name: 'add_modifier', args: { nodeId: 'body', kind: k, amount: 100, frequency: 1, amplitude: 6 } }) === null));
+  ok('and the tool docs describe emitters', /add_emitter/.test(TOOL_DOCS) && /orbit/.test(TOOL_DOCS));
+
+  const call: ToolCall = { name: 'add_emitter', args: {
+    name: 'zzz', glyphs: ['z', 'z', 'Z'], path: 'arc',
+    fromNode: 'Right eye', fromX: 40, fromY: -30, toX: 120, toY: -150,
+    color: [90, 90, 110], rateMs: 500, lifeMs: 1600, count: 3, startMs: 200, endMs: 1800,
+  } };
+  const staged = normaliseCall(P(), call);
+  ok('add_emitter validates', validate(P(), staged) === null, String(validate(P(), staged)));
+  ok('and describes itself readably', /Emit z z Z/.test(describe(P(), staged)), describe(P(), staged));
+  ok('a layer that does not exist is refused',
+    validate(P(), { name: 'add_emitter', args: { name: 'x', glyphs: ['z'], fromNode: 'elbow' } }) !== null);
+  ok('and so is an empty glyph list',
+    validate(P(), { name: 'add_emitter', args: { name: 'x', glyphs: [] } }) !== null);
+
+  applyCalls([staged]);
+  const made = (activeTimeline(P()).emitters ?? []).at(-1);
+  ok('the emitter is created, with its layer name resolved to an id',
+    made?.from.nodeId === 'eyeR' && made.glyphs.join('') === 'zzZ', JSON.stringify(made?.from));
+  const glyphs = (t: number) => {
+    const rig = evaluateRig(P(), t);
+    return emitterItems(activeTimeline(P()), rig, buildScene(rig, VIEW), t, VIEW);
+  };
+  ok('and it actually renders inside the range it was given',
+    glyphs(100).length === 0 && glyphs(900).length > 0 && glyphs(2200).length === 0);
+
+  // and the range is adjustable by name afterwards, which is what a follow-up asks for
+  applyCalls([{ name: 'set_effect_range', args: { effect: 'zzz', startMs: 1200, endMs: 1500 } }]);
+  ok('set_effect_range moves it', glyphs(900).length === 0 && glyphs(1300).length > 0);
+  applyCalls([{ name: 'set_effect_range', args: { effect: 'zzz' } }]);
+  ok('and clearing it runs the whole scope again', glyphs(100).length > 0);
+  ok('an effect nobody made is refused',
+    validate(P(), { name: 'set_effect_range', args: { effect: 'nope', startMs: 0 } }) !== null);
+
+  // a modifier is nameable by its kind, which is what a user would say
+  applyCalls([{ name: 'add_modifier', args: { nodeId: 'body', kind: 'pendulum', amount: 100, frequency: 1, amplitude: 10 } }]);
+  ok('an effect can be ranged by its kind name',
+    validate(P(), { name: 'set_effect_range', args: { effect: 'pendulum', startMs: 100, endMs: 400 } }) === null);
 
   ed().loadProject(defaultProject());
 }

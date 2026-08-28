@@ -16,6 +16,7 @@ export const TOOL_NAMES = [
   'create_preset', 'add_preset_to_timeline', 'add_modifier', 'morph_between',
   'set_timeline', 'clear_animation', 'set_block_duration', 'remove_block', 'move_block',
   'add_timeline', 'set_camera', 'remove_keyframe', 'move_keyframe', 'edit_preset',
+  'add_emitter', 'set_effect_range',
 ] as const;
 
 /** The JSON the model must produce. Ollama enforces this shape server-side via `format`. */
@@ -65,7 +66,22 @@ remove_keyframe       { nodeId, property, atMs }               // atMs must matc
 move_keyframe         { nodeId, property, fromMs, toMs }       // retime one keyframe; fromMs must match an existing one
 edit_preset           { preset, name?, durationMs?, tracks? }  // tracks REPLACE the preset's tracks; clips already on
                       // the strip keep the copy they were added with, so re-add to see the change
-To change a keyframe's VALUE or easing, call add_keyframe at the same atMs \u2014 it overwrites in place.`.trim();
+To change a keyframe's VALUE or easing, call add_keyframe at the same atMs \u2014 it overwrites in place.
+
+add_emitter           { name, glyphs, path?, fromNode?, fromX?, fromY?, toNode?, toX?, toY?,
+                        color?, size?, bow?, rateMs?, lifeMs?, count?, fadeStart?, spin?,
+                        wobble?, radiusX?, radiusY?, startMs?, endMs? }
+                      // little things leaving the mascot: zzz, \u266a, tears, confetti, orbiting objects.
+                      // glyphs is an array cycled one per particle, e.g. ["z","z","Z"].
+                      // path: "arc" drifts (zzz, notes) \u00b7 "fall" drops (tears, confetti)
+                      //       \u00b7 "orbit" circles fromX/fromY on an ellipse (things overhead)
+                      // fromNode/toNode PIN that end to a layer so it follows it \u2014 pin a tear's
+                      // start to eyeL and the drops leave the eye wherever the head moves.
+                      // x/y are offsets in rig units from that layer (or from the body centre).
+                      // color is [r,g,b] 0-255. fadeStart is 0-1 of a particle's life.
+set_effect_range      { effect, startMs?, endMs? }
+                      // effect = an effect's or emitter's name. Times are from the start of its
+                      // scope \u2014 the clip it belongs to, or the timeline. Omit both to run always.`.trim()
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A property the copilot may write: on a node, and a number. */
@@ -116,6 +132,17 @@ function findKeyframe(p: Project, nodeId: unknown, property: unknown, atMs: unkn
   const track = activeTrackFor(activeTimeline(p), String(nodeId), String(property), t);
   const kf = track?.keyframes.find((k) => Math.abs(k.time - t) < 8);
   return track && kf ? { track, kf } : undefined;
+}
+
+/** An effect the model can name: an emitter by its name, or a modifier by its kind. */
+function findEffect(p: Project, ref: unknown) {
+  const s = str(ref)?.toLowerCase();
+  if (!s) return undefined;
+  const tl = activeTimeline(p);
+  const emitter = (tl.emitters ?? []).find((e) => e.id === ref || e.name.toLowerCase() === s);
+  if (emitter) return { kind: 'emitter' as const, id: emitter.id };
+  const mod = tl.modifiers.find((m) => m.id === ref || m.kind.toLowerCase() === s);
+  return mod ? { kind: 'modifier' as const, id: mod.id } : undefined;
 }
 
 /** Layer id, or a layer name in any casing — models reach for the visible name. */
@@ -286,6 +313,17 @@ export function validate(p: Project, call: ToolCall): string | null {
     case 'move_block':
       return findBlock(p, a.block) ? null : `no clip "${String(a.block)}"`;
     case 'add_timeline': return str(a.name) ? null : 'add_timeline needs a name';
+    case 'add_emitter': {
+      if (!str(a.name)) return 'add_emitter needs a name';
+      if (!Array.isArray(a.glyphs) || !a.glyphs.length) return 'add_emitter needs a non-empty glyphs array, e.g. ["z","z","Z"]';
+      if (a.path !== undefined && !['arc', 'orbit', 'fall'].includes(String(a.path))) return 'path must be arc, orbit or fall';
+      for (const k of ['fromNode', 'toNode'] as const) {
+        if (a[k] !== undefined && !findNode(p, a[k])) return `no layer "${String(a[k])}" for ${k}`;
+      }
+      return null;
+    }
+    case 'set_effect_range':
+      return findEffect(p, a.effect) ? null : `no effect or emitter called "${String(a.effect)}"`;
     case 'set_camera':
       if (a.property !== 'perspective' && a.property !== 'fov' && a.property !== 'distance') return 'camera property must be perspective or distance';
       return num(a.value) !== undefined ? null : 'set_camera needs a numeric value';
@@ -337,6 +375,14 @@ export function describe(p: Project, call: ToolCall): string {
     case 'move_block': return `Move clip "${named(findBlock(p, a.block), a.block)}" to slot ${a.index}`;
     case 'add_timeline': return `Add timeline "${a.name}" (a new exported state)`;
     case 'set_camera': return `Set camera ${a.property} to ${a.value}`;
+    case 'add_emitter': {
+      const where = a.fromNode ? ` from ${name(a.fromNode)}` : '';
+      return `Emit ${(a.glyphs as string[]).slice(0, 4).join(' ')} on a ${a.path ?? 'arc'} path${where} — "${a.name}"`;
+    }
+    case 'set_effect_range':
+      return a.startMs === undefined && a.endMs === undefined
+        ? `Run "${a.effect}" for its whole scope`
+        : `Run "${a.effect}" from ${at(a.startMs ?? 0)}${a.endMs !== undefined ? ` to ${at(a.endMs)}` : ' onward'}`;
     case 'remove_keyframe': return `Delete the ${name(a.nodeId)} ${a.property} key at ${at(a.atMs)}`;
     case 'move_keyframe': return `Move the ${name(a.nodeId)} ${a.property} key from ${at(a.fromMs)} to ${at(a.toMs)}`;
     case 'edit_preset': {
@@ -497,6 +543,43 @@ export function applyCalls(calls: ToolCall[]) {
           const next = tl.blocks.filter((x) => x.id !== b.id);
           next.splice(Math.max(0, Math.min(next.length, num(a.index) ?? next.length)), 0, b);
           relayoutBlocks(tl, next);
+          break;
+        }
+        case 'add_emitter': {
+          const rgb = Array.isArray(a.color) ? (a.color as number[]) : null;
+          const tl = activeTimeline(p);
+          (tl.emitters ??= []).push({
+            id: uid('e'), name: String(a.name),
+            glyphs: (a.glyphs as unknown[]).map(String),
+            color: rgb ? { r: rgb[0] ?? 0, g: rgb[1] ?? 0, b: rgb[2] ?? 0, a: 1 } : { r: 108, g: 106, b: 128, a: 1 },
+            size: num(a.size) ?? 26,
+            path: (a.path as 'arc' | 'orbit' | 'fall') ?? 'arc',
+            from: { nodeId: findNode(p, a.fromNode), x: num(a.fromX) ?? 40, y: num(a.fromY) ?? -34 },
+            to: { nodeId: findNode(p, a.toNode), x: num(a.toX) ?? 110, y: num(a.toY) ?? -150 },
+            bow: num(a.bow) ?? 20,
+            ...(num(a.radiusX) !== undefined ? { radiusX: num(a.radiusX) } : {}),
+            ...(num(a.radiusY) !== undefined ? { radiusY: num(a.radiusY) } : {}),
+            rateMs: Math.max(40, num(a.rateMs) ?? 600),
+            lifeMs: Math.max(120, num(a.lifeMs) ?? 1800),
+            count: Math.max(1, Math.round(num(a.count) ?? 3)),
+            fadeStart: Math.min(1, Math.max(0, num(a.fadeStart) ?? 0.5)),
+            scaleFrom: num(a.scaleFrom) ?? 0.5, scaleTo: num(a.scaleTo) ?? 1.25,
+            spin: num(a.spin) ?? 0,
+            wobble: num(a.wobble) ?? 4, wobbleFrequency: num(a.wobbleFrequency) ?? 1.2,
+            seed: num(a.seed) ?? 7,
+            ...(num(a.startMs) !== undefined ? { startMs: num(a.startMs) } : {}),
+            ...(num(a.endMs) !== undefined ? { endMs: num(a.endMs) } : {}),
+          });
+          break;
+        }
+        case 'set_effect_range': {
+          const hit = findEffect(p, a.effect)!;
+          const tl = activeTimeline(p);
+          const target = hit.kind === 'emitter'
+            ? tl.emitters!.find((e) => e.id === hit.id)!
+            : tl.modifiers.find((m) => m.id === hit.id)!;
+          target.startMs = num(a.startMs);
+          target.endMs = num(a.endMs);
           break;
         }
         case 'add_timeline': {
