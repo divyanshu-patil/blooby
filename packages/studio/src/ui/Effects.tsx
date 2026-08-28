@@ -82,6 +82,7 @@ export function Effects() {
   const updateEmitter = useEditor((s) => s.updateEmitter);
   const removeEmitter = useEditor((s) => s.removeEmitter);
   const selectEmitter = useEditor((s) => s.selectEmitter);
+  const addSvgAsset = useEditor((s) => s.addSvgAsset);
   const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
 
   const tl = activeTimeline(project);
@@ -98,6 +99,33 @@ export function Effects() {
   const span = scopeSpan(tl, scope)[1];
   const add = (kind: ModifierKind, nodeId: string) =>
     addModifier({ nodeId, kind, ...DEFAULTS[kind], blockId: scope });
+
+  /**
+   * Read an .svg off disk, keep it with the project, and point this emitter at it.
+   *
+   * Only the inside of the <svg> is kept, plus its viewBox — the outer element is
+   * re-created by the renderer at whatever size the particle is, so a file authored at
+   * 512px and one authored at 24px both come out the same size.
+   */
+  const importSvg = (emitterId: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.svg,image/svg+xml';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      const box = /viewBox\s*=\s*["']([^"']+)["']/i.exec(text)?.[1];
+      const inner = /<svg[^>]*>([\s\S]*)<\/svg>/i.exec(text)?.[1];
+      if (!inner) { alert('That file does not look like an SVG.'); return; }
+      const id = addSvgAsset(file.name.replace(/\.svg$/i, ''), inner.trim(), box ?? '0 0 24 24');
+      updateEmitter(emitterId, (x) => {
+        x.svgAssetId = id;
+        x.svg = { sourceMarkup: inner.trim(), viewBox: box ?? '0 0 24 24' };
+      });
+    };
+    input.click();
+  };
 
   /** Every layer, so an emitter's endpoints can be pinned to one — tears to an eye. */
   const anchors = Object.values(project.rig.nodes);
@@ -218,6 +246,25 @@ export function Effects() {
             <input type="color" className="chip-color" title="Colour" value={hexColor(em.color)}
               onChange={(e) => updateEmitter(em.id, (x) => { x.color = { ...parseHex(e.target.value), a: x.color.a }; })} />
             <button className="btn ghost sm icon" title="Remove" onClick={() => removeEmitter(em.id)}>✕</button>
+          </div>
+
+          {/* glyphs, or an SVG kept with the project. The library is per-project on
+              purpose: it saves, exports and opens with the file, and needs no account. */}
+          <div className="row">
+            <select className="sel" style={{ flex: 1 }} value={em.svgAssetId ?? ''} aria-label="What to emit"
+              onChange={(e) => {
+                const asset = (project.svgAssets ?? []).find((a) => a.id === e.target.value);
+                updateEmitter(em.id, (x) => {
+                  if (!asset) { delete x.svgAssetId; delete x.svg; return; }
+                  x.svgAssetId = asset.id;
+                  x.svg = { sourceMarkup: asset.markup, viewBox: asset.viewBox };
+                });
+              }}>
+              <option value="">glyphs (below)</option>
+              {(project.svgAssets ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <button className="btn sm" title="Import an SVG and keep it with this project"
+              onClick={() => importSvg(em.id)}>Import SVG…</button>
           </div>
 
           <div className="row">

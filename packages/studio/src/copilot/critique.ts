@@ -68,6 +68,16 @@ function tracksIn(calls: ToolCall[]): Track[] {
   return out;
 }
 
+/** yaw, pitch and roll wrap; everything else is a plain number line. */
+const isAngle = (p: string) => p.endsWith('rotation') || p.includes('yaw') || p.includes('pitch');
+
+/** Does a track end on the pose it opened with? */
+export function closes(property: string, first: number, last: number): boolean {
+  if (!isAngle(property)) return Math.abs(first - last) < 1e-6;
+  const d = ((last - first) % 360 + 360) % 360;
+  return Math.min(d, 360 - d) < 1e-6;
+}
+
 const span = (t: Track) => Math.max(...t.keys.map((k) => k.value)) - Math.min(...t.keys.map((k) => k.value));
 
 export function critique(p: Project, calls: ToolCall[], ask: string): string[] {
@@ -99,8 +109,11 @@ export function critique(p: Project, calls: ToolCall[], ask: string): string[] {
     if (!body.length) notes.push(`The request is about the mascot itself, but no track animates ${p.rig.rootId}.`);
   }
 
-  // 4. a clip that ends somewhere other than where it started cannot loop or be followed
-  const drifting = tracks.filter((t) => Math.abs(t.keys[0].value - t.keys[t.keys.length - 1].value) > 1e-6);
+  // 4. a clip that ends somewhere other than where it started cannot loop or be followed.
+  //
+  // Angles compare modulo 360: a full spin ends on 360, which is the same pose it opened
+  // on and must not be reported as drift. Caught by running this over the builtins.
+  const drifting = tracks.filter((t) => !closes(t.property, t.keys[0].value, t.keys[t.keys.length - 1].value));
   if (drifting.length) {
     notes.push(`${drifting.map((t) => `${t.nodeId}.${t.property}`).join(', ')} end on a different value than they start on, so the clip cannot loop or be followed. Close each one back on its opening value.`);
   }

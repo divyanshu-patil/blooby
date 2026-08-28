@@ -17,6 +17,7 @@ export function getProp(node: RigNode, path: string): KeyValue | undefined {
     case 'size.x': return node.size.x;
     case 'size.y': return node.size.y;
     case 'color': return node.color;
+    case 'shape.path': return node.shapePath;
     default: return undefined;
   }
 }
@@ -37,6 +38,7 @@ export function setProp(node: RigNode, path: string, v: KeyValue): void {
     case 'size.x': node.size.x = n; break;
     case 'size.y': node.size.y = n; break;
     case 'color': node.color = v as ColorStop; break;
+    case 'shape.path': node.shapePath = typeof v === 'string' ? v : undefined; break;
   }
 }
 
@@ -99,8 +101,12 @@ export interface PropSpec {
 }
 
 export const PROPS: Record<string, PropSpec> = {
-  'surface.yaw': { on: 'node', label: 'Yaw', range: [-90, 90, 0.5, '\u00b0'],
-    help: 'Turns the feature around the sphere. Negative is left, positive is right. It foreshortens near the rim and hides past \u00b190\u00b0.' },
+  // \u00b1360 rather than \u00b190: the projection already carries a feature round the back of
+  // the sphere and out the other side at 300\u00b0 \u2014 only this range stopped a full spin being
+  // reachable. The slider is coarser for it; the number field and the stage's turn tool
+  // are how a gaze actually gets aimed.
+  'surface.yaw': { on: 'node', label: 'Yaw', range: [-360, 360, 0.5, '\u00b0'],
+    help: 'Turns the feature around the sphere. Negative is left, positive is right. It hides behind the silhouette past \u00b190\u00b0 and comes back out the other side \u2014 0 to 360 on the body is a full spin.' },
   'surface.pitch': { on: 'node', label: 'Pitch', range: [-90, 90, 0.5, '\u00b0'],
     help: 'The same, vertically. Negative is up, positive is down.' },
   'flatOffset.x': { on: 'node', label: 'Offset X', range: [-300, 300, 1, 'px'],
@@ -123,6 +129,8 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'The authored width in pixels. Prefer transform.scale.x for animation \u2014 this resizes the drawing itself.' },
   'size.y': { on: 'node', label: 'Height', range: [1, 300, 1, 'px'],
     help: 'The authored height in pixels. Prefer transform.scale.y for animation.' },
+  'shape.path': { on: 'node', label: 'Shape',
+    help: 'An SVG path outline. Keyframe it and the shape morphs from one to the next. Not a number, so the copilot cannot set it.' },
   color: { on: 'node', label: 'Color',
     help: 'Fill colour. Keyframeable in the editor, but it is not a number, so the copilot cannot set it.' },
 

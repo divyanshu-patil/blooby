@@ -4,6 +4,7 @@ import { cssColor, hexColor, oklchToRgb, parseHex, rgbToOklch } from '../core/co
 import { valueAt } from '../core/scene';
 import { activeTimeline, CAMERA_ID, type ColorStop } from '../core/types';
 import { KeyNav, NumberField, Panel, PropRow } from './bits';
+import { ShapeEditor } from './ShapeEditor';
 import { INK, BONE } from '../core/defaults';
 import { blockStarts, fmtSec } from '../core/timeline';
 import { easingLabel } from '../core/easing';
@@ -165,6 +166,9 @@ export function NodeInspector() {
       {node.kind !== 'body' && <PropRow nodeId={node.id} property="transform.length" />}
       <PropRow nodeId={node.id} property="size.x" label={isRoot ? 'Radius' : 'Width'} />
       {!isRoot && <PropRow nodeId={node.id} property="size.y" label="Height" />}
+
+      <div className="divider" />
+      <ShapeEditor node={node} />
 
       <div className="divider" />
       <ColorField value={colorNow ?? node.color} keyNavFor={node.id}

@@ -96,6 +96,27 @@ Lottie cannot represent a glyph without an embedded font descriptor, so emitters
 layers in the exporter's `skipped` list — named, never silently dropped. GIF and MP4 go
 through the real renderer and keep them.
 
+## Shapes and morphing
+
+A layer can carry `shapePath`, an SVG outline in a **-0.5..0.5 box**, drawn instead of its
+ellipse/pill and scaled to its size. Authoring in a unit box is what makes a morph about
+outlines rather than dimensions.
+
+`core/path.ts` owns it. Two `d` strings almost never share a command structure, so it
+flattens both to the same number of points spaced evenly by arc length, rotates them into
+their best alignment (or a square morphing into a star twists on the way), and interpolates
+point by point. `lerpValue` calls it, so `shape.path` keyframes morph for free.
+
+It is all arithmetic on purpose: `SVGPathElement.getPointAtLength` only exists in a
+browser, and the selfcheck, the exporter and any headless render need identical results.
+
+Two rules if you touch the parser:
+
+- **Every loop iteration must consume a token.** A malformed path left `cmd` on `Z`, which
+  reads nothing, and `M 1 zz 4` spun forever. There is a `step()` guard on every branch.
+- **Garbage degrades to nothing, never to NaN.** The shape editor takes pasted text, and
+  NaN coordinates go straight into the DOM. Non-finite segments are dropped.
+
 ## Adding an effect
 
 1. Add the row to `MODIFIERS` in `core/types.ts` — `label`, `maxFrequency`, and a `help`

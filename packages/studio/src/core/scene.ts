@@ -1,5 +1,6 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
+import { morphPath } from './path';
 import { noise1d } from './noise';
 import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
 import { CAMERA_PROPS, getCameraProp, getProp, NUMERIC_PROPS, readProp, setCameraProp, setProp, writeProp } from './props';
@@ -12,6 +13,8 @@ const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
 
 export function lerpValue(a: KeyValue, b: KeyValue, t: number): KeyValue {
   if (typeof a === 'number' && typeof b === 'number') return a + (b - a) * t;
+  // two path strings: a real morph, not a switch at the halfway mark
+  if (typeof a === 'string' && typeof b === 'string') return morphPath(a, b, t);
   if (isColor(a) && isColor(b)) return lerpColor(a, b, t);
   if (isVec(a) && isVec(b)) return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   return a;
@@ -315,6 +318,10 @@ function blendRigInto(to: Rig, from: Rig, amount: number): void {
       setProp(node, path, isAngle(path) ? lerpAngle(a, b, amount) : a + (b - a) * amount);
     }
     if (other.color && node.color) node.color = lerpColor(other.color, node.color, amount);
+    // a transition across a shape change morphs too, rather than popping at the seam
+    if (other.shapePath && node.shapePath && other.shapePath !== node.shapePath) {
+      node.shapePath = morphPath(other.shapePath, node.shapePath, amount);
+    }
   }
   for (const path of CAMERA_PROPS) {
     const a = getCameraProp(from, path), b = getCameraProp(to, path);
@@ -383,6 +390,8 @@ export interface SceneItem {
   svg?: { sourceMarkup: string; viewBox: string };
   /** a glyph rather than a shape — what an emitter puts on screen. `h` is the font size. */
   text?: string;
+  /** an outline in a -0.5..0.5 box, drawn scaled into the w/h box instead of the primitive */
+  path?: string;
 }
 
 export interface Viewport { width: number; height: number }
@@ -423,6 +432,7 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
     out.push({
       id: root.id, name: root.name, shape: 'ellipse', cx, cy, w: rx * limb * 2, h: ry * limb * 2,
       r: Math.min(rx, ry) * limb, rotation: roll, color: root.color, depth: -2, zIndex: root.zIndex,
+      ...(root.shapePath ? { path: root.shapePath } : {}),
     });
   }
 
@@ -456,7 +466,11 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
         out.push({ id: node.id, name: node.name, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
       } else if (node.kind !== 'group') {
         const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
-        out.push({ id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot, color, depth: p.depth, zIndex: node.zIndex });
+        out.push({
+          id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2,
+          rotation: rot, color, depth: p.depth, zIndex: node.zIndex,
+          ...(node.shapePath ? { path: node.shapePath } : {}),
+        });
       }
       walk(node, ax, ay, rot, Math.max(w, h) / 2, { x: 0, y: 0 }, cum * scaleOf(node));
     }

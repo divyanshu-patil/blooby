@@ -1,5 +1,6 @@
 import type { EasingCurve, Emitter, Expression, Keyframe, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
 import { derivedDuration } from './timeline';
+import { primitivePath } from './path';
 
 export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -66,6 +67,11 @@ const emit = (e: Partial<Omit<Emitter, 'id' | 'blockId'>> & Pick<Emitter, 'name'
   scaleFrom: 0.6, scaleTo: 1.2, spin: 0, wobble: 3, wobbleFrequency: 1.2, seed: 7,
   ...e,
 });
+
+/** The eye's own drawn outline, as a path — the morph's resting pose, so nothing pops. */
+const PILL = primitivePath('rect', { cornerRadius: 0.5 });
+const STAR = primitivePath('star', { points: 5, innerRatio: 0.45 });
+const STAR_YELLOW = { r: 247, g: 201, b: 72, a: 1 };
 
 const bothEyes = (property: string, keys: Keyframe[]): Track[] => [
   track('eyeL', property, keys),
@@ -340,6 +346,35 @@ export function builtinPresets(): Preset[] {
         rateMs: 600, lifeMs: 2400, count: 4, fadeStart: 0.85,
         scaleFrom: 0.85, scaleTo: 1, spin: 40, wobble: 3, startMs: 400, endMs: 3600,
       })],
+    },
+    {
+      // the eyes literally become stars: two keyframes on shape.path, and core/path.ts
+      // resamples both outlines so the in-between is a real shape rather than a switch
+      id: 'p_excited', name: 'Excited', source: 'builtin', durationMs: 2000,
+      tracks: [
+        ...bothEyes('shape.path', [kf(0, PILL), kf(340, STAR, 'easeOut'), kf(1500, STAR), kf(2000, PILL, 'easeInOut')]),
+        ...bothEyes('color', [kf(0, INK), kf(340, STAR_YELLOW, 'easeOut'), kf(1500, STAR_YELLOW), kf(2000, INK)]),
+        ...bothEyes('transform.scale.x', [kf(0, 1), kf(340, 1.35, 'easeOut'), kf(1500, 1.35), kf(2000, 1)]),
+        ...bothEyes('transform.length', [kf(0, 1.55), kf(340, 1.05, 'easeOut'), kf(1500, 1.05), kf(2000, 1.55)]),
+        ...bothEyes('eye.openness', [kf(0, 1), kf(2000, 1, 'linear')]),
+        // a jolt of delight: crouch, pop, settle — the body offset from the eyes
+        track('body', 'flatOffset.y', [kf(0, 0), kf(200, 8, 'easeInOut'), kf(420, -26, 'easeOut'), kf(700, 0, 'easeIn'), kf(860, -9, 'easeOut'), kf(1060, 0, 'easeIn'), kf(2000, 0)]),
+        track('body', 'transform.scale.y', [kf(0, 1), kf(200, 0.91, 'easeInOut'), kf(420, 1.12, 'easeOut'), kf(700, 0.94, 'easeIn'), kf(1060, 1), kf(2000, 1)]),
+        track('body', 'transform.scale.x', [kf(0, 1), kf(200, 1.09, 'easeInOut'), kf(420, 0.92, 'easeOut'), kf(700, 1.06, 'easeIn'), kf(1060, 1), kf(2000, 1)]),
+        track('body', 'transform.rotation', [kf(0, 0), kf(480, -7, 'easeOut'), kf(940, 6), kf(1420, 0, 'elastic'), kf(2000, 0)]),
+      ],
+    },
+    {
+      // a full revolution: the eyes travel right, pass behind the silhouette and come back
+      // out the left. The sphere projection already did this; only the slider range did not.
+      id: 'p_spin', name: 'Spin', source: 'builtin', durationMs: 1600,
+      tracks: [
+        track('body', 'surface.yaw', [kf(0, 0), kf(220, -22, 'easeInOut'), kf(1300, 360, 'easeInOut'), kf(1600, 360, 'easeOut')]),
+        // squash into the turn and out of it, so it reads as weight rather than a decal spinning
+        track('body', 'transform.scale.x', [kf(0, 1), kf(220, 1.06), kf(760, 0.94), kf(1300, 1.04), kf(1600, 1, 'easeOut')]),
+        track('body', 'transform.scale.y', [kf(0, 1), kf(220, 0.95), kf(760, 1.05), kf(1300, 0.97), kf(1600, 1, 'easeOut')]),
+        track('body', 'flatOffset.y', [kf(0, 0), kf(300, -10, 'easeOut'), kf(900, -14), kf(1400, 0, 'easeIn'), kf(1600, 0)]),
+      ],
     },
     {
       id: 'p_celebrate', name: 'Celebrate', source: 'builtin', durationMs: 2400,

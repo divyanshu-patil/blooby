@@ -101,6 +101,10 @@ singing one is a mouth cycle plus ♪. Reach for add_emitter as readily as a key
   confetti  many glyphs, fall, count 16, rateMs 90, big wobble and spin, over about 1500ms
   orbit     path "orbit" around a point above the head, radiusX wider than radiusY
 
+SHAPE. A layer can carry an outline (shape.path) and morph between two of them — an eye
+becoming a star is two keyframes, not a swap. You cannot set it (it is not a number), so
+say so in the reply rather than approximating it with scale.
+
 RECIPES — starting points, not rules. Adjust to what was asked.
   blink         eyeL/eyeR eye.openness 1 → 0.05 → 1
   sleepy        eye.openness ~0.15, body surface.pitch +8..12
@@ -118,4 +122,6 @@ RECIPES — starting points, not rules. Adjust to what was asked.
   shake (no)    body surface.yaw 0 → -14 → +12 → -6 → 0 over 600-800
   talk          body transform.scale.y alternating 1.05 / 0.97 every 180-220
   breathe/idle  body transform.scale.y 1 → 1.03 → 1 and flatOffset.y 0 → -6 → 0 over ~3000
+  spin          body surface.yaw 0 → 360 over 1200-1600 with a lean-back first. Features
+                pass behind the silhouette and come out the other side on their own.
 `.trim();

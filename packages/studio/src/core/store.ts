@@ -131,6 +131,10 @@ export interface Editor {
   updateModifier: (id: string, fn: (m: Modifier) => void) => void;
   removeModifier: (id: string) => void;
 
+  /** Keeps an SVG with the project, so it survives a save and an emitter can point at it. */
+  addSvgAsset: (name: string, markup: string, viewBox: string) => string;
+  removeSvgAsset: (id: string) => void;
+
   selectEmitter: (id: string | null) => void;
   addEmitter: (e: Omit<Emitter, 'id'>) => void;
   updateEmitter: (id: string, fn: (e: Emitter) => void) => void;
@@ -744,6 +748,20 @@ export const useEditor = create<Editor>((set, get) => ({
 
   // `emitters` is optional on Timeline so old projects load untouched — every write has
   // to seed the array rather than assume it
+  addSvgAsset(name, markup, viewBox) {
+    const id = uid('svg');
+    get().commit((p) => { (p.svgAssets ??= []).push({ id, name, markup, viewBox }); });
+    return id;
+  },
+  removeSvgAsset(id) {
+    get().commit((p) => {
+      if (p.svgAssets) p.svgAssets = p.svgAssets.filter((a) => a.id !== id);
+      // an emitter pointing at a deleted asset would render nothing and look broken;
+      // drop back to its glyphs, which it still has
+      for (const tl of p.timelines) for (const e of tl.emitters ?? []) if (e.svgAssetId === id) { delete e.svgAssetId; delete e.svg; }
+    });
+  },
+
   selectEmitter(id) { set({ selectedEmitterId: id }); },
   addEmitter(e) {
     const id = uid('e');

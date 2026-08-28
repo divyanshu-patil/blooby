@@ -15,6 +15,16 @@ export function Shapes({ scene }: { scene: SceneItem[] }) {
             </g>
           );
         }
+        // an outline authored in a -0.5..0.5 box, scaled into this item's own w/h. Scaling
+        // the path rather than regenerating it is what lets one morph drive any size.
+        if (s.path) {
+          const w = Math.max(Math.abs(s.w), 0.001), h = Math.max(Math.abs(s.h), 0.001);
+          return (
+            <g key={s.id} transform={`${spin ?? ''} translate(${s.cx} ${s.cy}) scale(${w} ${h})`}>
+              <path d={s.path} fill={cssColor(s.color)} vectorEffect="non-scaling-stroke" />
+            </g>
+          );
+        }
         if (s.text !== undefined) {
           // dominantBaseline centres the glyph on cy, so an emitter's path math is about
           // the particle's middle rather than wherever a font happens to sit its baseline

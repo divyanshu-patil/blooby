@@ -8,6 +8,7 @@ import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, composeScene, emitterFrame, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, scopeSpan, scopeTime, valueAt } from './scene';
 import { builtinPresets, defaultProject, makeTimeline } from './defaults';
+import { flattenPath, morphPath, primitivePath, PRIMITIVE_SHAPES } from './path';
 import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
@@ -17,7 +18,7 @@ import { MODIFIER_KINDS, MODIFIERS } from './types';
 import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, TOOL_DOCS, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
 import { suggestedStart, systemPrompt } from '../copilot/prompt';
-import { critique } from '../copilot/critique';
+import { closes, critique } from '../copilot/critique';
 import { baseUrl, CLOUD_CATALOGUE, LOCAL_URL, needsKey, resolveModel, usesBackend } from '../copilot/pool';
 import { listModels } from '../copilot/client';
 import { crc32 } from '../export/zip';
@@ -1793,8 +1794,9 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     for (const t of p.tracks) {
       const a = t.keyframes[0]?.value, b = t.keyframes[t.keyframes.length - 1]?.value;
       if (a === undefined || b === undefined) continue;
+      // angles compare modulo 360, so Spin ending on 360 is the pose it opened on
       const same = typeof a === 'number' && typeof b === 'number'
-        ? Math.abs(a - b) < 1e-6
+        ? closes(t.property, a, b)
         : JSON.stringify(a) === JSON.stringify(b);
       if (!same) drifting.push(`${p.name}.${t.nodeId}.${t.property}`);
     }
@@ -2049,6 +2051,104 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     `${posed} -> ${valueAt(P(), 'body', 'surface.pitch', 0)}`);
   ok('and drops the empty track rather than leaving a blank lane',
     !activeTimeline(P()).tracks.some((t) => t.nodeId === 'body' && t.property === 'surface.pitch'));
+
+  ed().loadProject(defaultProject());
+}
+
+// --- shape morphing -------------------------------------------------------------
+{
+  const area = (pts: { x: number; y: number }[]) =>
+    Math.abs(pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + (p.x * q.y - q.x * p.y); }, 0) / 2);
+
+  // the primitives are what they claim to be, in a -0.5..0.5 box
+  const circle = primitivePath('circle');
+  ok('a circle has the area of a circle', Math.abs(area(flattenPath(circle, 256)) - Math.PI * 0.25) < 0.002,
+    area(flattenPath(circle, 256)).toFixed(4));
+  ok('a square fills its box', Math.abs(area(flattenPath(primitivePath('rect'), 256)) - 1) < 0.01);
+  ok('rounding the corners takes area away',
+    area(flattenPath(primitivePath('rect', { cornerRadius: 0.5 }), 256)) < area(flattenPath(primitivePath('rect'), 256)));
+  ok('a star has less area than the circle it fits in',
+    area(flattenPath(primitivePath('star', { points: 5 }), 256)) < area(flattenPath(circle, 256)));
+  ok('every primitive stays inside its box',
+    PRIMITIVE_SHAPES.every((k) => flattenPath(primitivePath(k, { points: 7 }), 96)
+      .every((p) => Math.abs(p.x) <= 0.5001 && Math.abs(p.y) <= 0.5001)));
+
+  // the morph is a real in-between, not a switch at the halfway mark
+  const star = primitivePath('star', { points: 5 });
+  ok('t=0 and t=1 are the originals', morphPath(circle, star, 0) === circle && morphPath(circle, star, 1) === star);
+  const areas = [0, 0.25, 0.5, 0.75, 1].map((t) => area(flattenPath(morphPath(circle, star, t), 64)));
+  ok('and the shape genuinely travels between them',
+    areas.every((a, i) => i === 0 || a < areas[i - 1]), areas.map((a) => a.toFixed(3)).join(' > '));
+  ok('the in-between is neither original',
+    morphPath(circle, star, 0.5) !== circle && morphPath(circle, star, 0.5) !== star);
+
+  // alignment: a square into a diamond should barely move, not spin
+  const square = primitivePath('rect');
+  const diamond = primitivePath('polygon', { points: 4 });
+  const drift = flattenPath(morphPath(square, diamond, 0.5), 64);
+  ok('outlines are rotated into their best alignment before interpolating',
+    drift.every((p) => Math.abs(p.x) <= 0.51 && Math.abs(p.y) <= 0.51));
+
+  // the parser handles what it says it does
+  ok('relative commands parse', flattenPath('M 0 0 l 10 0 l 0 10 z', 32).length === 32);
+  ok('quadratics parse as curves', flattenPath('M 0 0 Q 5 10 10 0 Z', 32).length === 32);
+  // the editor takes pasted text, so garbage must degrade to nothing rather than to NaN
+  // coordinates — which "nonsense" produced before, since its letters parse as commands
+  for (const junk of ['nonsense', '', 'M', 'M 0', 'M 1 zz 4']) {
+    const pts = flattenPath(junk, 16);
+    ok(`"${junk}" degrades safely`, pts.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+      JSON.stringify(pts.slice(0, 2)));
+  }
+  ok('and a broken path morphs without producing NaN',
+    flattenPath(morphPath('nonsense', primitivePath('circle'), 0.5), 16)
+      .every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)));
+}
+
+// --- a shape keyframe morphs the layer, and a full spin goes round the back -----
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+  const pill = primitivePath('rect', { cornerRadius: 0.5 });
+  const star = primitivePath('star', { points: 5 });
+
+  ed().addTimeline('Shapes');
+  ed().setPlayhead(0);
+  ed().setValue('eyeL', 'shape.path', pill, 'a');
+  ed().toggleKeyframe('eyeL', 'shape.path');
+  ed().setPlayhead(1000);
+  ed().setValue('eyeL', 'shape.path', star, 'b');
+
+  const pathAt = (t: number) => buildScene(evaluateRig(P(), t), VIEW).find((i) => i.id === 'eyeL')?.path;
+  ok('the layer draws its outline instead of a pill', typeof pathAt(0) === 'string');
+  ok('the ends are the shapes that were keyed', pathAt(0) === pill && pathAt(1000) === star,
+    `${String(pathAt(0)).slice(0, 20)} / ${String(pathAt(1000)).slice(0, 20)}`);
+  const mid = pathAt(500);
+  ok('and halfway through it is genuinely between them', !!mid && mid !== pill && mid !== star);
+
+  // the Excited preset is the user-facing version of exactly that
+  const excited = builtinPresets().find((x) => x.id === 'p_excited')!;
+  ok('Excited morphs the eyes', excited.tracks.filter((t) => t.property === 'shape.path').length === 2);
+  ok('and turns them yellow on the way', excited.tracks.some((t) => t.property === 'color'));
+
+  // a full revolution: right, behind the silhouette, and out the other side
+  ed().loadProject(defaultProject());
+  const eyeAt = (yaw: number) => {
+    const p = defaultProject();
+    p.rig.nodes.body.surface.yaw = yaw;
+    return buildScene(p.rig, VIEW).find((i) => i.id === 'eyeL');
+  };
+  const front = eyeAt(0)!;
+  ok('a feature travels round with the body', eyeAt(60)!.cx > front.cx);
+  ok('hides behind the silhouette', !eyeAt(180));
+  ok('and comes back out the other side', !!eyeAt(300) && eyeAt(300)!.cx < front.cx);
+  ok('a full turn lands exactly where it started', Math.abs(eyeAt(360)!.cx - front.cx) < 1e-6);
+  ok('and the range allows one to be authored', (PROPS['surface.yaw'].range ?? [0, 0])[1] >= 360);
+
+  const spin = builtinPresets().find((x) => x.id === 'p_spin')!;
+  ok('the Spin preset actually goes all the way round',
+    spin.tracks.some((t) => t.property === 'surface.yaw' && t.keyframes.some((k) => k.value === 360)));
 
   ed().loadProject(defaultProject());
 }

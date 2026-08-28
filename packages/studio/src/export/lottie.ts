@@ -111,7 +111,11 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     // emitter's particles are glyphs, which would need a text layer with an embedded font
     // descriptor. Both are named in `skipped` rather than silently dropped — GIF and MP4
     // go through the real renderer and keep them.
-    if (first.svg || first.text !== undefined) { skipped.push(first.name); return; }
+    // Lottie has no shape for any of these: SVG markup is arbitrary, a glyph would need an
+    // embedded font descriptor, and a morphing outline would need per-frame bezier data.
+    // All are named in `skipped` rather than silently dropped — GIF and MP4 go through the
+    // real renderer and keep them.
+    if (first.svg || first.text !== undefined || first.path) { skipped.push(first.name); return; }
 
     // base geometry: the largest the shape ever gets, so scale stays <= 100%
     let w0 = 0, h0 = 0;

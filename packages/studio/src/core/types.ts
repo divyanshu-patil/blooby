@@ -40,6 +40,16 @@ export interface RigNode {
 
   primitive?: { shape: 'circle' | 'pill' };
 
+  /**
+   * An SVG path `d` in a -0.5..0.5 box, drawn instead of the node's ellipse/pill and
+   * scaled to its size. Keyframe it (`shape.path`) and the shape morphs — core/path.ts
+   * resamples both outlines to the same points and interpolates them, so any closed shape
+   * becomes any other. Undefined means the node draws its plain primitive, as always.
+   */
+  shapePath?: string;
+  /** what generated `shapePath`, so the parameter editor can keep offering its dials */
+  shape?: { kind: 'circle' | 'rect' | 'polygon' | 'star'; points?: number; innerRatio?: number; cornerRadius?: number; rotation?: number };
+
   svg?: { sourceMarkup: string; viewBox: string };
 }
 
@@ -61,7 +71,8 @@ export type EasingCurve =
   | { type: 'preset'; name: 'easeIn' | 'easeOut' | 'easeInOut' | 'bounce' | 'elastic' }
   | { type: 'bezier'; p1: Vec2; p2: Vec2 };
 
-export type KeyValue = number | ColorStop | Vec2;
+/** A string value is an SVG path `d` — see core/path.ts, which morphs between two. */
+export type KeyValue = number | ColorStop | Vec2 | string;
 
 export interface Keyframe {
   id: string;
@@ -164,6 +175,8 @@ export interface Emitter {
   glyphs: string[];
   /** used instead of a glyph when present */
   svg?: { sourceMarkup: string; viewBox: string };
+  /** which entry in Project.svgAssets `svg` came from, so the picker can show it selected */
+  svgAssetId?: string;
   color: ColorStop;
   /** glyph size in rig units before scaleFrom/scaleTo */
   size: number;
@@ -304,9 +317,14 @@ export interface Timeline {
   loop: boolean;
 }
 
+/** An SVG kept with the project so it can be reused — by an emitter, or as a layer. */
+export interface SvgAsset { id: string; name: string; markup: string; viewBox: string }
+
 export interface Project {
   name: string;
   rig: Rig;
+  /** optional, so every project saved before the library existed loads untouched */
+  svgAssets?: SvgAsset[];
   expressions: Expression[];
   presets: Preset[];
   timelines: Timeline[];
