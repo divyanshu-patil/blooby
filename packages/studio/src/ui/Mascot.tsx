@@ -15,6 +15,15 @@ export function Shapes({ scene }: { scene: SceneItem[] }) {
             </g>
           );
         }
+        if (s.text !== undefined) {
+          // dominantBaseline centres the glyph on cy, so an emitter's path math is about
+          // the particle's middle rather than wherever a font happens to sit its baseline
+          return (
+            <text key={s.id} x={s.cx} y={s.cy} fontSize={s.h} fill={cssColor(s.color)}
+              textAnchor="middle" dominantBaseline="central" transform={spin}
+              style={{ userSelect: 'none' }}>{s.text}</text>
+          );
+        }
         if (s.shape === 'ellipse') {
           return <ellipse key={s.id} cx={s.cx} cy={s.cy} rx={Math.max(s.w, 0) / 2} ry={Math.max(s.h, 0) / 2}
             fill={cssColor(s.color)} transform={spin} />;

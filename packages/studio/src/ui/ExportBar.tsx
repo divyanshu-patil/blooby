@@ -29,7 +29,7 @@ export function ExportBar() {
   const lottieJson = () => {
     const baked = bakeLottie(project, { background, name: project.name });
     download(new Blob([JSON.stringify(baked.json)], { type: 'application/json' }), `${base}.json`);
-    setNote(`${baked.frames} frames → ${baked.keyframeCount} keyframes${baked.skipped.length ? ` · SVG layers skipped: ${baked.skipped.join(', ')}` : ''}`);
+    setNote(`${baked.frames} frames → ${baked.keyframeCount} keyframes${baked.skipped.length ? ` · not representable in Lottie, use GIF/MP4 for these: ${[...new Set(baked.skipped)].join(', ')}` : ''}`);
   };
 
   const dotLottie = () => {

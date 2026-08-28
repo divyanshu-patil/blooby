@@ -107,7 +107,11 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
 
   order.forEach((id, n) => {
     const first = seen.get(id)!;
-    if (first.svg) { skipped.push(first.name); return; }
+    // Lottie has no shape for either of these: an SVG layer is arbitrary markup, and an
+    // emitter's particles are glyphs, which would need a text layer with an embedded font
+    // descriptor. Both are named in `skipped` rather than silently dropped — GIF and MP4
+    // go through the real renderer and keep them.
+    if (first.svg || first.text !== undefined) { skipped.push(first.name); return; }
 
     // base geometry: the largest the shape ever gets, so scale stays <= 100%
     let w0 = 0, h0 = 0;

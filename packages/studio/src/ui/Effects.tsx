@@ -8,6 +8,7 @@ const DEFAULTS: Record<ModifierKind, { amount: number; frequency: number; amplit
   shake: { amount: 100, frequency: 12, amplitude: 6, seed: 1 },
   float: { amount: 100, frequency: 0.6, amplitude: 8, phase: 0 },
   stretch: { amount: 100, frequency: 0.8, amplitude: 12, phase: 0 },
+  pendulum: { amount: 100, frequency: 0.7, amplitude: 10, phase: 0 },
 };
 
 /**

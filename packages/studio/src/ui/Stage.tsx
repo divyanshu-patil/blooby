@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { COMP } from '../core/defaults';
-import { buildScene, evaluateRig, evaluateWithTransition, type SceneItem } from '../core/scene';
+import { composeScene, evaluateRig, evaluateWithTransition, type SceneItem } from '../core/scene';
 import { bodyTurnScale, screenToSurface } from '../core/curvature';
 import { Shapes } from './Mascot';
+import { activeTimeline } from '../core/types';
 import type { Project, Rig } from '../core/types';
 
 type Mode = 'idle' | 'move' | 'scale' | 'rotate' | 'turn' | 'pan';
@@ -98,7 +99,9 @@ export function Stage() {
     // wall-clock progress" signal, not itself a value read inside this computation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, playhead, stateTransition, transitionTick]);
-  const scene = useMemo(() => buildScene(rig, COMP), [rig]);
+  // composeScene, not buildScene: the stage must draw exactly what the exporter bakes,
+  // emitters included, or the preview quietly lies about the finished animation
+  const scene = useMemo(() => composeScene(activeTimeline(project), rig, playhead, COMP), [project, rig, playhead]);
   const frame = bodyFrame(rig);
   const sel = scene.find((s) => s.id === selection[0]);
 

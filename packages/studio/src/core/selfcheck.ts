@@ -6,7 +6,7 @@
 import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
-import { activeTrackFor, buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
+import { activeTrackFor, buildScene, composeScene, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, scopeTime, valueAt } from './scene';
 import { defaultProject, makeTimeline } from './defaults';
 import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
@@ -1666,6 +1666,120 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('describe falls back to what the model wrote', line.includes('NotYetMade'), line);
 
   useEditor.getState().loadProject(defaultProject());
+}
+
+// --- pendulum, and the range an effect runs in ----------------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const bodyAt = (t: number) => buildScene(evaluateRig(P(), t), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
+
+  const base = Array.from({ length: 9 }, (_, i) => bodyAt(i * 120).rotation);
+  ed().addModifier({ nodeId: 'body', kind: 'pendulum', amount: 100, frequency: 1, amplitude: 12 });
+  const swung = Array.from({ length: 9 }, (_, i) => bodyAt(i * 120).rotation);
+  ok('a pendulum swings the body on rotation', swung.some((r, i) => Math.abs(r - base[i]) > 1));
+  ok('and swings BOTH ways, which is what makes it a pendulum',
+    Math.max(...swung.map((r, i) => r - base[i])) > 1 && Math.min(...swung.map((r, i) => r - base[i])) < -1,
+    swung.map((r, i) => (r - base[i]).toFixed(1)).join(' '));
+
+  // the axis is a dial: the same modifier on 'x' must move it, not turn it
+  const id = activeTimeline(P()).modifiers[0].id;
+  ed().updateModifier(id, (m) => { m.axis = 'x'; });
+  const onX = Array.from({ length: 9 }, (_, i) => bodyAt(i * 120));
+  ok('axis "x" slides instead of rotating',
+    onX.every((s, i) => Math.abs(s.rotation - base[i]) < 1e-6) && onX.some((s) => Math.abs(s.cx - onX[0].cx) > 1));
+
+  // a range narrows when it runs, measured from the start of its scope
+  ed().updateModifier(id, (m) => { m.axis = 'rotation'; m.startMs = 1000; m.endMs = 2000; });
+  ok('before the range, the effect is not running', Math.abs(bodyAt(500).rotation - base[4]) < 1e-6);
+  ok('after the range, the effect is not running', Math.abs(bodyAt(2600).rotation - bodyAt(2600).rotation) < 1e-6
+    && Math.abs(bodyAt(2400).rotation - buildScene(evaluateRig({ ...P(), timelines: P().timelines.map((t) => ({ ...t, modifiers: [] })) }, 2400), { width: 720, height: 720 }).find((s) => s.id === 'body')!.rotation) < 1e-6);
+  const inside = Array.from({ length: 6 }, (_, i) => bodyAt(1000 + i * 150).rotation);
+  ok('inside the range it swings', Math.max(...inside) - Math.min(...inside) > 1, inside.map((r) => r.toFixed(1)).join(' '));
+
+  // and it starts AT REST rather than picking up mid-swing
+  const tl0 = activeTimeline(P());
+  ok('the range start is the effect\u2019s own zero', scopeTime(tl0, { startMs: 1000, endMs: 2000 }, 1000) === 0);
+  ok('and outside it there is no time at all',
+    scopeTime(tl0, { startMs: 1000, endMs: 2000 }, 999) === null && scopeTime(tl0, { startMs: 1000, endMs: 2000 }, 2001) === null);
+
+  ed().loadProject(defaultProject());
+}
+
+// --- emitters: one engine for zzz, notes, tears, orbits and confetti -------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+  const at = (t: number) => {
+    const rig = evaluateRig(P(), t);
+    return emitterItems(activeTimeline(P()), rig, buildScene(rig, VIEW), t, VIEW);
+  };
+
+  ed().addEmitter({
+    name: 'zzz', glyphs: ['z', 'z', 'z'], color: { r: 90, g: 90, b: 110, a: 1 }, size: 26,
+    path: 'arc', from: { nodeId: 'eyeR', x: 14, y: -18 }, to: { x: 90, y: -120 }, bow: 18,
+    rateMs: 420, lifeMs: 1800, count: 4, fadeStart: 0.45,
+    scaleFrom: 0.6, scaleTo: 1.25, spin: 10, wobble: 4, wobbleFrequency: 1.4, seed: 3,
+  });
+
+  const t0 = at(900);
+  ok('an emitter puts particles on screen', t0.length > 0, String(t0.length));
+  ok('and they are glyphs, not shapes', t0.every((i) => i.text === 'z'));
+  ok('staggered, not stacked', new Set(t0.map((i) => Math.round(i.cx * 10))).size === t0.length);
+
+  // pure function of time: the same t must give the same picture, in any order
+  const a1 = JSON.stringify(at(1234)), a2 = JSON.stringify(at(1234));
+  ok('sceneAt(t) is answerable for any t, repeatably', a1 === a2);
+  ok('and scrubbing backwards is identical to arriving forwards',
+    JSON.stringify(at(700)) === (at(1500), JSON.stringify(at(700))));
+
+  // the fade actually fades
+  const alphas = Array.from({ length: 12 }, (_, i) => at(600 + i * 90)).flat().map((i) => i.color.a);
+  ok('particles fade rather than vanishing', Math.min(...alphas) < 0.5 && Math.max(...alphas) > 0.9,
+    `${Math.min(...alphas).toFixed(2)}..${Math.max(...alphas).toFixed(2)}`);
+
+  // anchoring is the whole trick behind tears: move the eye, the source moves with it
+  const eid = activeTimeline(P()).emitters![0].id;
+  const youngest = (ts: number) => at(ts).reduce((a, b) => (a.color.a > b.color.a ? a : b));
+  const before = youngest(420);
+  ed().commit((p) => { p.rig.nodes.eyeR.surface.yaw += 26; });
+  const after = youngest(420);
+  ok('an anchored source follows the layer it is attached to', Math.abs(after.cx - before.cx) > 4,
+    `${before.cx.toFixed(1)} -> ${after.cx.toFixed(1)}`);
+  ed().commit((p) => { p.rig.nodes.eyeR.surface.yaw -= 26; });
+
+  // a free anchor does not
+  ed().updateEmitter(eid, (e) => { e.from = { x: 0, y: 0 }; });
+  const free = youngest(420);
+  ed().commit((p) => { p.rig.nodes.eyeR.surface.yaw += 26; });
+  ok('an unanchored source stays put', Math.abs(youngest(420).cx - free.cx) < 1e-6);
+  ed().commit((p) => { p.rig.nodes.eyeR.surface.yaw -= 26; });
+
+  // orbit closes on itself — that is what makes it an orbit and not a line
+  ed().updateEmitter(eid, (e) => { e.path = 'orbit'; e.radiusX = 70; e.radiusY = 40; e.wobble = 0; e.fadeStart = 1; });
+  const ring = Array.from({ length: 24 }, (_, i) => at(i * 80)).flat();
+  const cx0 = ring[0].cx;
+  ok('an orbit comes back round to where it started',
+    Math.abs(Math.max(...ring.map((i) => i.cx)) - Math.min(...ring.map((i) => i.cx))) > 100
+    && ring.some((i) => Math.abs(i.cx - cx0) < 2));
+
+  // emitters must reach the exporter, not just the stage
+  ed().updateEmitter(eid, (e) => { e.path = 'arc'; });
+  const composed = composeScene(activeTimeline(P()), evaluateRig(P(), 900), 900, VIEW);
+  ok('composeScene carries them alongside the rig',
+    composed.some((i) => i.text === 'z') && composed.some((i) => i.id === 'body'));
+  ok('and draws them in front of the mascot',
+    composed.findIndex((i) => i.text === 'z') > composed.findIndex((i) => i.id === 'body'));
+
+  // scoped like a modifier
+  ed().updateEmitter(eid, (e) => { e.startMs = 1000; e.endMs = 1600; });
+  ok('an emitter respects its range too', at(500).length === 0 && at(1200).length > 0 && at(2000).length === 0);
+
+  ed().loadProject(defaultProject());
+  ok('a project with no emitters costs nothing', emitterItems(activeTimeline(P()), P().rig, [], 0, VIEW).length === 0);
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------

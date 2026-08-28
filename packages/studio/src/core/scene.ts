@@ -5,7 +5,7 @@ import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
 import { CAMERA_PROPS, getCameraProp, getProp, NUMERIC_PROPS, readProp, setCameraProp, setProp, writeProp } from './props';
 import { activeTimeline } from './types';
 import { activeTransitionAt, blockAt, blockStarts } from './timeline';
-import type { ColorStop, EasingCurve, KeyValue, Modifier, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
+import type { Anchor, ColorStop, EasingCurve, KeyValue, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
 const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
@@ -75,6 +75,14 @@ export function activeTrackFor(tl: Timeline, nodeId: string, property: string, t
   return fallback;
 }
 
+const PENDULUM_AXIS: Record<ModifierAxis, string> = {
+  rotation: 'transform.rotation',
+  x: 'flatOffset.x',
+  y: 'flatOffset.y',
+  yaw: 'surface.yaw',
+  pitch: 'surface.pitch',
+};
+
 function applyModifier(rig: Rig, m: Modifier, tSec: number) {
   const gain = (m.amount / 100) * m.amplitude;
   if (gain === 0) return;
@@ -96,6 +104,15 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number) {
     const cur = getProp(node, path);
     if (typeof cur === 'number') setProp(node, path, cur + d);
   };
+
+  // A pendulum is a sine on ONE chosen axis. Rotation is the one that actually reads as a
+  // pendulum — a hanging weight swings, it does not slide — but the axis is a dial because
+  // the same motion on flatOffset.x is what a slow sway wants.
+  if (m.kind === 'pendulum') {
+    const s = Math.sin(2 * Math.PI * m.frequency * tSec + (m.phase ?? 0)) * gain;
+    bump(PENDULUM_AXIS[m.axis ?? 'rotation'], s);
+    return;
+  }
   if (m.kind === 'shake') {
     const seed = m.seed ?? 0;
     const p = tSec * m.frequency;
@@ -246,15 +263,39 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
     // check block-scoped tracks already use, so a Shake added to just "Blink" can't leak
     // into neighboring clips. The effect's own phase runs from the clip's start, too, so
     // dragging the clip elsewhere on the timeline can't change how it looks internally.
-    let originMs = 0;
-    if (m.blockId) {
-      const w = blockWindow(tl, m.blockId);
-      if (!w || timeMs < w[0] || timeMs > w[1]) continue;
-      originMs = w[0];
-    }
-    applyModifier(rig, m, (timeMs - originMs) / 1000);
+    const local = scopeTime(tl, m, timeMs);
+    if (local === null) continue;
+    applyModifier(rig, m, local / 1000);
   }
   return rig;
+}
+
+/**
+ * How far into an effect's own run `timeMs` is, or null when it is not running.
+ *
+ * Scope is the clip when `blockId` is set and the whole timeline otherwise; `startMs`/
+ * `endMs` narrow it further, measured from the start of that scope. The returned time
+ * counts from `startMs`, not from the scope, so an effect with a range begins at rest
+ * rather than picking up mid-swing — and because everything here is relative, dragging a
+ * clip elsewhere on the strip cannot change how the effect inside it looks.
+ */
+export function scopeTime(tl: Timeline, e: { blockId?: string; startMs?: number; endMs?: number }, timeMs: number): number | null {
+  let originMs = 0;
+  if (e.blockId) {
+    const w = blockWindow(tl, e.blockId);
+    if (!w || timeMs < w[0] || timeMs > w[1]) return null;
+    originMs = w[0];
+  }
+  const local = timeMs - originMs;
+  if (e.startMs !== undefined && local < e.startMs) return null;
+  if (e.endMs !== undefined && local > e.endMs) return null;
+  return local - (e.startMs ?? 0);
+}
+
+/** [start, end] of an effect's scope on the timeline — what its range handles slide in. */
+export function scopeSpan(tl: Timeline, blockId: string | undefined): [number, number] {
+  const w = blockId ? blockWindow(tl, blockId) : null;
+  return w ? [0, w[1] - w[0]] : [0, tl.timelineDurationMs];
 }
 
 // numeric only: color is keyframeable in the editor but there is nothing to interpolate
@@ -340,6 +381,8 @@ export interface SceneItem {
   depth: number;
   zIndex: number;
   svg?: { sourceMarkup: string; viewBox: string };
+  /** a glyph rather than a shape — what an emitter puts on screen. `h` is the font size. */
+  text?: string;
 }
 
 export interface Viewport { width: number; height: number }
@@ -424,8 +467,125 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   return out;
 }
 
-export const sceneAt = (project: Project, t: number, view: Viewport) =>
-  buildScene(evaluateRig(project, t), view);
+/**
+ * Everything an emitter has on screen at `timeMs`.
+ *
+ * Particles are not simulated — there is no state to carry between frames, because there
+ * is no frame loop to carry it through. `sceneAt(t)` has to be answerable for any t in any
+ * order (the timeline scrubs, the exporter jumps, a thumbnail asks for one instant), so
+ * each particle is a pure function of its slot index and the time. Slot i is simply
+ * `i * rateMs` behind the emitter's clock, wrapping every `slots * rateMs`.
+ *
+ * `base` is the already-built rig scene: anchors read positions straight out of it rather
+ * than re-projecting, so a tear parented to an eye lands exactly where that eye was drawn,
+ * through every squash, roll and perspective divide that put it there.
+ */
+export function emitterItems(
+  tl: Timeline, rig: Rig, base: SceneItem[], timeMs: number, view: Viewport,
+): SceneItem[] {
+  const emitters = tl.emitters ?? [];
+  if (!emitters.length) return [];
+
+  const root = rig.nodes[rig.rootId];
+  const body = base.find((i) => i.id === rig.rootId);
+  // rig units -> screen: the body's drawn radius against its authored radius, so an
+  // emitter keeps its proportions when the mascot scales or the viewport changes
+  const unit = root && body && root.size.x > 0 ? (body.w / 2) / root.size.x : 1;
+  const centre = {
+    x: body?.cx ?? view.width / 2 + rig.camera.offset.x,
+    y: body?.cy ?? view.height / 2 + rig.camera.offset.y,
+  };
+
+  const anchor = (a: Anchor) => {
+    const on = a.nodeId ? base.find((i) => i.id === a.nodeId) : undefined;
+    return { x: (on?.cx ?? centre.x) + a.x * unit, y: (on?.cy ?? centre.y) + a.y * unit };
+  };
+
+  const out: SceneItem[] = [];
+  for (const e of emitters) {
+    const t = scopeTime(tl, e, timeMs);
+    if (t === null) continue;
+
+    const life = Math.max(1, e.lifeMs);
+    const rate = Math.max(1, e.rateMs);
+    const slots = Math.max(1, Math.min(e.count, Math.ceil(life / rate)));
+    const cycle = slots * rate;
+    const from = anchor(e.from), to = anchor(e.to);
+    const seed = e.seed ?? 0;
+
+    for (let i = 0; i < slots; i++) {
+      const age = ((t - i * rate) % cycle + cycle) % cycle;
+      if (age >= life) continue;                       // this slot is between spawns
+      const u = age / life;
+
+      let x: number, y: number;
+      if (e.path === 'orbit') {
+        // radius defaults to the from->to distance, so dragging the end handle sizes the
+        // ellipse — one gesture, whichever path is selected
+        const rx = (e.radiusX ?? Math.hypot(to.x - from.x, to.y - from.y) / unit) * unit;
+        const ry = (e.radiusY ?? e.radiusX ?? Math.hypot(to.x - from.x, to.y - from.y) / unit) * unit;
+        const a = 2 * Math.PI * (u + i / slots);
+        x = from.x + Math.cos(a) * rx;
+        y = from.y + Math.sin(a) * ry;
+      } else if (e.path === 'fall') {
+        // horizontal at a constant rate, vertical accelerating — gravity, cheaply
+        x = from.x + (to.x - from.x) * u + (i / slots - 0.5) * 2 * e.bow * unit;
+        y = from.y + (to.y - from.y) * u * u;
+      } else {
+        x = from.x + (to.x - from.x) * u;
+        y = from.y + (to.y - from.y) * u;
+        // a quadratic bump perpendicular to travel: 0 at both ends, widest in the middle
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const bow = e.bow * unit * 4 * u * (1 - u);
+        x += (-dy / len) * bow;
+        y += (dx / len) * bow;
+      }
+
+      if (e.wobble) {
+        const w = e.wobble * unit;
+        const phase = u * e.wobbleFrequency * (life / 1000) + i * 7.3;
+        x += noise1d(phase, seed) * w;
+        y += noise1d(phase + 31.7, seed) * w;
+      }
+
+      // fade in quickly so nothing pops into existence, then out from fadeStart
+      const fadeIn = Math.min(1, u / 0.12);
+      const tail = Math.max(1e-3, 1 - e.fadeStart);
+      const fadeOut = u <= e.fadeStart ? 1 : Math.max(0, 1 - (u - e.fadeStart) / tail);
+      const alpha = e.color.a * fadeIn * fadeOut;
+      if (alpha <= 0.002) continue;
+
+      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * unit;
+      out.push({
+        id: `${e.id}#${i}`, name: e.name, shape: 'pill',
+        cx: x, cy: y, w: size, h: size, r: size / 2,
+        rotation: e.spin * u,
+        color: { ...e.color, a: alpha },
+        depth: 3, zIndex: 900,
+        ...(e.svg ? { svg: e.svg } : { text: e.glyphs[i % Math.max(1, e.glyphs.length)] ?? '' }),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The rig plus whatever its emitters have on screen, in draw order.
+ *
+ * The editor's stage needs the evaluated rig for its own handles, so it cannot go through
+ * `sceneAt` — but it must not therefore draw a different picture than the exporter does.
+ * Both call this.
+ */
+export function composeScene(tl: Timeline, rig: Rig, timeMs: number, view: Viewport): SceneItem[] {
+  const base = buildScene(rig, view);
+  const extra = emitterItems(tl, rig, base, timeMs, view);
+  if (!extra.length) return base;
+  return [...base, ...extra].sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
+}
+
+export const sceneAt = (project: Project, t: number, view: Viewport): SceneItem[] =>
+  composeScene(activeTimeline(project), evaluateRig(project, t), t, view);
 
 /** Current value of a property, tracks included — what the inspector shows. Mirrors
  * evaluateRig's own per-track sampling (block speed/loop included) so the inspector can

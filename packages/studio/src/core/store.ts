@@ -5,7 +5,7 @@ import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from '
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
-import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
+import type { Block, EasingCurve, Emitter, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
@@ -127,6 +127,10 @@ export interface Editor {
   addModifier: (m: Omit<Modifier, 'id'>) => void;
   updateModifier: (id: string, fn: (m: Modifier) => void) => void;
   removeModifier: (id: string) => void;
+
+  addEmitter: (e: Omit<Emitter, 'id'>) => void;
+  updateEmitter: (id: string, fn: (e: Emitter) => void) => void;
+  removeEmitter: (id: string) => void;
 
   captureExpression: (name: string) => void;
   renameExpression: (id: string, name: string) => void;
@@ -704,6 +708,12 @@ export const useEditor = create<Editor>((set, get) => ({
   addModifier(m) { get().commit((p) => { at(p).modifiers.push({ ...m, id: uid('m') }); }); },
   updateModifier(id, fn) { get().commit((p) => { const m = at(p).modifiers.find((x) => x.id === id); if (m) fn(m); }, `mod.${id}`); },
   removeModifier(id) { get().commit((p) => { at(p).modifiers = at(p).modifiers.filter((m) => m.id !== id); }); },
+
+  // `emitters` is optional on Timeline so old projects load untouched — every write has
+  // to seed the array rather than assume it
+  addEmitter(e) { get().commit((p) => { const tl = at(p); (tl.emitters ??= []).push({ ...e, id: uid('e') }); }); },
+  updateEmitter(id, fn) { get().commit((p) => { const e = at(p).emitters?.find((x) => x.id === id); if (e) fn(e); }, `emit.${id}`); },
+  removeEmitter(id) { get().commit((p) => { const tl = at(p); if (tl.emitters) tl.emitters = tl.emitters.filter((e) => e.id !== id); }); },
 
   captureExpression(name) {
     const { project, playhead } = get();

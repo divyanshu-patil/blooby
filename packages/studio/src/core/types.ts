@@ -94,7 +94,13 @@ export const MODIFIERS = {
     help: 'Bobs the node on a slow sine. frequency 0.3-1.5 Hz, amplitude 3-15.' },
   stretch: { label: 'Stretch', maxFrequency: 6,
     help: 'Pulses the node and everything mapped onto it as one \u2014 squash-and-stretch for the whole rig. frequency 0.3-1.5 Hz, amplitude 3-15.' },
+  pendulum: { label: 'Pendulum', maxFrequency: 6,
+    help: 'Swings the node back and forth on ONE axis, like a hanging weight \u2014 set `axis` to "rotation" (default), "x", "y", "yaw" or "pitch". frequency 0.3-1.5 Hz, amplitude 6-20.' },
 } as const;
+
+/** Which single property a pendulum swings. Rotation is the one that reads as a pendulum. */
+export type ModifierAxis = 'rotation' | 'x' | 'y' | 'yaw' | 'pitch';
+export const MODIFIER_AXES: ModifierAxis[] = ['rotation', 'x', 'y', 'yaw', 'pitch'];
 
 export type ModifierKind = keyof typeof MODIFIERS;
 export const MODIFIER_KINDS = Object.keys(MODIFIERS) as ModifierKind[];
@@ -109,10 +115,89 @@ export interface Modifier {
   seed?: number;
   amplitude: number;
   phase?: number;
+  /** pendulum only: which axis it swings on. Undefined means 'rotation'. */
+  axis?: ModifierAxis;
   /** set when this effect was added to one clip specifically — it then only evaluates
    * inside that block's own time window instead of the whole timeline. Undefined means
    * global, exactly like every effect before per-clip effects existed. */
   blockId?: string;
+  /**
+   * The slice of its scope this effect actually runs in, in ms from the START OF THAT
+   * SCOPE — the clip's own start when `blockId` is set, the timeline's when it is not.
+   * Relative rather than absolute so dragging a clip elsewhere cannot desynchronise the
+   * effect inside it, exactly like the phase origin. Undefined at either end means "the
+   * whole scope", which is what every effect did before ranges existed.
+   */
+  startMs?: number;
+  endMs?: number;
+}
+
+/** How an emitted particle travels. */
+export type EmitterPath = 'arc' | 'orbit' | 'fall';
+
+/**
+ * Where an emitter's path begins or ends.
+ *
+ * Attached to a node, the point tracks whatever that node is doing — which is the whole
+ * trick behind tears: parent the start to an eye and the drops come out of the eye no
+ * matter how the head moves. Free, it is an offset from the body's centre.
+ */
+export interface Anchor {
+  /** follow this layer; undefined means the offset is from the body centre */
+  nodeId?: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * A stream of little things leaving the mascot: zzz, ♪, tears, a notification badge,
+ * confetti, or objects orbiting overhead.
+ *
+ * One record covers all of those because they are the same thing with different numbers —
+ * a glyph or an SVG, a path from somewhere to somewhere, some wander, and a fade. Five
+ * separate "systems" would have been five sets of the same bugs.
+ */
+export interface Emitter {
+  id: string;
+  name: string;
+  /** cycled in order, one per particle: ['z','z','z'] or ['♪','♫','♩','♬'] */
+  glyphs: string[];
+  /** used instead of a glyph when present */
+  svg?: { sourceMarkup: string; viewBox: string };
+  color: ColorStop;
+  /** glyph size in rig units before scaleFrom/scaleTo */
+  size: number;
+
+  path: EmitterPath;
+  from: Anchor;
+  to: Anchor;
+  /** sideways bow on an arc, in rig units — what makes a tear curve rather than fall flat */
+  bow: number;
+  /** orbit only: the ellipse around `from`. Undefined falls back to the travel distance. */
+  radiusX?: number;
+  radiusY?: number;
+
+  /** ms between spawns, how long one lives, and how many may be alive at once */
+  rateMs: number;
+  lifeMs: number;
+  count: number;
+
+  /** 0–1 of a particle's life, where it starts fading out */
+  fadeStart: number;
+  scaleFrom: number;
+  scaleTo: number;
+  /** degrees over a full life */
+  spin: number;
+
+  /** off-path wander, in rig units, from the same noise the shake modifier uses */
+  wobble: number;
+  wobbleFrequency: number;
+
+  seed?: number;
+  /** scoped exactly like a Modifier — same clip, same relative range */
+  blockId?: string;
+  startMs?: number;
+  endMs?: number;
 }
 
 export interface Expression {
@@ -191,6 +276,8 @@ export interface Timeline {
   name: string;
   tracks: Track[];
   modifiers: Modifier[];
+  /** optional, so every project saved before emitters existed loads with no migration */
+  emitters?: Emitter[];
   blocks: Block[];
   /** one per transitioned seam, keyed by the clip it follows — absent entries just mean
    * no transition there yet. Optional (not defaulted to []) so every project saved before
