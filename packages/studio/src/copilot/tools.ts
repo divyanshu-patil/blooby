@@ -397,7 +397,9 @@ export function applyCalls(calls: ToolCall[]) {
         }
       }
     }
-  }, `copilot.${Date.now()}`);
+    // no coalesce label: every Apply is its own undo step. A timestamp label merged two
+    // batches applied inside the same millisecond into one.
+  });
 }
 
 /** A property with a track can't be set statically — the track would just mask it. */

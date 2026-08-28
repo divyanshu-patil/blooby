@@ -208,7 +208,7 @@ export function Expressions() {
     return expressionCatalog.filter((e) => !own.has(e.id));
   }, [project.expressions, expressionCatalog]);
 
-  const useShared = (x: Expression) => {
+  const adoptShared = (x: Expression) => {
     commit((p) => { if (!p.expressions.some((e) => e.id === x.id)) p.expressions = [...p.expressions, x]; }, 'add pose from library');
     apply(x.id, playhead);
   };
@@ -262,7 +262,7 @@ export function Expressions() {
           <div className="chips">
             {shared.map((x) => (
               <button key={x.id} className="chip" title={`Add "${x.name}" and apply it at ${(playhead / 1000).toFixed(2)}s`}
-                onClick={() => useShared(x)}>
+                onClick={() => adoptShared(x)}>
                 <span className="glyph" style={{ display: 'grid', placeItems: 'center', font: '600 9px var(--mono)', color: 'var(--paper)' }}>
                   {Object.keys(x.snapshot ?? {}).length}
                 </span>
