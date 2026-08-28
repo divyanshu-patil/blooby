@@ -11,8 +11,9 @@
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": "."
+    "rootDir": "./src",
+    "outDir": "./dist"
   },
-  "include": ["src", "scripts"]
+  "include": ["src/**/*"],
+  "exclude": ["scripts/**/*"]
 }
