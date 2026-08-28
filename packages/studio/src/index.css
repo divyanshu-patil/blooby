@@ -577,13 +577,21 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 /* ---- copilot ------------------------------------------------------------ */
 .chat { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
 .thread { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; scrollbar-width: thin; min-height: 150px; }
-.msg { font-size: 12px; line-height: 1.5; }
-.msg .who { font: 700 9px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 2px; }
-.msg.user .bubble { background: var(--ink); color: var(--paper); padding: 7px 9px; border-radius: 7px; }
-.msg.bot .bubble { background: var(--field); border: 1px solid var(--line-soft); padding: 7px 9px; border-radius: 7px; white-space: pre-wrap; }
-.msg.err .bubble { background: #fbe8e3; border: 1px solid #f0b9a9; color: #8a2c12; padding: 7px 9px; border-radius: 7px; }
+/* you on the right, the copilot on the left. The tail corner (the one square edge) is
+   what makes the side read at a glance without a colour change. */
+.msg { display: flex; flex-direction: column; align-items: flex-start; font-size: 12px; line-height: 1.5; }
+.msg.user { align-items: flex-end; }
+.msg .who { font: 700 9px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.msg .bubble { max-width: 88%; padding: 7px 9px; border-radius: 10px 10px 10px 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user .bubble { background: var(--ink); color: var(--paper); border-radius: 10px 10px 3px 10px; }
+.msg.bot .bubble { background: var(--field); border: 1px solid var(--line-soft); }
+.msg.err .bubble { background: #fbe8e3; border: 1px solid #f0b9a9; color: #8a2c12; }
+.msg.note .bubble { background: var(--field); border: 1px dashed var(--line); color: var(--muted); }
 
-.msg.note .bubble { background: var(--field); border: 1px dashed var(--line); color: var(--muted); padding: 7px 9px; border-radius: 7px; }
+/* the proposal card is an action surface, not speech — it stays full width */
+.msg .proposal, .msg .think { align-self: stretch; }
+.msg-acts { display: flex; gap: 2px; margin-top: 2px; }
+.msg-acts .btn { height: 18px; padding: 0 5px; font-size: 10px; color: var(--muted); }
 .msg .think { margin-top: 4px; font-size: 11px; color: var(--muted); }
 .msg .think summary { cursor: pointer; font: 700 9px var(--display); letter-spacing: .12em; text-transform: uppercase; }
 .msg .think pre { margin: 4px 0 0; padding: 6px 8px; background: var(--field); border: 1px solid var(--line-soft); border-radius: 6px; white-space: pre-wrap; font: 400 11px/1.5 var(--mono); max-height: 180px; overflow: auto; }

@@ -26,7 +26,12 @@ export function Copilot() {
   const busy = phase !== 'idle';
   const [showKeys, setShowKeys] = useState(false);
   const [newKey, setNewKey] = useState('');
+  const [copied, setCopied] = useState(-1);
+  // where ↑/↓ currently sit in your own past messages; null means you are on the live draft
+  const [recalled, setRecalled] = useState<number | null>(null);
   const thread = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const draft = useRef('');
 
   useEffect(() => { thread.current?.scrollTo({ top: 1e6 }); }, [turns]);
 
@@ -64,6 +69,7 @@ export function Copilot() {
     const text = input.trim();
     if (!text || busy) return;
     setInput('');
+    setRecalled(null);
     push({ role: 'user', text });
     setPhase('thinking');
     const ac = new AbortController();
@@ -111,6 +117,43 @@ export function Copilot() {
   };
 
   const stop = () => abort?.abort();
+
+  const copy = (i: number, text: string) => {
+    // clipboard is unavailable on an insecure origin; say nothing rather than throw
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(i);
+      setTimeout(() => setCopied((n) => (n === i ? -1 : n)), 1400);
+    }).catch(() => {});
+  };
+
+  /**
+   * ↑/↓ through your own past messages, the way a shell does.
+   *
+   * Entering history needs the caret at the very start, so arrow keys still move around
+   * a draft you are editing; once you are in it, they keep stepping. Returns whether it
+   * handled the key.
+   */
+  const recall = (dir: -1 | 1): boolean => {
+    const mine = turns.filter((t) => t.role === 'user').map((t) => t.text);
+    if (!mine.length) return false;
+    const put = (v: string) => {
+      setInput(v);
+      requestAnimationFrame(() => box.current?.setSelectionRange(v.length, v.length));
+    };
+    if (recalled === null) {
+      if (dir === 1) return false;
+      draft.current = input;
+      setRecalled(mine.length - 1);
+      put(mine[mine.length - 1]);
+      return true;
+    }
+    const next = recalled + dir;
+    if (next < 0) return true;                       // already at the oldest — swallow it
+    if (next >= mine.length) { setRecalled(null); put(draft.current); return true; }
+    setRecalled(next);
+    put(mine[next]);
+    return true;
+  };
 
   const apply = (i: number) => {
     const turn = turns[i];
@@ -223,6 +266,11 @@ export function Copilot() {
                     <pre>{t.thinking}</pre>
                   </details>
                 )}
+                <div className="msg-acts">
+                  <button className="btn ghost sm" title="Copy this message" onClick={() => copy(i, t.text)}>
+                    {copied === i ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
                 {!!t.calls?.length && (
                   <div className="proposal" style={{ marginTop: 6 }}>
                     <ul>
@@ -242,11 +290,19 @@ export function Copilot() {
             ))}
             {busy && <p className="hint working">{PHASE_LABEL[phase as keyof typeof PHASE_LABEL]}</p>}
           </div>
-          <textarea className="ask" placeholder="Describe the animation you want…" value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) ask(); }} />
+          <textarea ref={box} className="ask" placeholder="Describe the animation you want…" value={input}
+            onChange={(e) => { setInput(e.target.value); setRecalled(null); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { ask(); return; }
+              const t = e.currentTarget;
+              const atStart = t.selectionStart === 0 && t.selectionEnd === 0;
+              const atEnd = t.selectionStart === t.value.length && t.selectionEnd === t.value.length;
+              if (e.key === 'ArrowUp' && (recalled !== null || atStart) && recall(-1)) e.preventDefault();
+              else if (e.key === 'ArrowDown' && recalled !== null && atEnd && recall(1)) e.preventDefault();
+              else if (e.key === 'Escape' && recalled !== null) { setRecalled(null); setInput(draft.current); }
+            }} />
           <div className="row">
-            <span className="hint">⌘↵ to send</span>
+            <span className="hint">⌘↵ to send · ↑ for your last message</span>
             <span className="spacer" />
             <button className="btn sm" disabled={!turns.length || busy} onClick={clear}>Clear</button>
             {busy && phase !== 'applying'
