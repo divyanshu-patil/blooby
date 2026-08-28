@@ -53,6 +53,11 @@ export const adminApi = {
     api.get<Page<AdminUser>>('/api/admin/users', params),
   user: (id: string) => api.get<AdminUser & { recentProjects: ProjectRow[]; publishedAssets: number; pendingAssets: number }>(`/api/admin/users/${id}`),
   setRole: (id: string, role: 'user' | 'admin') => api.patch<AdminUser>(`/api/admin/users/${id}/role`, { role }),
+
+  copilot: () => api.get<CopilotAdminView>('/api/admin/copilot'),
+  setCopilotSettings: (allowUserKeys: boolean) => api.patch<CopilotAdminView>('/api/admin/copilot', { allowUserKeys }),
+  addCopilotKey: (key: string, label: string) => api.post<CopilotKeyRow>('/api/admin/copilot/keys', { key, label }),
+  removeCopilotKey: (id: string) => api.del<void>(`/api/admin/copilot/keys/${id}`),
   projects: (params: { q?: string; userId?: string; limit?: number; cursor?: string }) =>
     api.get<Page<ProjectRow>>('/api/admin/projects', params),
   moderationQueue: (params: { status: string; limit?: number; cursor?: string }) =>
@@ -68,4 +73,23 @@ export const adminApi = {
   publishSplash: (id: string) => api.post<SplashscreenRow>(`/api/admin/splashscreens/${id}/publish`),
   unpublishSplash: (id: string) => api.post<SplashscreenRow>(`/api/admin/splashscreens/${id}/unpublish`),
   removeSplash: (id: string) => api.del<void>(`/api/admin/splashscreens/${id}`),
+};
+
+/** Two booleans, which is all a signed-in user is told about the server's copilot setup. */
+export interface CopilotConfig { allowUserKeys: boolean; hasServerKeys: boolean }
+
+/** Never carries `secret` — the API has no read path that selects it. */
+export interface CopilotKeyRow {
+  id: string; label: string; hint: string;
+  status: 'ok' | 'rate-limited' | 'error';
+  note: string | null; lastUsedAt: string | null; createdAt: string;
+}
+
+export interface CopilotAdminView {
+  allowUserKeys: boolean;
+  keys: CopilotKeyRow[];
+}
+
+export const copilotApi = {
+  config: () => api.get<CopilotConfig>('/api/copilot/config'),
 };

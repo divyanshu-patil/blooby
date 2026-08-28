@@ -141,6 +141,35 @@ wrong for anything but a small correction. That is why the craft block tells the
 prefer the surface angles — it is rig-specific advice a general animation guide could not
 give.
 
+### The four-beat clip shape: rest 200–400, move, hold 300–600, return
+
+This one is not from the literature, it is from watching generated clips fail. A model
+given "make the eyes go big" puts a keyframe at 0 and one at 400 and stops there. Three
+things go wrong:
+
+- **Starting on frame 0** means the clip is already moving the instant it appears. Placed
+  after another clip on the strip, it reads as clipped rather than as a new beat. The
+  200–400 ms rest is the same interval as an anticipation hold — long enough to register
+  as a pose, short enough not to feel like a stall.
+- **Not holding** means the peak is passed through rather than seen. This is the "holds"
+  principle from the twelve, stated as a number: a pose the viewer is meant to *read*
+  needs 300–600 ms; below ~200 ms it registers as a flicker
+  ([Creative Bloq](https://www.creativebloq.com/advice/understand-the-12-principles-of-animation)).
+- **Not returning** means the last keyframe is not the first, so the clip cannot loop and
+  cannot be followed by another without a visible jump. The timeline's `loop` flag already
+  derives a closing keyframe per track, but a clip that ends where it started needs no
+  such rescue and behaves correctly in every position on the strip.
+
+The exceptions are stated in the craft block because a rule with no stated exceptions gets
+applied to the cases it ruins: a deliberate state change ("look sleepy and stay that way")
+must not spring back, a continuous loop has no rest beat by definition, and one beat of a
+multi-clip sequence should not each carry their own rest and return.
+
+Paired with this: the copilot is told to **extend the timeline** with `set_timeline` when
+the shape does not fit, rather than compressing the animation into the duration it happens
+to have been given. Compressing is the failure this rule exists to prevent — it is how a
+1400 ms beat becomes an unreadable 400 ms one.
+
 ## Recipes
 
 The recipe list is not sourced; it is this rig's properties applied to the rules above,

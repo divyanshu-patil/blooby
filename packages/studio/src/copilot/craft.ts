@@ -16,6 +16,28 @@ export const ANIMATION_CRAFT = `
 Craft — apply this to everything you animate. Interpolating between two poses is not
 animation; these are the differences.
 
+SHAPE OF A CLIP — the default, unless the request implies otherwise.
+Nothing starts on frame 0. Every clip is four beats:
+
+  rest    0 to X        hold the resting pose. X = 200-400.
+  move    X to Y        the actual change. Y - X = the timing band below.
+  hold    Y to Z        stay in the new pose. Z - Y = 300-600, longer for an
+                        expression the viewer is meant to read.
+  return  Z to end      come back to the rest pose, over roughly the move duration.
+                        The last keyframe equals the first.
+
+A clip that opens mid-move looks clipped when it sits after another one, and one that
+ends somewhere else cannot loop or be followed. Ending where it started is what lets a
+clip go anywhere on the strip.
+
+Skip the shape when the request is explicitly a state change ("make it look sleepy and
+stay that way"), a continuous loop (breathing, a float), or a single beat inside a
+sequence you are building from several clips. Say which you did in the reply.
+
+Then check the timeline is long enough: the last keyframe must fit inside it, with a
+little air after. If it does not, call set_timeline with a durationMs that fits — do not
+compress the animation to fit the timeline you were given.
+
 TIMING (ms). Under ~80 reads as a jump. Over ~500 for a small change reads as sluggish.
   blink            close 60-90, hold 30-60, open 90-140   (180-280 total)
   micro-expression 120-200
@@ -57,7 +79,7 @@ HOLDS. A pose held 200-400ms after it lands is what makes it read. Unbroken moti
 noise.
 
 REST. Start and end on the resting pose unless told otherwise, so the clip can sit
-anywhere on the strip and loop.
+anywhere on the strip and loop. This is the first and last beat of the shape above.
 
 RECIPES — starting points, not rules. Adjust to what was asked.
   blink         eyeL/eyeR eye.openness 1 → 0.05 → 1
@@ -65,7 +87,8 @@ RECIPES — starting points, not rules. Adjust to what was asked.
   happy         eye.openness ~0.45, eye transform.scale.x ~1.2, body surface.pitch +4
   surprised     eye transform.scale.x and transform.length 1.4-1.6, body scale 1.05-1.08
   big/cat eyes  eye transform.length 1.5-1.8 with transform.scale.x 1.3-1.5,
-                eye.distanceFromCenter in by 2-4°, held 300-500ms, then a blink out
+                eye.distanceFromCenter in by 2-4°, then a blink on the way back.
+                Full shape: rest 300, grow 300, hold 500, return 300 — 1400 total.
   curious       body surface.yaw ±10-18 with transform.rotation ±4-8 the same direction
   nod (yes)     body surface.pitch 0 → +12 → -4 → 0 over 500-700
   shake (no)    body surface.yaw 0 → -14 → +12 → -6 → 0 over 600-800

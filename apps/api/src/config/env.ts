@@ -33,8 +33,10 @@ const schema = z.object({
   /** Hard ceiling on a single uploaded project payload. */
   MAX_PROJECT_BYTES: z.coerce.number().int().positive().default(8 * 1024 * 1024),
 
-  /** Optional: Ollama Cloud keys for the copilot proxy, tried in order. */
-  OLLAMA_KEYS: z.string().default(''),
+  // Copilot keys deliberately do NOT live here. They are rows in public.copilot_keys,
+  // managed from the admin dashboard: a pool in an env var means rotating a key is a
+  // redeploy, only the person holding the host can do it, and every key is visible to
+  // anything that can read the process environment.
   OLLAMA_URL: z.string().url().default('https://ollama.com'),
 });
 
@@ -57,7 +59,6 @@ export const env = {
   isProd: raw.NODE_ENV === 'production',
   corsOrigins: [raw.APP_URL, raw.ADMIN_URL],
   allowedMediaTypes: raw.ALLOWED_MEDIA_TYPES.split(',').map((s) => s.trim()).filter(Boolean),
-  ollamaKeys: raw.OLLAMA_KEYS.split(',').map((s) => s.trim()).filter(Boolean),
 };
 
 export type Env = typeof env;

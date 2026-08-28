@@ -10,6 +10,8 @@ import { uuidParam } from '../dtos/common.js';
 import { analyticsRangeDto, listAdminProjectsDto, listUsersDto, updateUserRoleDto } from '../dtos/admin/index.js';
 import { createAssetDto, listModerationDto, moderateAssetDto } from '../dtos/assets/index.js';
 import { createSplashscreenDto, updateSplashscreenDto } from '../dtos/splashscreens/index.js';
+import { copilotSettingsDto, createCopilotKeyDto } from '../dtos/copilot/index.js';
+import { copilotController } from '../controllers/copilot.controller.js';
 
 /**
  * The gate is applied once, to the whole router. A new admin endpoint therefore cannot be
@@ -42,3 +44,10 @@ adminRoutes.patch('/splashscreens/:id', id, validate(updateSplashscreenDto), asy
 adminRoutes.post('/splashscreens/:id/publish', id, asyncHandler(splashscreensController.publish));
 adminRoutes.post('/splashscreens/:id/unpublish', id, asyncHandler(splashscreensController.unpublish));
 adminRoutes.delete('/splashscreens/:id', id, asyncHandler(splashscreensController.remove));
+
+// the copilot key pool. `secret` is never selected by these handlers — an admin manages
+// keys by hint and label, and reads none of them back.
+adminRoutes.get('/copilot', asyncHandler(copilotController.adminView));
+adminRoutes.patch('/copilot', validate(copilotSettingsDto), asyncHandler(copilotController.setSettings));
+adminRoutes.post('/copilot/keys', validate(createCopilotKeyDto), asyncHandler(copilotController.addKey));
+adminRoutes.delete('/copilot/keys/:id', id, asyncHandler(copilotController.removeKey));

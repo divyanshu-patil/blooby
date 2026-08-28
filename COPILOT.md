@@ -164,6 +164,37 @@ propose the same thing again.
 - **A cancel is not a failure.** An `AbortError` must never mark a key bad or sweep the
   pool.
 
+## Keys, and whose they are
+
+Ollama Cloud keys are **rows in `public.copilot_keys`**, managed from the admin
+dashboard's Copilot tab. They are deliberately not in an environment variable: a pool in
+`OLLAMA_KEYS` means rotating one key is a redeploy, only whoever owns the host can do it,
+and every key is readable by anything that can read the process environment.
+
+Both `copilot_keys` and `copilot_settings` have RLS **enabled with no policies**. That is
+not an oversight — a table in that state is readable only by the service role, so only
+`apps/api` behind `requireAdmin` can touch it. A leaked publishable key reads nothing.
+
+A key is write-only from the dashboard: posted once, and it comes back as a `hint`
+(`sk-a…9f2c`). No read path on the server selects `secret`, so no amount of poking at the
+admin screen recovers a key — including for the admin who pasted it.
+
+### The `allowUserKeys` switch
+
+| switch | user keys | server keys | what happens |
+| --- | --- | --- | --- |
+| on | some | — | backend, using the user's keys |
+| on | none | yes | backend, using the server pool |
+| on | none | no | local Ollama daemon |
+| off | ignored | yes | backend, server pool |
+| off | ignored | no | local Ollama daemon |
+
+The editor hides the key field when the switch is off, but **the hiding is a convenience,
+not the mechanism**. `copilotService.keysFor()` drops supplied keys whenever the switch is
+off, so a client that keeps sending them is simply ignored. A UI-only switch is not a
+switch. `pnpm --filter @blooby/api check:copilot` asserts exactly that against the real
+database, plus rotation order and that no read path leaks a `secret`.
+
 ## Endpoints, briefly
 
 Three tiers, and the cloud one forks in a way that is easy to get wrong:

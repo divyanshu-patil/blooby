@@ -150,3 +150,30 @@ model Splashscreen {
 
   @@map("splashscreens")
 }
+
+/// Mirrors public.copilot_settings — one row, pinned by a boolean primary key with a
+/// check constraint, so "exactly one" is enforced by Postgres and not by this service.
+model CopilotSettings {
+  id            Boolean  @id @default(true)
+  allowUserKeys Boolean  @default(true) @map("allow_user_keys")
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("copilot_settings")
+}
+
+/// Mirrors public.copilot_keys. RLS is on with no policies, so this is reachable only
+/// through the service role — `secret` must never appear in anything sent to a client.
+model CopilotKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  label      String    @default("")
+  secret     String
+  hint       String
+  status     String    @default("ok")
+  note       String?
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdBy  String?   @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, lastUsedAt])
+  @@map("copilot_keys")
+}

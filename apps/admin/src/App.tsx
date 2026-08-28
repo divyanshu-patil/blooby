@@ -10,6 +10,7 @@ import { Projects } from './features/Projects';
 import { Moderation } from './features/Moderation';
 import { OfficialEditor } from './features/OfficialEditor';
 import { Splashscreens } from './features/Splashscreens';
+import { Copilot } from './features/Copilot';
 
 const NAV: NavGroup[] = [
   { items: [{ id: '/dashboard', label: 'Dashboard', glyph: '▤' }] },
@@ -22,6 +23,9 @@ const NAV: NavGroup[] = [
     { id: '/editor', label: 'Official', glyph: '✦' },
     { id: '/splashscreens', label: 'Splashscreen', glyph: '◐' },
   ] },
+  { title: 'System', items: [
+    { id: '/copilot', label: 'Copilot', glyph: '◇' },
+  ] },
 ];
 
 const ADMIN_TOUR: DriveStep[] = [
@@ -31,6 +35,7 @@ const ADMIN_TOUR: DriveStep[] = [
   { element: '[data-tour="/community"]', popover: { title: 'Community review', description: 'Submissions from users. Approve to publish, or reject with a reason the creator sees. Nothing is deleted — statuses keep the history.' } },
   { element: '[data-tour="/editor"]', popover: { title: 'Editor', description: 'The same editor users have. Build an animation, then publish it as official content or save it as a splashscreen.' } },
   { element: '[data-tour="/splashscreens"]', popover: { title: 'Splashscreen', description: 'Publish the animation everyone sees when the app opens. Only one is live at a time, and swapping it needs no redeploy.' } },
+  { element: '[data-tour="/copilot"]', popover: { title: 'Copilot', description: 'Ollama Cloud keys for the AI copilot, rotated across on failure, and the switch for whether users may use their own instead. Keys live here rather than in an environment variable, so rotating one is not a redeploy.' } },
 ];
 
 export function App() {
@@ -54,6 +59,7 @@ export function App() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/community" element={<Moderation />} />
           <Route path="/splashscreens" element={<Splashscreens />} />
+          <Route path="/copilot" element={<Copilot />} />
         </Route>
       </Route>
 

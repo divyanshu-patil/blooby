@@ -18,11 +18,22 @@ export const ENDPOINT_INFO: Record<Endpoint, { label: string; hint: string }> = 
   },
 };
 
+/** What the backend says it will do. Refreshed from GET /api/copilot/config on mount —
+ *  it rides along in settings because every routing decision below needs it, but it is
+ *  the server's answer, not a preference, and the server re-checks it on every request. */
+export interface ServerPolicy {
+  /** whether an admin permits users to bring their own keys */
+  allowUserKeys: boolean;
+  /** whether the server has a pool of its own to fall back on */
+  hasServerKeys: boolean;
+}
+
 export interface CopilotSettings {
   endpoint: Endpoint;
   customUrl: string;
   model: string;
   keys: PoolKey[];
+  server?: ServerPolicy;
 }
 
 const KEY = 'blooby.copilot.v1';
@@ -48,7 +59,10 @@ export function loadSettings(): CopilotSettings {
 }
 
 export function saveSettings(s: CopilotSettings) {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* private mode */ }
+  // `server` is the backend's answer, not a setting — persisting it would mean a stale
+  // policy survives an admin changing it, and reads as the user's own choice
+  const { server: _server, ...persisted } = s;
+  try { localStorage.setItem(KEY, JSON.stringify(persisted)); } catch { /* private mode */ }
 }
 
 export const LOCAL_URL = 'http://localhost:11434';
@@ -82,15 +96,25 @@ export function baseUrl(s: CopilotSettings): string {
  * design choice, which is why "use my own keys" and "go through the backend" are the
  * same switch.
  */
-export const usesBackend = (s: CopilotSettings) => s.endpoint === 'cloud' && s.keys.length > 0;
+export const usesBackend = (s: CopilotSettings) =>
+  s.endpoint === 'cloud' && (s.keys.length > 0 || !!s.server?.hasServerKeys);
 
-/** A custom endpoint always needs a key; cloud needs one only when routing via backend. */
-export const needsKey = (s: CopilotSettings) => s.endpoint === 'custom' || usesBackend(s);
+/** A custom endpoint always needs a key. Cloud needs one only when it is going through
+ *  the backend and the backend has none of its own to fall back on. */
+export const needsKey = (s: CopilotSettings) =>
+  s.endpoint === 'custom' || (usesBackend(s) && !s.server?.hasServerKeys);
 
-/** Which tiers can hold a key pool at all — what the settings UI gates on. Distinct from
- *  needsKey, which asks whether a key is *required* for the request about to be sent;
- *  gating the editor on that would hide the field you need to add your first key. */
-export const acceptsKeys = (s: CopilotSettings) => s.endpoint === 'custom' || s.endpoint === 'cloud';
+/**
+ * Which tiers may hold a key pool at all — what the settings UI gates on.
+ *
+ * Distinct from needsKey, which asks whether a key is *required* for the request about to
+ * be sent; gating the editor on that would hide the field you need to add your first key.
+ * An admin can switch user keys off, in which case the cloud tier stops offering the
+ * field entirely and everyone uses the server's pool. Hiding it is a convenience — the
+ * server ignores supplied keys regardless, because a UI-only switch is not a switch.
+ */
+export const acceptsKeys = (s: CopilotSettings) =>
+  s.endpoint === 'custom' || (s.endpoint === 'cloud' && s.server?.allowUserKeys !== false);
 
 /**
  * How a cloud model has to be addressed, which depends on HOW the request gets there.

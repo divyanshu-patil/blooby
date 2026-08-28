@@ -8,7 +8,8 @@
     "build": "tsc -b",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
-    "seed:presets": "tsx scripts/seed-presets.ts"
+    "seed:presets": "tsx scripts/seed-presets.ts",
+    "check:copilot": "tsx scripts/check-copilot-keys.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1119.0",

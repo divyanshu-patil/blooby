@@ -126,3 +126,22 @@
 /* the queue grid shows the same live preview, so a reviewer can triage without
    opening every submission */
 .card-thumb .empty-note { font-size: 11px; color: var(--muted); padding: 10px; text-align: center; }
+
+/* --- copilot key pool ------------------------------------------------------ */
+/* not .card: that one is a clickable tile with a hover lift, and these are panels */
+.setting-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;
+}
+.setting-card > strong { font-size: 14px; letter-spacing: -.01em; }
+.setting-card .hint { margin: 0; max-width: 62ch; }
+.setting-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.setting-row .txt { flex: 1; min-width: 200px; }
+.setting-alert {
+  font-size: 13px; line-height: 1.45; color: #8a2c12;
+  background: #fbe8e3; border: 1px solid #f0b9a9; border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 18px;
+}
+.setting-card .table td .dot-status { display: inline-block; margin-right: 6px; vertical-align: middle; }
+.setting-card .table code { font: 500 12px var(--mono); }
+.dim { color: var(--muted); }

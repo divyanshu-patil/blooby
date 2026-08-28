@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { chatJson, listModels, verifyKeys, type ChatMessage } from '../copilot/client';
+import { copilotApi } from '../cloud/api';
 import { acceptsKeys, baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, resolveModel, saveSettings, usesBackend, type CopilotSettings, type KeyStatus } from '../copilot/pool';
 import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validateBatch } from '../copilot/tools';
 import { systemPrompt } from '../copilot/prompt';
@@ -34,6 +35,17 @@ export function Copilot() {
   const draft = useRef('');
 
   useEffect(() => { thread.current?.scrollTo({ top: 1e6 }); }, [turns]);
+
+  // whether this deployment lets you bring your own keys, and whether it has any of its
+  // own, is the server's call — ask it rather than assuming, and fail open to the
+  // previous behaviour (your keys, no server pool) when the backend is not reachable
+  useEffect(() => {
+    let live = true;
+    copilotApi.config()
+      .then((server) => { if (live) setSettings((s) => ({ ...s, server })); })
+      .catch(() => { if (live) setSettings((s) => ({ ...s, server: { allowUserKeys: true, hasServerKeys: false } })); });
+    return () => { live = false; };
+  }, []);
 
   const patch = (p: Partial<CopilotSettings>) => setSettings((s) => { const n = { ...s, ...p }; saveSettings(n); return n; });
 
@@ -193,12 +205,20 @@ export function Copilot() {
             )}
             {settings.endpoint === 'cloud' && (
               <p className="hint">
-                {usesBackend(settings)
-                  ? <>Using your {settings.keys.length} key{settings.keys.length === 1 ? '' : 's'} through the blooby
-                      backend. <code>ollama.com</code> sends no CORS headers, so a browser cannot call it directly —
-                      the backend makes the hop. Remove every key to fall back to your local Ollama.</>
-                  : <>With no keys, requests go to <code>localhost:11434</code> and your local Ollama proxies them
-                      using its own sign-in. Add a key below to use your own Ollama Cloud account instead.</>}
+                {settings.keys.length ? (
+                  <>Using your {settings.keys.length} key{settings.keys.length === 1 ? '' : 's'} through the blooby
+                    backend. <code>ollama.com</code> sends no CORS headers, so a browser cannot call it directly —
+                    the backend makes the hop. Remove every key to fall back to
+                    {settings.server?.hasServerKeys ? " this server's own keys." : ' your local Ollama.'}</>
+                ) : settings.server?.hasServerKeys ? (
+                  <>Running on this server&rsquo;s Ollama Cloud keys — nothing to configure.
+                    {acceptsKeys(settings)
+                      ? ' Add your own below to use your account instead.'
+                      : ' Your own keys are turned off for this deployment.'}</>
+                ) : (
+                  <>With no keys, requests go to <code>localhost:11434</code> and your local Ollama proxies them
+                    using its own sign-in. Add a key below to use your own Ollama Cloud account instead.</>
+                )}
               </p>
             )}
             {acceptsKeys(settings) && (

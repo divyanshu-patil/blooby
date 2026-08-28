@@ -19,7 +19,8 @@ export type { DriveStep } from 'driver.js';
 
 // cloud
 export { api, ApiError } from './cloud/client';
-export { projectsApi, assetsApi, communityApi, splashApi, adminApi } from './cloud/api';
+export { projectsApi, assetsApi, communityApi, splashApi, adminApi, copilotApi } from './cloud/api';
+export type { CopilotAdminView, CopilotConfig, CopilotKeyRow } from './cloud/api';
 export { useSession, auth, consumeAuthError } from './cloud/auth';
 export { useAsync } from './cloud/useAsync';
 export { useAutosave } from './cloud/useAutosave';
