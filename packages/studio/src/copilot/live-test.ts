@@ -14,7 +14,8 @@ import { defaultProject } from '../core/defaults';
 import { systemPrompt } from './prompt';
 import { RESPONSE_SCHEMA, normaliseCall, validate, describe, applyCalls } from './tools';
 import { parseTurn } from './parse';
-import { resolveModel, type CopilotSettings } from './pool';
+import { chatJson } from './client';
+import { type CopilotSettings } from './pool';
 import { blockStarts } from '../core/timeline';
 import { activeTimeline } from '../core/types';
 
@@ -25,20 +26,18 @@ const ed = useEditor.getState();
 ed.loadProject(defaultProject());
 const P = () => useEditor.getState().project;
 
-const body = JSON.stringify({
-  model: resolveModel(settings, settings.model),
-  messages: [{ role: 'system', content: systemPrompt(P()) }, { role: 'user', content: ask }],
-  stream: false, format: RESPONSE_SCHEMA, options: { temperature: 0.15 },
-});
+// through chatJson, not a hand-rolled fetch: the request the editor actually sends is
+// the only one worth testing — the token budget and the model-name resolution live there
+const { content, thinking } = await chatJson(
+  settings,
+  [{ role: 'system', content: systemPrompt(P()) }, { role: 'user', content: ask }],
+  RESPONSE_SCHEMA,
+  () => {},
+);
+console.log(`--- raw (${content.length} chars) ---\n${content.slice(0, 800)}\n`);
+if (thinking) console.log(`--- thinking ---\n${thinking.slice(0, 400)}\n`);
 
-const res = await fetch('http://localhost:11434/api/chat', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
-});
-const data = await res.json();
-const raw = data.message?.content ?? '';
-console.log('--- raw ---\n' + raw.slice(0, 500) + '\n');
-
-const parsed = parseTurn(raw);
+const parsed = parseTurn(content);
 const calls = parsed.calls.map((c) => normaliseCall(P(), c));
 console.log('reply:', parsed.reply || '(none)');
 for (const c of calls) {
