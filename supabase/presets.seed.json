@@ -1,0 +1,1525 @@
+{
+  "presets": [
+    {
+      "id": "p_neutral",
+      "name": "Neutral",
+      "source": "builtin",
+      "durationMs": 800,
+      "tracks": []
+    },
+    {
+      "id": "p_idle",
+      "name": "Idle",
+      "source": "builtin",
+      "durationMs": 2400,
+      "tracks": [
+        {
+          "id": "t_lsqw2yx",
+          "nodeId": "body",
+          "property": "flatOffset.y",
+          "keyframes": [
+            {
+              "id": "k_b7y6rhl",
+              "time": 0,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_48mm6v3",
+              "time": 1200,
+              "value": -7,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_hx8n02k",
+              "time": 2400,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_zc7n1a7",
+          "nodeId": "body",
+          "property": "surface.yaw",
+          "keyframes": [
+            {
+              "id": "k_46lcirh",
+              "time": 0,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_iq5ffew",
+              "time": 1600,
+              "value": 4,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_gp3kmoc",
+              "time": 2400,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_yak99nz",
+          "nodeId": "eyeL",
+          "property": "eye.openness",
+          "keyframes": [
+            {
+              "id": "k_xu1ec8k",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_fm2724u",
+              "time": 1700,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_esvg3xl",
+              "time": 1790,
+              "value": 0.06,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_s0oiron",
+              "time": 1880,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_a9ifk3t",
+          "nodeId": "eyeR",
+          "property": "eye.openness",
+          "keyframes": [
+            {
+              "id": "k_tsdm3to",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_h3oe0u4",
+              "time": 1700,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_vzle6b4",
+              "time": 1790,
+              "value": 0.06,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_ieizgcc",
+              "time": 1880,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p_blink",
+      "name": "Blink",
+      "source": "builtin",
+      "durationMs": 900,
+      "tracks": [
+        {
+          "id": "t_ujnrpmu",
+          "nodeId": "eyeL",
+          "property": "eye.openness",
+          "keyframes": [
+            {
+              "id": "k_txz44q7",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_5kl0cfg",
+              "time": 240,
+              "value": 0.06,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeIn"
+              }
+            },
+            {
+              "id": "k_ov3n8x8",
+              "time": 360,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_r225h8r",
+              "time": 560,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_umz1kvo",
+              "time": 700,
+              "value": 0.06,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeIn"
+              }
+            },
+            {
+              "id": "k_jbngket",
+              "time": 820,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_4izj64w",
+          "nodeId": "eyeR",
+          "property": "eye.openness",
+          "keyframes": [
+            {
+              "id": "k_mcjoe1j",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_jemb5ip",
+              "time": 240,
+              "value": 0.06,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeIn"
+              }
+            },
+            {
+              "id": "k_m915ljo",
+              "time": 360,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_tlpapzr",
+              "time": 560,
+              "value": 1,
+              "easingOut": {
+                "type": "linear"
+              }
+            },
+            {
+              "id": "k_kdwbbx4",
+              "time": 700,
+              "value": 0.06,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeIn"
+              }
+            },
+            {
+              "id": "k_2roze0n",
+              "time": 820,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p_talk",
+      "name": "Talk",
+      "source": "builtin",
+      "durationMs": 1600,
+      "tracks": [
+        {
+          "id": "t_g3acwfo",
+          "nodeId": "body",
+          "property": "transform.scale.y",
+          "keyframes": [
+            {
+              "id": "k_69g6yxy",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_vorho7j",
+              "time": 200,
+              "value": 1.05,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_5m1jpqk",
+              "time": 400,
+              "value": 0.97,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_hvtpn50",
+              "time": 600,
+              "value": 1.04,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_c4jyqhs",
+              "time": 800,
+              "value": 0.98,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_ummiiz1",
+              "time": 1000,
+              "value": 1.05,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_x8rv1az",
+              "time": 1200,
+              "value": 0.98,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_6arzb1a",
+              "time": 1600,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_csu0j1h",
+          "nodeId": "body",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_jarmj2f",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_qvuhdrt",
+              "time": 200,
+              "value": 0.97,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_oxdrfnl",
+              "time": 400,
+              "value": 1.03,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_9yghfak",
+              "time": 600,
+              "value": 0.98,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_86ih9bt",
+              "time": 800,
+              "value": 1.02,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_63l4uf5",
+              "time": 1000,
+              "value": 0.97,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_6ive62c",
+              "time": 1200,
+              "value": 1.02,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_wchfjbx",
+              "time": 1600,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_z4sjssm",
+          "nodeId": "eyeL",
+          "property": "transform.length",
+          "keyframes": [
+            {
+              "id": "k_q73jk51",
+              "time": 0,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_edd1ck1",
+              "time": 300,
+              "value": 1.3,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_3mrupk8",
+              "time": 700,
+              "value": 1.6,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_u92u2ho",
+              "time": 1100,
+              "value": 1.35,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_88hokwc",
+              "time": 1600,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_a4j629z",
+          "nodeId": "eyeR",
+          "property": "transform.length",
+          "keyframes": [
+            {
+              "id": "k_jftessg",
+              "time": 0,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_ekzj7cu",
+              "time": 300,
+              "value": 1.3,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_h5cuiv8",
+              "time": 700,
+              "value": 1.6,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_r9r78g8",
+              "time": 1100,
+              "value": 1.35,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_m67xes5",
+              "time": 1600,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p_happy",
+      "name": "Happy",
+      "source": "builtin",
+      "durationMs": 1400,
+      "tracks": [
+        {
+          "id": "t_2l5xt22",
+          "nodeId": "eyeL",
+          "property": "eye.openness",
+          "keyframes": [
+            {
+              "id": "k_qokss9h",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_a5qby4p",
+              "time": 260,
+              "value": 0.42,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_jmrdg74",
+              "time": 1100,
+              "value": 0.42,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_q3thr70",
+              "time": 1400,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_tr72bkf",
+          "nodeId": "eyeR",
+          "property": "eye.openness",
+          "keyframes": [
+            {
+              "id": "k_ewl8at2",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_69qnn0h",
+              "time": 260,
+              "value": 0.42,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_15t7ks1",
+              "time": 1100,
+              "value": 0.42,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_9vbuo70",
+              "time": 1400,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_fl1ejxa",
+          "nodeId": "eyeL",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_zrsqw92",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_ujxoebz",
+              "time": 260,
+              "value": 1.22,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_ek90rg6",
+              "time": 1100,
+              "value": 1.22,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_d223vhe",
+              "time": 1400,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_z7l80z1",
+          "nodeId": "eyeR",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_wj0ta7m",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_wrlsjda",
+              "time": 260,
+              "value": 1.22,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_xzhe77b",
+              "time": 1100,
+              "value": 1.22,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_suz2nxx",
+              "time": 1400,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_q6coowy",
+          "nodeId": "body",
+          "property": "flatOffset.y",
+          "keyframes": [
+            {
+              "id": "k_oiz7sl3",
+              "time": 0,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_67rsl5x",
+              "time": 200,
+              "value": -22,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_tughu0a",
+              "time": 520,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "bounce"
+              }
+            },
+            {
+              "id": "k_jmji9gd",
+              "time": 760,
+              "value": -10,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_h7p7v2w",
+              "time": 1000,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "bounce"
+              }
+            },
+            {
+              "id": "k_w5g236m",
+              "time": 1400,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p_surprised",
+      "name": "Surprised",
+      "source": "builtin",
+      "durationMs": 1000,
+      "tracks": [
+        {
+          "id": "t_8jbbduy",
+          "nodeId": "eyeL",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_8uxlo3h",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_ecrac4q",
+              "time": 140,
+              "value": 1.5,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_37yrkkg",
+              "time": 760,
+              "value": 1.5,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_yiwwpgg",
+              "time": 1000,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_p55rot9",
+          "nodeId": "eyeR",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_yn8dkc7",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_g7pcyn9",
+              "time": 140,
+              "value": 1.5,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_ygm54ob",
+              "time": 760,
+              "value": 1.5,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_pb5jp9i",
+              "time": 1000,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_s5ubdyd",
+          "nodeId": "eyeL",
+          "property": "transform.length",
+          "keyframes": [
+            {
+              "id": "k_nwi1r1h",
+              "time": 0,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_f2l7t0d",
+              "time": 140,
+              "value": 1.15,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_vv6ti5z",
+              "time": 760,
+              "value": 1.15,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_1nx233l",
+              "time": 1000,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_g75dvod",
+          "nodeId": "eyeR",
+          "property": "transform.length",
+          "keyframes": [
+            {
+              "id": "k_yqh4hw0",
+              "time": 0,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_9p2o5c6",
+              "time": 140,
+              "value": 1.15,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_5gof08p",
+              "time": 760,
+              "value": 1.15,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_1o1313i",
+              "time": 1000,
+              "value": 1.55,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_ra773gt",
+          "nodeId": "body",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_4x7qpmv",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_v5i4n73",
+              "time": 140,
+              "value": 1.07,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_xrmvjg8",
+              "time": 760,
+              "value": 1.07,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_v3xv8jd",
+              "time": 1000,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_4kaybcp",
+          "nodeId": "body",
+          "property": "transform.scale.y",
+          "keyframes": [
+            {
+              "id": "k_dbhgbst",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_gxpumcq",
+              "time": 140,
+              "value": 1.07,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_qws1ete",
+              "time": 760,
+              "value": 1.07,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_4zj8lx7",
+              "time": 1000,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p_thinking",
+      "name": "Thinking",
+      "source": "builtin",
+      "durationMs": 2200,
+      "tracks": [
+        {
+          "id": "t_cd1t12a",
+          "nodeId": "body",
+          "property": "surface.yaw",
+          "keyframes": [
+            {
+              "id": "k_dvie0wz",
+              "time": 0,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_x3pn3bk",
+              "time": 600,
+              "value": -20,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_ncjzwfv",
+              "time": 1600,
+              "value": -20,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_maqaqmi",
+              "time": 2200,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_k3krad8",
+          "nodeId": "body",
+          "property": "surface.pitch",
+          "keyframes": [
+            {
+              "id": "k_lfqtcep",
+              "time": 0,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_iwwqrff",
+              "time": 600,
+              "value": -10,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_2jhmqr9",
+              "time": 1600,
+              "value": -10,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_4yxdhib",
+              "time": 2200,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_f7ojt6l",
+          "nodeId": "eyeL",
+          "property": "eye.openness",
+          "keyframes": [
+            {
+              "id": "k_thlymkw",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_juk496z",
+              "time": 600,
+              "value": 0.5,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_xt9guch",
+              "time": 1600,
+              "value": 0.5,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_mqhakgy",
+              "time": 2200,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_pfqnrwt",
+          "nodeId": "eyeR",
+          "property": "surface.pitch",
+          "keyframes": [
+            {
+              "id": "k_lubn9by",
+              "time": 0,
+              "value": -4,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_rf0il6z",
+              "time": 700,
+              "value": -14,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_htnlyge",
+              "time": 1500,
+              "value": -14,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_romb2xk",
+              "time": 2200,
+              "value": -4,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p_notify",
+      "name": "Notify",
+      "source": "builtin",
+      "durationMs": 1300,
+      "tracks": [
+        {
+          "id": "t_htqlezm",
+          "nodeId": "body",
+          "property": "surface.yaw",
+          "keyframes": [
+            {
+              "id": "k_5ki0y24",
+              "time": 0,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_hnsgc80",
+              "time": 150,
+              "value": 16,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_3zqk5s4",
+              "time": 330,
+              "value": -14,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_03gw5aq",
+              "time": 500,
+              "value": 10,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_c4kgehx",
+              "time": 670,
+              "value": -6,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_85hzaxe",
+              "time": 900,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "elastic"
+              }
+            },
+            {
+              "id": "k_kdfjvli",
+              "time": 1300,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_b3eyqf1",
+          "nodeId": "body",
+          "property": "transform.rotation",
+          "keyframes": [
+            {
+              "id": "k_m44ilxp",
+              "time": 0,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_weor6nw",
+              "time": 150,
+              "value": -5,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_k11uru0",
+              "time": 400,
+              "value": 4,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_itifbnz",
+              "time": 700,
+              "value": -2,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_iuy1y10",
+              "time": 1000,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "elastic"
+              }
+            },
+            {
+              "id": "k_p86u2c6",
+              "time": 1300,
+              "value": 0,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_zeqiyuf",
+          "nodeId": "eyeL",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_47c6she",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_qjh6fob",
+              "time": 150,
+              "value": 1.3,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_3szqsie",
+              "time": 700,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_v9cj1qt",
+              "time": 1300,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        },
+        {
+          "id": "t_zsqk8au",
+          "nodeId": "eyeR",
+          "property": "transform.scale.x",
+          "keyframes": [
+            {
+              "id": "k_9zktvsn",
+              "time": 0,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_lwbljkp",
+              "time": 150,
+              "value": 1.3,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeOut"
+              }
+            },
+            {
+              "id": "k_tl2s2ch",
+              "time": 700,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            },
+            {
+              "id": "k_34ezlht",
+              "time": 1300,
+              "value": 1,
+              "easingOut": {
+                "type": "preset",
+                "name": "easeInOut"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "expressions": [
+    {
+      "id": "x_neutral",
+      "name": "Neutral",
+      "snapshot": {
+        "eyeL.eye.openness": 1,
+        "eyeR.eye.openness": 1,
+        "eyeL.transform.length": 1.55,
+        "eyeR.transform.length": 1.55,
+        "eyeL.transform.scale.x": 1,
+        "eyeR.transform.scale.x": 1,
+        "body.surface.yaw": 0,
+        "body.surface.pitch": 0
+      }
+    },
+    {
+      "id": "x_happy",
+      "name": "Happy",
+      "snapshot": {
+        "eyeL.eye.openness": 0.42,
+        "eyeR.eye.openness": 0.42,
+        "eyeL.transform.scale.x": 1.22,
+        "eyeR.transform.scale.x": 1.22,
+        "body.surface.pitch": 4
+      }
+    },
+    {
+      "id": "x_surprised",
+      "name": "Surprised",
+      "snapshot": {
+        "eyeL.transform.scale.x": 1.5,
+        "eyeR.transform.scale.x": 1.5,
+        "eyeL.transform.length": 1.15,
+        "eyeR.transform.length": 1.15,
+        "body.transform.scale.x": 1.07,
+        "body.transform.scale.y": 1.07
+      }
+    },
+    {
+      "id": "x_sleepy",
+      "name": "Sleepy",
+      "snapshot": {
+        "eyeL.eye.openness": 0.14,
+        "eyeR.eye.openness": 0.14,
+        "body.surface.pitch": 10
+      }
+    }
+  ]
+}

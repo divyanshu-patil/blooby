@@ -1,0 +1,147 @@
+/* Admin-only chrome. Everything structural comes from @blooby/studio's kit.css, so this
+   file stays small — the sidebar, cards, tables and dialogs are the same components the
+   user-facing app renders. */
+
+.auth { display: grid; place-items: center; min-height: 100vh; background: var(--paper); padding: 24px; }
+.auth-card { width: min(392px, 100%); padding: 26px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; box-shadow: var(--shadow); }
+.auth-title { font-family: var(--display); font-size: 23px; font-weight: 700; letter-spacing: -.025em; margin: 0 0 5px; }
+.auth-sub { font-size: 13px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+.btn.google { width: 100%; justify-content: center; background: var(--field); border: 1px solid var(--line); font-weight: 500; }
+.btn.google:hover { border-color: var(--signal); }
+
+.who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+.who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.admin-editor-body { flex: 1; min-height: 0; }
+
+/* --- dashboard blocks --------------------------------------------------- */
+/* Charts and lists DO get card chrome — unlike the stat blocks, they are containers with
+   internal structure, which is exactly what DESIGN.md's 24px card is for. */
+.panel-block {
+  margin-top: 24px; padding: 20px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow);
+}
+.block-title {
+  font-family: var(--display); font-size: 18px; font-weight: 600;
+  line-height: 1.56; margin: 0 0 16px; color: var(--ink);
+}
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.two-col .panel-block { margin-top: 0; }
+@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+/* The one thing worth interrupting an admin about. Uses the dark inversion rather than a
+   colour, since #e7000b is reserved for destructive states and a pending queue is work,
+   not an error. */
+.callout {
+  display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 24px;
+  padding: 16px 20px; font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  background: var(--ink); border: 0; border-radius: var(--r-card); color: #fafafa;
+}
+.callout strong { font-family: var(--display); font-size: 18px; font-weight: 600; }
+.callout-go { margin-left: auto; font-weight: 500; }
+.callout:hover { background: var(--ink-2); }
+
+/* --- chart -------------------------------------------------------------- */
+.chart-total { font-size: 14px; line-height: 1.43; color: var(--muted); margin-bottom: 12px; }
+.chart-num { font-family: var(--display); font-size: 24px; font-weight: 600; letter-spacing: -.6px; color: var(--ink); }
+
+.chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; }
+.chart-bar { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 2px; }
+.chart-fill { width: 100%; background: var(--ink); border-radius: 2px 2px 0 0; min-height: 1px; }
+.chart-bar:hover .chart-fill { background: var(--muted); }
+
+.chart-axis { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+/* --- lists -------------------------------------------------------------- */
+.ranked, .plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.ranked li, .plain-list li { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.ranked li:first-child, .plain-list li:first-child { border-top: 0; }
+.ranked-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranked-num { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+/* --- full-bleed editor -------------------------------------------------- */
+/* The preview is the point of this screen, so navigation is a slide-over rather than a
+   permanent column eating 236px of it. */
+.full-editor { display: flex; flex-direction: column; height: 100vh; }
+
+.full-bar {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  padding: 10px 16px; background: var(--surface-alt); border-bottom: 1px solid var(--line);
+}
+.full-bar .spacer { flex: 1; }
+.full-title { font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+
+.icon-btn {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: var(--r-btn); background: var(--panel);
+  border: 1px solid var(--line); color: var(--ink); cursor: pointer; font-size: 14px;
+}
+.icon-btn:hover { background: var(--field); }
+
+.full-body { flex: 1; min-height: 0; }
+
+.slide-scrim { position: fixed; inset: 0; background: rgba(10, 10, 10, .32); z-index: 80; }
+.slide-nav {
+  position: fixed; inset: 0 auto 0 0; z-index: 81; width: 248px;
+  padding: 16px 12px; background: var(--surface-alt); border-right: 1px solid var(--line);
+  box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px;
+  animation: slide-in .16s ease;
+}
+@keyframes slide-in { from { transform: translateX(-100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .slide-nav { animation: none; } }
+
+/* --- splashscreen editor ------------------------------------------------ */
+.splash-preview {
+  display: grid; place-items: center;
+  aspect-ratio: 16 / 9; width: 100%;
+  border-radius: var(--r-nested, 10px); overflow: hidden;
+}
+.splash-preview svg { width: 100%; height: 100%; }
+.splash-preview-empty { font-size: 12px; color: #fafafa; opacity: .7; padding: 12px; text-align: center; }
+
+/* the card grid reuses the same preview, which must not stretch its row */
+.card-thumb .splash-preview { aspect-ratio: 4 / 3; border-radius: 0; }
+
+.splash-picker {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  max-height: 132px; overflow: auto; margin-bottom: 12px;
+  padding: 10px; background: var(--field); border-radius: var(--r-nested, 10px);
+}
+.splash-pick {
+  padding: 6px 12px; border-radius: var(--r-btn); font: 500 14px var(--ui);
+  background: var(--panel); border: 1px solid var(--line); color: var(--ink); cursor: pointer;
+}
+.splash-pick:hover { border-color: var(--ink); }
+
+/* --- moderation preview -------------------------------------------------- */
+.review-stage {
+  display: grid; place-items: center;
+  aspect-ratio: 16 / 10; width: 100%;
+  background: #0a0a0a; border-radius: var(--r-nested, 10px); overflow: hidden;
+}
+.review-stage svg { width: 100%; height: 100%; }
+.review-stage .empty-note { color: #fafafa; opacity: .7; font-size: 12px; padding: 12px; text-align: center; }
+
+/* the queue grid shows the same live preview, so a reviewer can triage without
+   opening every submission */
+.card-thumb .empty-note { font-size: 11px; color: var(--muted); padding: 10px; text-align: center; }
+
+/* --- copilot key pool ------------------------------------------------------ */
+/* not .card: that one is a clickable tile with a hover lift, and these are panels */
+.setting-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;
+}
+.setting-card > strong { font-size: 14px; letter-spacing: -.01em; }
+.setting-card .hint { margin: 0; max-width: 62ch; }
+.setting-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.setting-row .txt { flex: 1; min-width: 200px; }
+.setting-alert {
+  font-size: 13px; line-height: 1.45; color: #8a2c12;
+  background: #fbe8e3; border: 1px solid #f0b9a9; border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 18px;
+}
+.setting-card .table td .dot-status { display: inline-block; margin-right: 6px; vertical-align: middle; }
+.setting-card .table code { font: 500 12px var(--mono); }
+.dim { color: var(--muted); }

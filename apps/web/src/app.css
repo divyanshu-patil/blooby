@@ -1,0 +1,11 @@
+.cloud-editor { display: flex; flex-direction: column; height: 100vh; }
+
+/* the save state and its button live inside the editor's own header now */
+.cloudsave { display: inline-flex; align-items: center; gap: 8px; }
+.cloudsave .btn { display: inline-flex; align-items: center; gap: 5px; }
+
+.cloud-editor-body { flex: 1; min-height: 0; }
+
+.who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+.who img { width: 22px; height: 22px; border-radius: 50%; }
+.who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
