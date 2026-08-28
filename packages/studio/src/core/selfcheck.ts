@@ -1739,15 +1739,20 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     JSON.stringify(at(700)) === (at(1500), JSON.stringify(at(700))));
 
   // the fade actually fades, AND shrinks — fading alone reads as popping out
-  const sampled = Array.from({ length: 12 }, (_, i) => at(600 + i * 90)).flat();
+  const sampled = Array.from({ length: 44 }, (_, i) => at(400 + i * 60)).flat();
   const alphas = sampled.map((i) => i.color.a);
   ok('particles fade rather than vanishing', Math.min(...alphas) < 0.5 && Math.max(...alphas) > 0.9,
     `${Math.min(...alphas).toFixed(2)}..${Math.max(...alphas).toFixed(2)}`);
-  const faded = sampled.filter((i) => i.color.a < 0.35);
+  // The shrink is deliberately late: shrinking across the whole fade cancels the growth a
+  // glyph is authored with, which is how zzz came to export at a third of their size. So
+  // sample where the particle is nearly gone, not merely fading.
+  // measured against the faintest sample there is, rather than a threshold that may not
+  // be reached: the point is that the last thing on screen is not full size
+  const faintest = sampled.reduce((a, c) => (c.color.a < a.color.a ? c : a));
   const solid = sampled.filter((i) => i.color.a > 0.9);
-  ok('and shrink as they go, so none of them pops out at full size',
-    faded.length > 0 && solid.length > 0 && Math.max(...faded.map((i) => i.w)) < Math.max(...solid.map((i) => i.w)),
-    `faded ${Math.max(...faded.map((i) => i.w)).toFixed(1)} vs solid ${Math.max(...solid.map((i) => i.w)).toFixed(1)}`);
+  ok('and shrink away at the end, so none of them pops out at full size',
+    solid.length > 0 && faintest.w < Math.max(...solid.map((i) => i.w)),
+    `faintest ${faintest.w.toFixed(1)}@${faintest.color.a.toFixed(2)} vs solid ${Math.max(...solid.map((i) => i.w)).toFixed(1)}`);
 
   // anchoring is the whole trick behind tears: move the eye, the source moves with it
   const eid = activeTimeline(P()).emitters![0].id;
@@ -1784,13 +1789,13 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
   // scoped like a modifier
   ed().updateEmitter(eid, (e) => { e.startMs = 1000; e.endMs = 1600; });
-  ok('an emitter respects its range', at(500).length === 0 && at(1200).length > 0);
-  // it stops SPAWNING at the end; what is already in the air finishes falling. Cutting
-  // mid-flight made a stream vanish rather than trail off.
-  ok('and trails off past the end rather than blinking out',
-    at(1700).length > 0 && at(1700).length <= at(1200).length,
-    `${at(1200).length} inside -> ${at(1700).length} just after`);
-  ok('with everything gone one lifetime later', at(1600 + 2200).length === 0, String(at(3800).length));
+  ok('an emitter respects its range exactly', at(500).length === 0 && at(1200).length > 0 && at(1700).length === 0);
+  // the exit happens INSIDE the range: the last stretch fades and shrinks to nothing, so
+  // the range is exactly what it says AND its end is animated rather than a switch
+  const fading = at(1500);
+  ok('and fades out over the last of it, rather than switching off',
+    fading.length > 0 && Math.max(...fading.map((i) => i.color.a)) < Math.max(...at(1200).map((i) => i.color.a)),
+    `${Math.max(...at(1200).map((i) => i.color.a)).toFixed(2)} -> ${Math.max(...fading.map((i) => i.color.a)).toFixed(2)}`);
 
   ed().loadProject(defaultProject());
   ok('a project with no emitters costs nothing', emitterItems(activeTimeline(P()), P().rig, [], 0, VIEW).length === 0);
@@ -1862,10 +1867,14 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('and not before its range opens', glyphs(start + 200).length === 0);
   // authored so the tail finishes inside the clip: an emitter whose particles outlive
   // their clip is cut off mid-flight, which is the thing the fade exists to avoid
-  ok('and the last of them have gone by the end of the clip', glyphs(start + 4590).length === 0,
-    glyphs(start + 4590).map((g) => g.color.a.toFixed(2)).join(' '));
-  ok('while still trailing off after they stop spawning',
-    glyphs(start + 3400).length > 0, String(glyphs(start + 3400).length));
+  ok('and every one of them is gone by the end of its range, never past it',
+    glyphs(start + 3250).length === 0 && glyphs(start + 3400).length === 0,
+    glyphs(start + 3250).map((g) => g.color.a.toFixed(2)).join(' '));
+  // Sleepy's stream stops being born early enough that its last particles die naturally
+  // inside the range, so the exit ramp never has to bite. Either way nothing pops.
+  ok('thinning out towards the end rather than switching off',
+    Math.max(...glyphs(start + 2800).map((g) => g.color.a), 0) < Math.max(...glyphs(start + 2000).map((g) => g.color.a)),
+    `${Math.max(...glyphs(start + 2000).map((g) => g.color.a)).toFixed(2)} -> ${Math.max(...glyphs(start + 2800).map((g) => g.color.a), 0).toFixed(2)}`);
 
   ed().addBlock('p_angry');
   const angry = TL().blocks.at(-1)!;
@@ -1992,10 +2001,10 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     return emitterItems(activeTimeline(P()), rig, buildScene(rig, VIEW), t, VIEW);
   };
   ok('and it actually renders inside the range it was given',
-    glyphs(100).length === 0 && glyphs(900).length > 0);
-  ok('trailing off after it rather than vanishing',
-    glyphs(1900).length > 0 && glyphs(1800 + 1600 + 50).length === 0,
-    `${glyphs(1900).length} just after, ${glyphs(3450).length} a lifetime later`);
+    glyphs(100).length === 0 && glyphs(900).length > 0 && glyphs(1900).length === 0);
+  ok('fading out over the last of it rather than vanishing',
+    Math.max(...glyphs(1750).map((g) => g.color.a)) < Math.max(...glyphs(1200).map((g) => g.color.a)),
+    `${Math.max(...glyphs(1200).map((g) => g.color.a)).toFixed(2)} -> ${Math.max(...glyphs(1750).map((g) => g.color.a)).toFixed(2)}`);
 
   // and the range is adjustable by name afterwards, which is what a follow-up asks for
   applyCalls([{ name: 'set_effect_range', args: { effect: 'zzz', startMs: 1200, endMs: 1500 } }]);
@@ -2607,17 +2616,16 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   });
 
   // an orbit has no births to stop, so ending its range used to blink the whole ring off
-  const inside = at(1200), just = at(1800), later = at(2400), gone = at(2800);
-  ok('an orbit runs inside its range', inside.length === 4, String(inside.length));
-  ok('and fades past the end rather than blinking off',
-    just.length === 4 && Math.max(...just.map((i) => i.color.a)) < 1,
-    `${just.length} @ ${Math.max(...just.map((i) => i.color.a)).toFixed(2)}`);
-  ok('shrinking as it fades',
-    Math.max(...just.map((i) => i.w)) < Math.max(...inside.map((i) => i.w)),
-    `${Math.max(...inside.map((i) => i.w)).toFixed(1)} -> ${Math.max(...just.map((i) => i.w)).toFixed(1)}`);
-  ok('further still as it goes on',
-    later.length === 0 || Math.max(...later.map((i) => i.color.a)) < Math.max(...just.map((i) => i.color.a)));
-  ok('and gone one lifetime past the end', gone.length === 0, String(gone.length));
+  const mid = at(700), late = at(1350), out = at(1600);
+  ok('an orbit runs full strength while orbiting',
+    mid.length === 4 && mid.every((i) => Math.abs(i.color.a - 1) < 1e-6), `${mid.length} @ ${mid[0]?.color.a}`);
+  ok('and never shrinks on its way round',
+    new Set(mid.map((i) => Math.round(i.w * 100))).size === 1, mid.map((i) => i.w.toFixed(1)).join(' '));
+  ok('fading and shrinking only when it is time to go',
+    late.length === 4 && Math.max(...late.map((i) => i.color.a)) < 1
+    && Math.max(...late.map((i) => i.w)) < Math.max(...mid.map((i) => i.w)),
+    `a ${Math.max(...late.map((i) => i.color.a)).toFixed(2)}, w ${Math.max(...mid.map((i) => i.w)).toFixed(1)} -> ${Math.max(...late.map((i) => i.w)).toFixed(1)}`);
+  ok('and gone by the end of its range, never past it', out.length === 0, String(out.length));
 
   // a preset whose point IS its emitter must not be iconified as a plain face
   for (const id of ['p_sleepy', 'p_singing', 'p_crying', 'p_notify']) {

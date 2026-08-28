@@ -767,7 +767,17 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   display: flex; flex-direction: column; gap: 6px; padding: 8px;
   background: var(--field); border: 1px solid var(--line-soft); border-radius: 6px;
 }
-.fxcard .chip-color { flex: none; }
+/* NOT .chip-color: that one is a preset-chip hover affordance — absolutely positioned
+   and opacity 0 until the chip is hovered — so reusing it here made every colour swatch
+   in the effects panel invisible and out of flow. */
+.swatch {
+  flex: none; width: 24px; height: 23px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 5px; background: none;
+}
+.swatch::-webkit-color-swatch-wrapper { padding: 2px; }
+.swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
+.swatch:hover { border-color: var(--muted); }
+.partrow .swatch { width: 22px; height: 20px; }
 
 /* ---- emitter trajectory handles on the stage ------------------------------ */
 .traj-dot { cursor: grab; }
@@ -887,3 +897,8 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .drawer-item:hover, .drawer-item[aria-pressed='true'] { background: var(--field); border-color: var(--line-soft); }
 .drawer-item-name { font: 500 12.5px var(--ui); color: var(--ink); }
 .drawer-item-help { font-size: 11px; color: var(--muted); line-height: 1.35; }
+
+/* a number you can drag across, like every other motion tool */
+.scrubbable { cursor: ew-resize; }
+.scrubbable:focus { cursor: text; }
+.scrubbable.scrubbing { border-color: var(--signal); background: #fff; }

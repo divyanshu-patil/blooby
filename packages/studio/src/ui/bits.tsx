@@ -19,9 +19,42 @@ export function Panel({ title, actions, children, flush }: { title: string; acti
 }
 
 /** Number input that only commits on blur/Enter, so typing "-" doesn't snap to 0. */
+/**
+ * A number you can type, or scrub by dragging across it — the convention every other
+ * motion tool uses, and the reason nobody types a value they only want to nudge.
+ *
+ * A drag only starts once the pointer has actually moved, so a plain click still puts the
+ * caret in the field and typing keeps working.
+ */
 export function NumberField({ value, onChange, step = 1, className = 'prop-num' }: { value: number; onChange: (v: number) => void; step?: number; className?: string }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [scrubbing, setScrubbing] = useState(false);
   const shown = draft ?? fmtNum(value);
+
+  const startScrub = (down: React.PointerEvent<HTMLInputElement>) => {
+    if (down.button !== 0) return;
+    const from = value;
+    const x0 = down.clientX;
+    let moved = false;
+    const move = (e: PointerEvent) => {
+      const dx = e.clientX - x0;
+      if (!moved && Math.abs(dx) < 3) return;      // a click is not a drag
+      if (!moved) { moved = true; setScrubbing(true); }
+      // shift for fine, alt for coarse — the same modifiers these tools always use
+      const scale = e.shiftKey ? 0.1 : e.altKey ? 10 : 1;
+      const next = from + dx * step * scale;
+      // snap to the step's own precision, so dragging by 0.1 does not produce 0.30000004
+      const places = Math.max(0, Math.ceil(-Math.log10(step * scale)));
+      onChange(Number(next.toFixed(Math.min(6, places))));
+    };
+    const up = () => {
+      setScrubbing(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const flush = () => {
     if (draft === null) return;
     const n = parseFloat(draft);
@@ -29,7 +62,8 @@ export function NumberField({ value, onChange, step = 1, className = 'prop-num' 
     setDraft(null);
   };
   return (
-    <input className={className} value={shown} inputMode="decimal" step={step}
+    <input className={`${className} scrubbable${scrubbing ? ' scrubbing' : ''}`} value={shown} inputMode="decimal" step={step}
+      onPointerDown={startScrub}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={flush}
       onKeyDown={(e) => {

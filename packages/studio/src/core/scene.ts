@@ -285,26 +285,16 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
  */
 export function scopeTime(
   tl: Timeline, e: { blockId?: string; startMs?: number; endMs?: number }, timeMs: number,
-  /**
-   * How long past the end this still resolves. Emitters pass a particle's lifetime: when
-   * a range ends they must stop SPAWNING, not kill everything already in the air — cutting
-   * mid-flight makes a stream vanish rather than trail off, which is the one thing the
-   * fade exists to avoid. Modifiers pass nothing; a shake ending is just a shake ending.
-   */
-  graceMs = 0,
 ): number | null {
   let originMs = 0;
   if (e.blockId) {
-    // no grace on the CLIP boundary: a clip that has ended has ended, and letting its
-    // particles run on would rain them over whatever clip comes next. Grace applies to
-    // the effect's own range, which is the thing a user sets and expects to trail off.
     const w = blockWindow(tl, e.blockId);
     if (!w || timeMs < w[0] || timeMs > w[1]) return null;
     originMs = w[0];
   }
   const local = timeMs - originMs;
   if (e.startMs !== undefined && local < e.startMs) return null;
-  if (e.endMs !== undefined && local > e.endMs + graceMs) return null;
+  if (e.endMs !== undefined && local > e.endMs) return null;
   return local - (e.startMs ?? 0);
 }
 
@@ -573,20 +563,26 @@ export function emitterItems(
   for (const e of emitters) {
     const life = Math.max(1, e.lifeMs);
     const rate = Math.max(1, e.rateMs);
-    // one lifetime of grace, so the last particles finish falling instead of blinking out
-    const t = scopeTime(tl, e, timeMs, life);
+    const t = scopeTime(tl, e, timeMs);
     if (t === null) continue;
 
-    // ...but nothing new is born after the range closes
     const stopsAt = e.endMs !== undefined ? e.endMs - (e.startMs ?? 0) : Infinity;
 
     /**
-     * An orbit has no births to stop, so ending its range would blink the whole ring off.
-     * It gets an exit instead: past the end it keeps circling while fading and shrinking
-     * away over one lifetime, which is what every other path gets for free by letting its
-     * last particles finish falling.
+     * How an emitter leaves, and why it happens INSIDE its range rather than after it.
+     *
+     * Trailing past the end was worse in both directions: a long-lived particle kept
+     * going most of the way to the next clip, so a range you shortened looked like it did
+     * nothing — and a clip boundary still cut hard, because letting particles outlive
+     * their clip would rain them over whatever comes next.
+     *
+     * So the last stretch of the range IS the exit: births stop, and everything still on
+     * screen fades and shrinks to nothing by the moment the range closes. The range is
+     * then exactly what it says, and its end is animated rather than a switch.
      */
-    const exit = e.path === 'orbit' && t > stopsAt ? 1 - (t - stopsAt) / life : 1;
+    const EXIT_MS = 420;
+    const tail = stopsAt === Infinity ? 0 : Math.min(EXIT_MS, stopsAt * 0.4);
+    const exit = tail > 0 ? Math.min(1, Math.max(0, (stopsAt - t) / tail)) : 1;
     if (exit <= 0) continue;
     // an orbit uses every slot it was given: they are positions on a ring, not spawns
     const slots = e.path === 'orbit'
@@ -617,8 +613,12 @@ export function emitterItems(
         ? ((t * rateOf + (i / slots) * life) % life)
         : ((t * rateOf - i * rate) % cycle + cycle) % cycle;
       if (age >= life) continue;                       // this slot is between spawns
-      // an orbit is handled by `exit` above; everything else simply stops being born
-      if (e.path !== 'orbit' && t - age > stopsAt) continue;
+      // when this particle started, in the emitter's OWN clock. `age` is measured on the
+      // slot's speed-scaled clock, so subtracting it from unscaled `t` compared two
+      // different times and let births through (or cut them) at the wrong moment.
+      const born = (t * rateOf - age) / rateOf;
+      // nothing new is born once the exit has begun — an orbit has no births to stop
+      if (e.path !== 'orbit' && born > stopsAt - tail) continue;
       // easing shapes the journey itself: an ease-out drop falls fast and settles, where
       // linear travel is the same speed the whole way down
       const u = e.easing ? applyEasing(e.easing, age / life) : age / life;
@@ -633,8 +633,13 @@ export function emitterItems(
         // `count` below life/rate the birth cycle is shorter than a life, so several sat
         // almost on top of each other. An orbit divides its track evenly, always.
         const a = 2 * Math.PI * (orbitPhase + i / slots);
-        x = from.x + Math.cos(a) * rx;
-        y = from.y + Math.sin(a) * ry;
+        // the ring can be tilted, so it reads as a halo seen at an angle rather than
+        // always lying flat
+        const ox = Math.cos(a) * rx, oy = Math.sin(a) * ry;
+        const tilt = ((e.orbitTilt ?? 0) * Math.PI) / 180;
+        const ct = Math.cos(tilt), st = Math.sin(tilt);
+        x = from.x + ox * ct - oy * st;
+        y = from.y + ox * st + oy * ct;
       } else if (e.path === 'fall') {
         // horizontal at a constant rate, vertical accelerating — gravity, cheaply
         x = from.x + (to.x - from.x) * u + (i / slots - 0.5) * 2 * e.bow * unit;
@@ -657,19 +662,35 @@ export function emitterItems(
         y += noise1d(phase + 31.7, seed) * w;
       }
 
-      // fade in quickly so nothing pops into existence, then out from fadeStart. An orbit
-      // is never born — it is a position on a ring — so fading it in punched a hole in the
-      // ring every time a slot's phase came round past zero.
-      const fadeIn = e.path === 'orbit' ? 1 : Math.min(1, u / 0.12);
-      const tail = Math.max(1e-3, 1 - e.fadeStart);
-      const fadeOut = u <= e.fadeStart ? 1 : Math.max(0, 1 - (u - e.fadeStart) / tail);
+      /**
+       * An orbit is a position on a ring, not something born and lost: it neither fades in
+       * (which punched a hole in the ring each time a slot's phase crossed zero) nor fades
+       * or shrinks on its way round. Its only fade is the exit. Everything else is born,
+       * travels and fades out from `fadeStart`.
+       */
+      const orbiting = e.path === 'orbit';
+      const fadeIn = orbiting ? 1 : Math.min(1, u / 0.12);
+      const fadeSpan = Math.max(1e-3, 1 - e.fadeStart);
+      const fadeOut = orbiting || u <= e.fadeStart ? 1 : Math.max(0, 1 - (u - e.fadeStart) / fadeSpan);
       const alpha = e.color.a * fadeIn * fadeOut * exit;
       if (alpha <= 0.002) continue;
 
       // a particle shrinks as it fades rather than staying full size and vanishing. Fading
       // alone reads as popping out of existence — the same reason a layer keyframed to
       // `visible: 0` scales away instead of blinking off.
-      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * (pt?.sizeScale ?? 1) * unit * fadeOut * exit;
+      const grow = orbiting ? 1 : e.scaleFrom + (e.scaleTo - e.scaleFrom) * u;
+      /**
+       * Shrinking only at the very end, not across the whole fade.
+       *
+       * Multiplying size by `fadeOut` outright cancels the growth a glyph is authored
+       * with: zzz rise from 0.45x to 1.35x while fading from 42% of their life, so the two
+       * fought and they peaked at a third of their intended size — small enough to be
+       * invisible in an export. Below 35% alpha the particle is on its way out anyway, and
+       * that is the stretch where shrinking reads as leaving rather than as never arriving.
+       */
+      const SHRINK_FROM = 0.35;
+      const shrink = fadeOut < SHRINK_FROM ? fadeOut / SHRINK_FROM : 1;
+      const size = e.size * grow * (pt?.sizeScale ?? 1) * unit * shrink * exit;
       const tint = pt?.color ?? e.color;
 
       // what this particle IS: a library/project shape, or a character. `resolveShape` is

@@ -247,6 +247,8 @@ export interface Emitter {
   /** orbit only: the ellipse around `from`. Undefined falls back to the travel distance. */
   radiusX?: number;
   radiusY?: number;
+  /** orbit only: tilts the whole ellipse, in degrees — a ring seen at an angle */
+  orbitTilt?: number;
 
   /** ms between spawns, how long one lives, and how many may be alive at once */
   rateMs: number;

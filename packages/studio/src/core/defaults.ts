@@ -226,8 +226,11 @@ export function builtinPresets(): Preset[] {
         track('body', 'flatOffset.y', [kf(900, 0), kf(2000, -5, 'easeInOut'), kf(2650, 0, 'easeOut'), kf(3450, -5, 'easeInOut'), kf(4100, 0, 'easeOut')]),
       ],
       emitters: [emit({
-        name: 'zzz', parts: [shape('zed', { sizeScale: 0.7, speed: 1.1 }), shape('zed', { sizeScale: 0.9 }), shape('zed', { sizeScale: 1.2, speed: 0.85 })],
-        from: { nodeId: 'body', x: 46, y: -34 }, to: { nodeId: 'body', x: 118, y: -150 },
+        // bigger and further out: at 26 units on a path that crosses the head they were a
+        // grey mark on a pale body, and nearly invisible once exported
+        name: 'zzz', size: 40,
+        parts: [shape('zed', { sizeScale: 0.75, speed: 1.1 }), shape('zed', { sizeScale: 1 }), shape('zed', { sizeScale: 1.35, speed: 0.85 })],
+        from: { nodeId: 'body', x: 64, y: -58 }, to: { nodeId: 'body', x: 168, y: -190 },
         // stops spawning at 3200 with a 1400ms life, so the last zzz has faded out by the
         // clip's own end at 4600 — an emitter whose tail outlives its clip gets cut off
         // mid-flight, which is the one thing the fade exists to avoid
@@ -253,6 +256,14 @@ export function builtinPresets(): Preset[] {
         track('body', 'surface.pitch', [kf(0, 0), kf(300, 0, 'linear'), kf(560, 8, 'easeOut'), kf(1400, 6), kf(1800, 0)]),
       ],
       modifiers: [{ nodeId: 'body', kind: 'shake', amount: 100, frequency: 16, amplitude: 5, seed: 4, startMs: 300, endMs: 1400 }],
+      emitters: [emit({
+        // steam off the head: the shake alone reads as cold, not angry
+        name: 'steam', parts: [shape('splash', { sizeScale: 0.8, speed: 1.15 }), shape('splash', { sizeScale: 1.1 })],
+        color: { r: 226, g: 128, b: 96, a: 1 }, size: 26,
+        from: { nodeId: 'body', x: -20, y: -104 }, to: { nodeId: 'body', x: -54, y: -196 },
+        bow: -14, rateMs: 260, lifeMs: 900, count: 4, fadeStart: 0.35,
+        scaleFrom: 0.4, scaleTo: 1.5, wobble: 9, startMs: 380, endMs: 1400, seed: 12,
+      })],
     },
     {
       id: 'p_cold', name: 'Cold', source: 'builtin', durationMs: 2400,
@@ -269,6 +280,13 @@ export function builtinPresets(): Preset[] {
       ],
       // a shiver is fast and small — the opposite dial positions from an angry shake
       modifiers: [{ nodeId: 'body', kind: 'shake', amount: 100, frequency: 24, amplitude: 3, seed: 11, startMs: 400, endMs: 2000 }],
+      emitters: [emit({
+        name: 'flakes', parts: [shape('spark', { sizeScale: 0.6, speed: 0.8 }), shape('spark', { sizeScale: 0.85 })],
+        color: { r: 196, g: 226, b: 244, a: 1 }, size: 18, path: 'fall',
+        from: { nodeId: 'body', x: 0, y: -170 }, to: { nodeId: 'body', x: -30, y: 150 },
+        bow: 90, rateMs: 320, lifeMs: 1900, count: 6, fadeStart: 0.7,
+        scaleFrom: 0.9, scaleTo: 0.8, spin: 140, wobble: 12, startMs: 300, endMs: 2000, seed: 6,
+      })],
     },
     {
       id: 'p_sad', name: 'Sad', source: 'builtin', durationMs: 2600,
@@ -284,6 +302,8 @@ export function builtinPresets(): Preset[] {
         track('eyeL', 'transform.rotation', [kf(0, 0), kf(940, -14, 'easeInOut'), kf(2220, -14), kf(2600, 0)]),
         track('eyeR', 'transform.rotation', [kf(0, 0), kf(940, 14, 'easeInOut'), kf(2220, 14), kf(2600, 0)]),
       ],
+      // a heavy, barely-there sway while it is down — stillness reads as a static pose
+      modifiers: [{ nodeId: 'body', kind: 'pendulum', axis: 'rotation', amount: 100, frequency: 0.32, amplitude: 3, phase: 0, startMs: 800, endMs: 2200 }],
     },
     {
       id: 'p_crying', name: 'Crying', source: 'builtin', durationMs: 3000,
@@ -349,6 +369,7 @@ export function builtinPresets(): Preset[] {
         bow: 16, rateMs: 900, lifeMs: 1500, count: 2, fadeStart: 0.55,
         scaleFrom: 0.35, scaleTo: 1.2, spin: 14, wobble: 4, startMs: 500, endMs: 2000,
       })],
+      modifiers: [{ nodeId: 'body', kind: 'pendulum', axis: 'rotation', amount: 100, frequency: 0.5, amplitude: 4, phase: 1.4, startMs: 400, endMs: 2000 }],
     },
     {
       id: 'p_curious', name: 'Curious', source: 'builtin', durationMs: 2200,
@@ -362,6 +383,7 @@ export function builtinPresets(): Preset[] {
         ...bothEyes('transform.scale.x', [kf(0, 1), kf(360, 1.3, 'easeOut'), kf(1800, 1.3), kf(2200, 1)]),
         ...bothEyes('transform.length', [kf(0, 1.55), kf(360, 1.85, 'easeOut'), kf(1800, 1.85), kf(2200, 1.55)]),
       ],
+      modifiers: [{ nodeId: 'body', kind: 'float', amount: 100, frequency: 0.9, amplitude: 4, phase: 0, startMs: 400, endMs: 1800 }],
     },
     {
       id: 'p_float', name: 'Float', source: 'builtin', durationMs: 3000,
@@ -386,9 +408,9 @@ export function builtinPresets(): Preset[] {
         name: 'orbit', parts: [shape('spark'), shape('star', { sizeScale: 0.85 }), shape('heart', { sizeScale: 0.9 }), shape('spark', { sizeScale: 1.1 })],
         color: { r: 84, g: 82, b: 112, a: 1 }, size: 20, path: 'orbit',
         from: { nodeId: 'body', x: 0, y: -128 }, to: { x: 0, y: 0 },
-        radiusX: 104, radiusY: 34,
-        rateMs: 600, lifeMs: 2400, count: 4, fadeStart: 0.85,
-        scaleFrom: 0.85, scaleTo: 1, spin: 40, wobble: 3, startMs: 400, endMs: 3600,
+        radiusX: 104, radiusY: 34, orbitTilt: -12,
+        rateMs: 600, lifeMs: 2400, count: 5, fadeStart: 1,
+        scaleFrom: 1, scaleTo: 1, spin: 40, wobble: 3, startMs: 400, endMs: 3600,
       })],
     },
     {
@@ -407,6 +429,13 @@ export function builtinPresets(): Preset[] {
         track('body', 'transform.scale.x', [kf(0, 1), kf(200, 1.09, 'easeInOut'), kf(420, 0.92, 'easeOut'), kf(700, 1.06, 'easeIn'), kf(1060, 1), kf(2000, 1)]),
         track('body', 'transform.rotation', [kf(0, 0), kf(480, -7, 'easeOut'), kf(940, 6), kf(1420, 0, 'elastic'), kf(2000, 0)]),
       ],
+      emitters: [emit({
+        name: 'sparks', parts: [shape('spark', { sizeScale: 0.7, speed: 1.2 }), shape('star', { sizeScale: 0.9 })],
+        color: STAR_YELLOW, size: 22,
+        from: { nodeId: 'body', x: 0, y: -120 }, to: { nodeId: 'body', x: 96, y: -210 },
+        bow: 40, rateMs: 200, lifeMs: 900, count: 6, fadeStart: 0.45,
+        scaleFrom: 0.3, scaleTo: 1.2, spin: 200, wobble: 16, startMs: 340, endMs: 1500, seed: 17,
+      })],
     },
     {
       // a full revolution: the eyes travel right, pass behind the silhouette and come back

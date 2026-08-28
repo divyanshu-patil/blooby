@@ -104,10 +104,12 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
     return (
       <g className="traj">
         {snap && <SnapRing target={snap} />}
-        <ellipse cx={a.x} cy={a.y} rx={rx} ry={ry} fill="none" stroke={stroke} strokeWidth={1.25} strokeDasharray="5 5" opacity={0.8} />
+        <ellipse cx={a.x} cy={a.y} rx={rx} ry={ry} fill="none" stroke={stroke} strokeWidth={1.25} strokeDasharray="5 5" opacity={0.8}
+          transform={emitter.orbitTilt ? `rotate(${emitter.orbitTilt} ${a.x} ${a.y})` : undefined} />
         <circle className="traj-dot" cx={a.x} cy={a.y} r={6} fill={stroke}
           pointerEvents="all" onPointerDown={dragEnd('from')} />
         <circle className="traj-dot" cx={a.x + rx} cy={a.y} r={5.5} fill="var(--paper)" stroke={stroke} strokeWidth={2}
+          transform={emitter.orbitTilt ? `rotate(${emitter.orbitTilt} ${a.x} ${a.y})` : undefined}
           pointerEvents="all" onPointerDown={dragRadius} />
         <text x={a.x} y={a.y - ry - 9} textAnchor="middle" className="traj-label" fill={stroke}>{emitter.name}</text>
       </g>

@@ -279,14 +279,20 @@ export function Effects() {
 
       {emitters.map((em) => (
         <div key={em.id} className={`fxcard${selectedEmitterId === em.id ? ' on' : ''}`}
-          onPointerDownCapture={() => selectEmitter(em.id)}>
+          // Selecting on pointerdown, but never when the pointer went down on a control:
+          // the re-render replaced the input mid-gesture, which killed a number-scrub
+          // before it started. Clicking the card's own surface still selects it.
+          onPointerDownCapture={(e) => {
+            if ((e.target as HTMLElement).closest('input, select, textarea, button')) return;
+            selectEmitter(em.id);
+          }}>
           <div className="row">
             <button className="btn ghost sm icon" aria-pressed={selectedEmitterId === em.id}
               title={selectedEmitterId === em.id ? 'Its path is on the stage' : 'Show its path on the stage'}
               onClick={() => selectEmitter(selectedEmitterId === em.id ? null : em.id)}>◎</button>
             <input className="txt" style={{ flex: 1 }} value={em.name} aria-label="Emitter name"
               onChange={(e) => updateEmitter(em.id, (x) => { x.name = e.target.value; })} />
-            <input type="color" className="chip-color" title="Colour of everything this throws"
+            <input type="color" className="swatch" title="Colour of everything this throws"
               value={hexColor(em.color)}
               onChange={(e) => updateEmitter(em.id, (x) => {
                 const c = { ...parseHex(e.target.value), a: x.color.a };
@@ -360,8 +366,12 @@ export function Effects() {
             min={em.path === 'orbit' ? 10 : -200} max={200} step={1}
             onChange={(v) => updateEmitter(em.id, (x) => { if (x.path === 'orbit') x.radiusX = v; else x.bow = v; })} />
           {em.path === 'orbit' && (
-            <Dial label="Ellipse Y" value={em.radiusY ?? em.radiusX ?? 100} min={4} max={200} step={1}
-              onChange={(v) => updateEmitter(em.id, (x) => { x.radiusY = v; })} />
+            <>
+              <Dial label="Ellipse Y" value={em.radiusY ?? em.radiusX ?? 100} min={4} max={200} step={1}
+                onChange={(v) => updateEmitter(em.id, (x) => { x.radiusY = v; })} />
+              <Dial label="Tilt" value={em.orbitTilt ?? 0} min={-90} max={90} step={1}
+                onChange={(v) => updateEmitter(em.id, (x) => { x.orbitTilt = v; })} />
+            </>
           )}
           <Dial label="Every" value={em.rateMs} min={40} max={2000} step={10} onChange={(v) => updateEmitter(em.id, (x) => { x.rateMs = v; })} />
           <Dial label="Lives" value={em.lifeMs} min={200} max={6000} step={50} onChange={(v) => updateEmitter(em.id, (x) => { x.lifeMs = v; })} />
