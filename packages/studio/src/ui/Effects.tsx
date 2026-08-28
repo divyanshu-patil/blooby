@@ -149,7 +149,7 @@ export function Effects() {
 
       {/* which layer a new effect lands on. Clicking the one already chosen clears it back
           to the body, so "just the eyes" and "the whole thing" are both one click away. */}
-      <div className="row targetbar">
+      <div className="row targetbar" data-tour="fx-target">
         <span className="prop-label" style={{ flex: 1 }}>Apply to</span>
         {Object.values(project.rig.nodes).map((n) => (
           <button key={n.id} className="btn sm" aria-pressed={target === n.id}
@@ -214,8 +214,10 @@ export function Effects() {
               </label><NumberField value={m.phase ?? 0} step={0.1} onChange={(v) => updateModifier(m.id, (x) => { x.phase = v; })} />
             </div>
           )}
-          <RangeBar spanMs={span} startMs={m.startMs} endMs={m.endMs} label={clipScoped ? 'Runs in clip' : 'Runs in timeline'}
-            onChange={(a, b) => updateModifier(m.id, (x) => { x.startMs = a; x.endMs = b; })} />
+          <span data-tour="fx-range">
+            <RangeBar spanMs={span} startMs={m.startMs} endMs={m.endMs} label={clipScoped ? 'Runs in clip' : 'Runs in timeline'}
+              onChange={(a, b) => updateModifier(m.id, (x) => { x.startMs = a; x.endMs = b; })} />
+          </span>
         </div>
       ))}
 

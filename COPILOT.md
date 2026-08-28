@@ -238,6 +238,24 @@ Two rules when adding a check:
 The selfcheck covers each complaint firing on the shape that should trigger it, and — the
 one that matters most — a well-made clip drawing no complaints at all.
 
+## What the copilot can reach
+
+The rule at the top of this file — if the editor can do it, the copilot must be able to —
+is why every capability added to the editor arrives with a tool in the same commit:
+
+| editor feature | tool |
+| --- | --- |
+| shapes and morphing | `set_shape` (with `atMs`, two of them morph) |
+| what an emitter throws | `set_emitter_parts` |
+| emitters at all | `add_emitter` |
+| effect and emitter ranges | `set_effect_range` |
+| pendulum | `add_modifier` with `kind: "pendulum"` |
+| retiring a feature | `visible`, a plain 0–1 property |
+
+The tool docs list the shape library's ids inline, generated from `SHAPE_LIBRARY`, so a
+new shape is offerable the moment it exists. The selfcheck asserts that: every entry's id
+must appear in `TOOL_DOCS`.
+
 ## Rules the copilot code itself follows
 
 - **Validate the batch, not the call.** `create_preset` followed by

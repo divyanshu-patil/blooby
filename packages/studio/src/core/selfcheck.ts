@@ -2480,6 +2480,48 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ed().loadProject(defaultProject());
 }
 
+// --- the copilot reaches everything the editor gained ----------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  ok('the tool docs describe shapes and parts', /set_shape/.test(TOOL_DOCS) && /set_emitter_parts/.test(TOOL_DOCS));
+  ok('and list the shapes it may ask for', SHAPE_LIBRARY.every((x) => TOOL_DOCS.includes(x.id)));
+
+  // a shape keyframe, which is the morph
+  const mk: ToolCall = { name: 'set_shape', args: { nodeId: 'Left eye', shape: 'star', points: 5, atMs: 0 } };
+  const staged = normaliseCall(P(), mk);
+  ok('set_shape validates', validate(P(), staged) === null, String(validate(P(), staged)));
+  ok('a shape nobody has is refused',
+    validate(P(), { name: 'set_shape', args: { nodeId: 'eyeL', shape: 'blob' } }) !== null);
+  ed().addTimeline('CopilotShapes');
+  applyCalls([{ name: 'set_shape', args: { nodeId: 'eyeL', shape: 'pill', atMs: 0 } },
+              { name: 'set_shape', args: { nodeId: 'eyeL', shape: 'star', points: 5, atMs: 600 } }]);
+  const pathAt = (t: number) => buildScene(evaluateRig(P(), t), { width: 720, height: 720 }).find((i) => i.id === 'eyeL')?.path;
+  ok('two shape keyframes morph', !!pathAt(300) && pathAt(300) !== pathAt(0) && pathAt(300) !== pathAt(600));
+
+  // and what an emitter throws
+  ed().loadProject(defaultProject());
+  ed().addEmitter({
+    name: 'sparks', glyphs: [], color: { r: 0, g: 0, b: 0, a: 1 }, size: 20, path: 'arc',
+    from: { nodeId: 'body', x: 0, y: -40 }, to: { nodeId: 'body', x: 60, y: -140 }, bow: 10,
+    rateMs: 300, lifeMs: 900, count: 3, fadeStart: 0.6,
+    scaleFrom: 1, scaleTo: 1, spin: 0, wobble: 0, wobbleFrequency: 1,
+  });
+  ok('an unknown shape id is refused, and says what is available',
+    /spark/.test(validate(P(), { name: 'set_emitter_parts', args: { emitter: 'sparks', parts: [{ shape: 'nope' }] } }) ?? ''));
+  applyCalls([{ name: 'set_emitter_parts', args: { emitter: 'sparks', parts: [
+    { shape: 'spark', speed: 1.2, size: 0.8 }, { shape: 'star', color: [240, 200, 60] },
+  ] } }]);
+  const em = activeTimeline(P()).emitters!.at(-1)!;
+  ok('set_emitter_parts replaces what it throws',
+    (em.parts ?? []).length === 2 && em.parts![0].shapeId === 'spark' && em.parts![1].color?.r === 240);
+  ok('and clears the old glyph line so nothing is thrown twice', em.glyphs.length === 0);
+
+  ed().loadProject(defaultProject());
+}
+
 // --- zip: the CRC everything downstream depends on -----------------------------
 ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as Uint8Array<ArrayBuffer>) === 0xcbf43926);
 

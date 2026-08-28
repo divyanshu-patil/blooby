@@ -5,6 +5,8 @@ import { blocksEnd, relayoutBlocks } from '../core/timeline';
 import { activeTrackFor } from '../core/scene';
 import { setProp } from '../core/props';
 import { activeTimeline, MODIFIER_KINDS, MODIFIERS } from '../core/types';
+import { primitivePath, PRIMITIVE_SHAPES, type PrimitiveShape } from '../core/path';
+import { shapeById, SHAPE_LIBRARY } from '../core/emitters';
 import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
 import type { EasingCurve, ModifierKind, Project } from '../core/types';
 
@@ -16,7 +18,7 @@ export const TOOL_NAMES = [
   'create_preset', 'add_preset_to_timeline', 'add_modifier', 'morph_between',
   'set_timeline', 'clear_animation', 'set_block_duration', 'remove_block', 'move_block',
   'add_timeline', 'set_camera', 'remove_keyframe', 'move_keyframe', 'edit_preset',
-  'add_emitter', 'set_effect_range',
+  'add_emitter', 'set_effect_range', 'set_shape', 'set_emitter_parts',
 ] as const;
 
 /** The JSON the model must produce. Ollama enforces this shape server-side via `format`. */
@@ -81,7 +83,21 @@ add_emitter           { name, glyphs, path?, fromNode?, fromX?, fromY?, toNode?,
                       // color is [r,g,b] 0-255. fadeStart is 0-1 of a particle's life.
 set_effect_range      { effect, startMs?, endMs? }
                       // effect = an effect's or emitter's name. Times are from the start of its
-                      // scope \u2014 the clip it belongs to, or the timeline. Omit both to run always.`.trim()
+                      // scope \u2014 the clip it belongs to, or the timeline. Omit both to run always.
+
+set_shape             { nodeId, shape: "circle"|"pill"|"rect"|"polygon"|"star", points?, innerRatio?,
+                        cornerRadius?, vertexRadius?, rotation?, atMs? }
+                      // gives a layer an outline. With atMs it is a keyframe, and two keyframes
+                      // holding different shapes MORPH \u2014 that is how an eye becomes a star.
+                      // points: sides, or a star's points. innerRatio: a star's waist, 0.05-0.9.
+                      // vertexRadius: rounds the points, 0-1. cornerRadius: a rect's corners.
+                      // The body is naturally a circle and an eye a pill \u2014 start a morph from
+                      // that shape, or the first frame pops.
+set_emitter_parts     { emitter, parts: [{ shape, color?, speed?, size?, spin? }] }
+                      // what an emitter throws. shape is one of:
+                      // ${SHAPE_LIBRARY.map((s) => s.id).join(', ')}
+                      // Several parts at different speeds, sizes and colours is what makes a
+                      // burst read \u2014 one shape repeated does not.`.trim()
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A property the copilot may write: on a node, and a number. */
@@ -324,6 +340,20 @@ export function validate(p: Project, call: ToolCall): string | null {
     }
     case 'set_effect_range':
       return findEffect(p, a.effect) ? null : `no effect or emitter called "${String(a.effect)}"`;
+    case 'set_shape': {
+      const bad = node(a.nodeId);
+      if (bad) return bad;
+      return PRIMITIVE_SHAPES.includes(a.shape as never) ? null : `shape must be one of ${PRIMITIVE_SHAPES.join(', ')}`;
+    }
+    case 'set_emitter_parts': {
+      const hit = findEffect(p, a.emitter);
+      if (!hit || hit.kind !== 'emitter') return `no emitter called "${String(a.emitter)}"`;
+      if (!Array.isArray(a.parts) || !a.parts.length) return 'set_emitter_parts needs at least one part';
+      for (const pt of a.parts as Record<string, unknown>[]) {
+        if (!shapeById(String(pt?.shape))) return `no shape "${String(pt?.shape)}" — use one of ${SHAPE_LIBRARY.map((x) => x.id).join(', ')}`;
+      }
+      return null;
+    }
     case 'set_camera':
       if (a.property !== 'perspective' && a.property !== 'fov' && a.property !== 'distance') return 'camera property must be perspective or distance';
       return num(a.value) !== undefined ? null : 'set_camera needs a numeric value';
@@ -379,6 +409,10 @@ export function describe(p: Project, call: ToolCall): string {
       const where = a.fromNode ? ` from ${name(a.fromNode)}` : '';
       return `Emit ${(a.glyphs as string[]).slice(0, 4).join(' ')} on a ${a.path ?? 'arc'} path${where} — "${a.name}"`;
     }
+    case 'set_shape':
+      return `Make ${name(a.nodeId)} a ${a.shape}${a.atMs !== undefined ? ` at ${at(a.atMs)} — morphs from whatever it was` : ''}`;
+    case 'set_emitter_parts':
+      return `"${a.emitter}" throws ${(a.parts as { shape: string }[]).map((x) => x.shape).join(', ')}`;
     case 'set_effect_range':
       return a.startMs === undefined && a.endMs === undefined
         ? `Run "${a.effect}" for its whole scope`
@@ -570,6 +604,40 @@ export function applyCalls(calls: ToolCall[]) {
             ...(num(a.startMs) !== undefined ? { startMs: num(a.startMs) } : {}),
             ...(num(a.endMs) !== undefined ? { endMs: num(a.endMs) } : {}),
           });
+          break;
+        }
+        case 'set_shape': {
+          const d = primitivePath(a.shape as PrimitiveShape, {
+            points: num(a.points), innerRatio: num(a.innerRatio),
+            cornerRadius: num(a.cornerRadius), vertexRadius: num(a.vertexRadius), rotation: num(a.rotation),
+          });
+          const nodeId = String(a.nodeId);
+          if (num(a.atMs) !== undefined) writeKeyframe(p, nodeId, 'shape.path', num(a.atMs)!, d, easingOf(a.easing));
+          else {
+            const n2 = p.rig.nodes[nodeId];
+            if (n2) {
+              n2.shapePath = d;
+              n2.shape = {
+                kind: a.shape as 'circle' | 'pill' | 'rect' | 'polygon' | 'star',
+                points: num(a.points), innerRatio: num(a.innerRatio),
+                cornerRadius: num(a.cornerRadius), vertexRadius: num(a.vertexRadius), rotation: num(a.rotation),
+              };
+            }
+          }
+          break;
+        }
+        case 'set_emitter_parts': {
+          const hit = findEffect(p, a.emitter)!;
+          const em = activeTimeline(p).emitters!.find((x) => x.id === hit.id)!;
+          em.parts = (a.parts as Record<string, unknown>[]).map((pt, i) => {
+            const rgb = Array.isArray(pt.color) ? (pt.color as number[]) : null;
+            return {
+              id: uid(`pt${i}`), shapeId: String(pt.shape),
+              ...(rgb ? { color: { r: rgb[0] ?? 0, g: rgb[1] ?? 0, b: rgb[2] ?? 0, a: 1 } } : {}),
+              weight: 1, speed: num(pt.speed) ?? 1, sizeScale: num(pt.size) ?? 1, spin: num(pt.spin) ?? 0,
+            };
+          });
+          em.glyphs = [];
           break;
         }
         case 'set_effect_range': {

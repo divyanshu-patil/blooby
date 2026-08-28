@@ -101,9 +101,12 @@ singing one is a mouth cycle plus ♪. Reach for add_emitter as readily as a key
   confetti  many glyphs, fall, count 16, rateMs 90, big wobble and spin, over about 1500ms
   orbit     path "orbit" around a point above the head, radiusX wider than radiusY
 
-SHAPE. A layer can carry an outline (shape.path) and morph between two of them — an eye
-becoming a star is two keyframes, not a swap. You cannot set it (it is not a number), so
-say so in the reply rather than approximating it with scale.
+SHAPE. set_shape gives a layer an outline, and two shape keyframes morph between them —
+an eye becoming a star is two keyframes, not a swap. Start from the layer's natural shape
+(circle for the body, pill for an eye) so the first frame does not pop.
+
+LEAVING. "visible" is 0-1 and fades AND shrinks. Retire a feature with it rather than
+letting it sit there through a beat it has no part in.
 
 RECIPES — starting points, not rules. Adjust to what was asked.
   blink         eyeL/eyeR eye.openness 1 → 0.05 → 1

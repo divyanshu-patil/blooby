@@ -121,6 +121,7 @@ Layers:
 ${nodes}
 Expressions: ${p.expressions.map((e) => `${e.name}`).join(', ') || 'none'}
 Presets: ${p.presets.map((e) => `${e.name} (${fmtSec(e.durationMs)}, ${e.tracks.length} tracks)`).join(', ')}
+Shapes: ${Object.values(p.rig.nodes).filter((n) => n.shapePath).map((n) => `${n.id} is a ${n.shape?.kind ?? 'custom outline'}`).join(', ') || 'every layer is its natural shape'}
 Effects and emitters running now: ${[
     ...tl.modifiers.map((m) => `${m.kind} on ${m.nodeId}`),
     ...(tl.emitters ?? []).map((e) => `"${e.name}" (${e.glyphs.join('')}, ${e.path})`),
@@ -194,6 +195,13 @@ Rules:
   endpoint to a layer with fromNode/toNode when it should come from that layer.
 - add_modifier "pendulum" swings one axis; set_effect_range narrows when any effect or
   emitter runs, in ms from the start of its own scope.
+- set_shape gives a layer an outline, and two shape keyframes MORPH between them — that is
+  how an eye becomes a star. Start from the layer's natural shape (the body is a circle,
+  an eye is a pill) or the first frame pops.
+- set_emitter_parts decides what an emitter throws. Several parts at different speeds,
+  sizes and colours is what makes a burst read; one shape repeated does not.
+- "visible" is a plain 0-1 property that fades AND shrinks — keyframe it to 0 to retire a
+  feature into the next clip rather than blinking it off.
 - Say it in one sentence. A long "reply" is the one thing that can get your answer cut
   off before the "calls" array is written, which loses all of the work.`;
 }
