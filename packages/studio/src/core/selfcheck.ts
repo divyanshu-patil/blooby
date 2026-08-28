@@ -1524,6 +1524,51 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   useEditor.getState().loadProject(defaultProject());
 }
 
+// --- copilot: a follow-up edits, it does not build a second clip -----------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  const bare = systemPrompt(P());
+  ok('with nothing made yet, no conversation line is claimed', !/in this conversation/.test(bare));
+
+  const withHistory = systemPrompt(P(), ['BigEye']);
+  ok('once something is made, the prompt names it', /You made these in this conversation, newest last: BigEye/.test(withHistory));
+  ok('and says a bare "it" refers to the newest of them', /"it", "the animation"/.test(withHistory));
+
+  // the trap this rule exists for: edit_preset changes the template, and a clip already
+  // placed keeps its own copy — so editing only the preset changes nothing on screen
+  ok('the prompt warns that editing a preset alone is invisible',
+    /editing the preset alone changes nothing on screen/.test(withHistory));
+  ok('and points refinements at the strip keyframes',
+    /overwrites that keyframe in place/.test(withHistory));
+  ok('while still allowing an explicit second preset',
+    /only when asked for one in so many words/.test(withHistory));
+
+  // that warning has to be TRUE: prove a placed clip ignores a later edit_preset
+  applyCalls([
+    { name: 'create_preset', args: { name: 'Follow', durationMs: 600, tracks: [
+      { nodeId: 'body', property: 'transform.scale.x', keyframes: [{ time: 0, value: 1 }, { time: 300, value: 1.2 }] },
+    ] } },
+    { name: 'add_preset_to_timeline', args: { preset: 'Follow' } },
+  ]);
+  const clipStart = blockStarts(activeTimeline(P())).at(-1)!;
+  const before = valueAt(P(), 'body', 'transform.scale.x', clipStart + 300) as number;
+
+  applyCalls([{ name: 'edit_preset', args: { preset: 'Follow', tracks: [
+    { nodeId: 'body', property: 'transform.scale.x', keyframes: [{ time: 0, value: 1 }, { time: 300, value: 1.8 }] },
+  ] } }]);
+  ok('editing the preset really does leave the placed clip alone',
+    (valueAt(P(), 'body', 'transform.scale.x', clipStart + 300) as number) === before, String(before));
+
+  // and that the route the prompt points at DOES change it
+  applyCalls([{ name: 'add_keyframe', args: { nodeId: 'body', property: 'transform.scale.x', atMs: clipStart + 300, value: 1.8 } }]);
+  ok('while add_keyframe at the listed time is what the user actually sees change',
+    (valueAt(P(), 'body', 'transform.scale.x', clipStart + 300) as number) === 1.8);
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
 // --- zip: the CRC everything downstream depends on -----------------------------
 ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as Uint8Array<ArrayBuffer>) === 0xcbf43926);
 

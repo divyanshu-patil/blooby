@@ -92,8 +92,12 @@ overwrites that keyframe in place rather than adding a second one:
 ${lines.length ? lines.join('\n') : '  (nothing animated yet)'}`;
 }
 
-/** Compact enough to fit any context window, complete enough to act on. */
-export function systemPrompt(p: Project): string {
+/**
+ * @param made names of presets and clips this conversation has already created, newest
+ *   last. Without it a follow-up like "make it scale more" reads as a fresh request and
+ *   the copilot builds a second clip beside the first instead of changing it.
+ */
+export function systemPrompt(p: Project, made: string[] = []): string {
   const tl = activeTimeline(p);
   // built-in preset contents are not worth the tokens; the ones a user asks to edit are
   const custom = p.presets.filter((x) => x.source === 'custom');
@@ -138,6 +142,24 @@ Tools:
 ${TOOL_DOCS}
 
 ${ANIMATION_CRAFT}
+
+${made.length ? `You made these in this conversation, newest last: ${made.join(', ')}.
+"it", "the animation", "that clip" and anything else the user says without naming
+something refers to the newest of them.
+
+` : ''}FOLLOW-UPS. A message that refines what you just did — "bigger", "slower", "more
+rotation", "now make it blink at the end" — is an EDIT of that work, not a new clip.
+- To change what the user is LOOKING AT, edit the keyframes on the strip. add_keyframe at
+  a time already listed under "Keyframes" overwrites that keyframe in place;
+  move_keyframe retimes one; remove_keyframe deletes one. This is what actually changes
+  the animation.
+- edit_preset changes the saved template ONLY. A clip already on the strip keeps the copy
+  it was added with, so editing the preset alone changes nothing on screen. When the user
+  is refining a clip that came from a preset you made, edit the clip's keyframes, and
+  edit_preset as well if they want the saved version to match.
+- Build a second preset only when asked for one in so many words — "add another",
+  "also make a", "a second". If you cannot tell whether a message refines or adds, refine:
+  an unwanted extra clip is more annoying to undo than a value pushed further.
 
 Rules:
 - Work through "plan" first: read the request, match it to a recipe, read the keyframes

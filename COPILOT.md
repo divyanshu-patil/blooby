@@ -141,6 +141,20 @@ The keyframe dump is budgeted (`timelineDump`, 4000 chars) and says how many tra
 dropped. Chat history is capped at the last 12 turns for the same reason: an unbounded
 thread on top of a full timeline is how a reply gets cut off mid-JSON.
 
+The prompt also carries **what this conversation has already built** — the names from
+applied `create_preset` / `add_preset_to_timeline` / `add_timeline` calls, newest last —
+so a follow-up ("make it scale more") edits that work instead of building a second clip
+beside it. Only *applied* turns count: telling the model about a proposal the user
+rejected is how it ends up editing a clip that is not there.
+
+There is a trap in the follow-up rules worth knowing before you change them.
+`edit_preset` changes the **template only** — a clip already on the strip holds the copy
+it was added with, so editing the preset alone changes nothing the user can see. The
+prompt therefore points refinements at the strip's own keyframes (`add_keyframe` at a
+listed time overwrites in place) and mentions `edit_preset` as the separate thing it is.
+The selfcheck proves both halves: that a placed clip really does ignore a later
+`edit_preset`, and that `add_keyframe` at the listed time really does change what plays.
+
 The response schema puts **`plan` first**, before `reply` and `calls`, and requires it.
 Key order in a JSON schema is generation order, so the model states what the request
 means, which recipe it matches, what is already on the timeline and which beats it is

@@ -62,6 +62,11 @@ OVERSHOOT AND SETTLE. End a lively move past its target, then come back. Oversho
 8-15% of the change, settle over 40-60% of the main duration — a scale to 1.3 goes
 1.0 to 1.34 to 1.3. Never overshoot a blink or anything closing.
 
+REFINING SOMETHING YOU ALREADY MADE. Change the beat that is wrong, leave the rest.
+"scale more" means the body scale keyframes get bigger values at the times they already
+sit on — not a new clip, not a rebuilt preset, not every other value nudged along with
+it. Keep the shape and the timing you had unless the request is about timing.
+
 READ THE WHOLE REQUEST. Every verb in it is a beat you owe. "the eyes get big and the
 mascot scales and rotates and blinks" is four changes, and a body scale of 1.05 does not
 count as one — if the user names a motion, it has to be visible at a glance. When in

@@ -92,7 +92,7 @@ export function Copilot() {
       // something the model said, and replaying it just teaches it to say that
       // Capped, because the system prompt now carries the whole timeline — an unbounded
       // thread on top of that is how a reply gets cut off mid-JSON.
-      { role: 'system', content: systemPrompt(project) },
+      { role: 'system', content: systemPrompt(project, made(turns)) },
       ...turns.filter((t) => t.role === 'user' || t.role === 'bot').slice(-12)
         .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: asHistory(t) })),
       { role: 'user', content: text },
@@ -345,6 +345,24 @@ export function Copilot() {
 }
 
 class ValidationError extends Error {}
+
+/**
+ * What this conversation has actually built, newest last.
+ *
+ * Only applied turns count — a proposal the user rejected or has not applied yet is not
+ * on the timeline, and telling the model it exists is how it ends up editing a clip that
+ * is not there. Without this list a follow-up ("make it scale more") reads as a brand new
+ * request and the copilot builds a second clip beside the first.
+ */
+function made(turns: Turn[]): string[] {
+  const names = turns
+    .filter((t) => t.done)
+    .flatMap((t) => t.calls ?? [])
+    .filter((c) => c.name === 'create_preset' || c.name === 'add_preset_to_timeline' || c.name === 'add_timeline')
+    .map((c) => (c.args.name ?? c.args.preset))
+    .filter((n): n is string => typeof n === 'string' && n.trim() !== '');
+  return [...new Set(names)].slice(-6);
+}
 
 /**
  * What the model is shown for one of its own past turns.
