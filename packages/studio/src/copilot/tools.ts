@@ -1,5 +1,5 @@
 import { uniqueName, useEditor, writeKeyframe } from '../core/store';
-import { makeTimeline, uid } from '../core/defaults';
+import { attachPresetEffects, makeTimeline, uid } from '../core/defaults';
 import { namedEasing, EASING_NAMES } from '../core/easing';
 import { blocksEnd, relayoutBlocks } from '../core/timeline';
 import { activeTrackFor } from '../core/scene';
@@ -445,6 +445,9 @@ export function applyCalls(calls: ToolCall[]) {
             });
           }
           tl.blocks.splice(index, 0, { id: blockId, presetId: preset.id, name: preset.name, durationMs: preset.durationMs });
+          // a preset's effects and emitters come with it — "Sleepy" without the zzz is
+          // not sleepy, and the copilot placing one must get the same clip the panel does
+          attachPresetEffects(tl, preset, blockId);
           break;
         }
         case 'add_modifier':

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { defaultProject, makeTimeline, uid } from './defaults';
+import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
 import { readProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
@@ -439,6 +439,7 @@ export const useEditor = create<Editor>((set, get) => ({
           keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
         });
       }
+      attachPresetEffects(tl, preset, blockId);
       const shifted = tl.blocks.slice(at0).map((b) => b.id);
       if (shifted.length) {
         const set2 = new Set(shifted);

@@ -91,6 +91,8 @@ export function relayoutBlocks(tl: Timeline, next: Block[]): void {
   // owning clip left: never evaluates again (evaluateRig skips an unresolvable window)
   // but stays in the timeline forever with no UI left to ever reach or remove it.
   tl.modifiers = tl.modifiers.filter((m) => !m.blockId || newById.has(m.blockId));
+  // an emitter is scoped the same way and orphans the same way
+  if (tl.emitters) tl.emitters = tl.emitters.filter((e) => !e.blockId || newById.has(e.blockId));
   // same for a transition into a now-gone clip — nothing left for it to blend into
   if (tl.transitions) tl.transitions = tl.transitions.filter((x) => newById.has(x.afterBlockId));
   tl.timelineDurationMs = derivedDuration(tl);

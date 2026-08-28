@@ -216,6 +216,15 @@ export interface Preset {
   source: PresetSource;
   durationMs: number;
   tracks: Track[];
+  /**
+   * The half of a preset that is not keyframes. "Sleepy" is not sleepy without the zzz
+   * and "Cold" is not cold without the shiver, so a preset carries its own effects and
+   * emitters and they are scoped to the clip when it is placed — a preset that only
+   * carried tracks would be half an animation with no way to say so.
+   * Both optional: every preset written before this existed is still valid.
+   */
+  modifiers?: Omit<Modifier, 'id' | 'blockId'>[];
+  emitters?: Omit<Emitter, 'id' | 'blockId'>[];
   thumbnail?: string;
   /** Library metadata, present only on presets that came from the shared catalogue.
    *  Local builtin/custom presets have no publish date or usage count to sort on. */

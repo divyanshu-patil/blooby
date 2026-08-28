@@ -7,7 +7,7 @@ import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScree
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, composeScene, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, scopeTime, valueAt } from './scene';
-import { defaultProject, makeTimeline } from './defaults';
+import { builtinPresets, defaultProject, makeTimeline } from './defaults';
 import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
@@ -1780,6 +1780,98 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
   ed().loadProject(defaultProject());
   ok('a project with no emitters costs nothing', emitterItems(activeTimeline(P()), P().rig, [], 0, VIEW).length === 0);
+}
+
+// --- the built-in presets, held to the same rules the copilot is -----------------
+{
+  const presets = builtinPresets();
+
+  // every clip must end on the pose it opened with, or it cannot loop and cannot be
+  // followed. Checked structurally across all of them rather than by eye.
+  const drifting: string[] = [];
+  for (const p of presets) {
+    for (const t of p.tracks) {
+      const a = t.keyframes[0]?.value, b = t.keyframes[t.keyframes.length - 1]?.value;
+      if (a === undefined || b === undefined) continue;
+      const same = typeof a === 'number' && typeof b === 'number'
+        ? Math.abs(a - b) < 1e-6
+        : JSON.stringify(a) === JSON.stringify(b);
+      if (!same) drifting.push(`${p.name}.${t.nodeId}.${t.property}`);
+    }
+  }
+  ok('every builtin returns to the pose it opened on', drifting.length === 0, drifting.join(', '));
+
+  // and the copilot's own critic must approve them. If it does not, one of the two is
+  // wrong — a critic that rejects the hand-authored work is not a usable critic.
+  const proj = defaultProject();
+  const complaints: string[] = [];
+  for (const p of presets) {
+    if (!p.tracks.length) continue;
+    const calls: ToolCall[] = [{ name: 'create_preset', args: { name: p.name, durationMs: p.durationMs, tracks: p.tracks.map((t) => ({
+      nodeId: t.nodeId, property: t.property, keyframes: t.keyframes.map((k) => ({ time: k.time, value: k.value })),
+    })) } }];
+    for (const c of critique(proj, calls, '')) complaints.push(`${p.name}: ${c}`);
+  }
+  ok('the critic approves every hand-authored builtin', complaints.length === 0, complaints.join('\n    '));
+
+  // the renamed one, and the new one that took its place
+  ok('Notify was renamed to Decline', presets.some((p) => p.id === 'p_decline' && p.name === 'Decline'));
+  ok('and the new Notify announces rather than refuses',
+    presets.find((p) => p.id === 'p_notify')?.emitters?.length === 1
+    && !presets.find((p) => p.id === 'p_notify')!.tracks.some((t) => t.property === 'surface.yaw'));
+}
+
+// --- a preset carries its effects, and placing it brings them along --------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const TL = () => activeTimeline(P());
+  const VIEW = { width: 720, height: 720 };
+
+  ed().commit((p) => { p.presets = builtinPresets(); });
+  const emittersBefore = TL().emitters?.length ?? 0;
+
+  ed().addBlock('p_sleepy');
+  const clip = TL().blocks.at(-1)!;
+  const em = TL().emitters ?? [];
+  ok('placing Sleepy brings its zzz with it', em.length === emittersBefore + 1, String(em.length));
+  ok('scoped to the clip it was placed as, not globally', em.at(-1)!.blockId === clip.id);
+
+  const start = blockStarts(TL()).at(-1)!;
+  const glyphs = (t: number) => {
+    const rig = evaluateRig(P(), t);
+    return emitterItems(TL(), rig, buildScene(rig, VIEW), t, VIEW);
+  };
+  ok('the zzz appear once the mascot is asleep', glyphs(start + 1800).length > 0, String(glyphs(start + 1800).length));
+  ok('and not before its range opens', glyphs(start + 200).length === 0);
+  ok('nor after it closes', glyphs(start + 4500).length === 0);
+
+  ed().addBlock('p_angry');
+  const angry = TL().blocks.at(-1)!;
+  const shake = TL().modifiers.find((m) => m.blockId === angry.id);
+  ok('placing Angry brings its shake, with the range it was authored with',
+    !!shake && shake.startMs === 300 && shake.endMs === 1400, JSON.stringify(shake));
+
+  // the colour track is the point of Angry, and colour has to actually evaluate
+  const angryStart = blockStarts(TL()).at(-1)!;
+  const bodyColor = (t: number) => evaluateRig(P(), t).nodes.body.color;
+  // bone is near-white, so "red" is not a bigger r — it is r pulling away from g and b
+  const redness = (c: { r: number; g: number; b: number }) => c.r - (c.g + c.b) / 2;
+  ok('the body really does turn red mid-clip',
+    redness(bodyColor(angryStart + 800)) > redness(bodyColor(angryStart)) + 60,
+    `${redness(bodyColor(angryStart)).toFixed(0)} -> ${redness(bodyColor(angryStart + 800)).toFixed(0)}`);
+  ok('and comes back to bone by the end',
+    Math.abs(redness(bodyColor(angryStart + 1800)) - redness(bodyColor(angryStart))) < 2);
+
+  // removing a clip must take its effects with it, or they linger unreachable forever
+  const before = { e: (TL().emitters ?? []).length, m: TL().modifiers.length };
+  ed().removeBlock(clip.id);
+  ok('removing the clip removes its emitter', (TL().emitters ?? []).length === before.e - 1);
+  ed().removeBlock(angry.id);
+  ok('and its effects', TL().modifiers.length === before.m - 1);
+
+  ed().loadProject(defaultProject());
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------

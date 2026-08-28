@@ -105,10 +105,16 @@ export function critique(p: Project, calls: ToolCall[], ask: string): string[] {
     notes.push(`${drifting.map((t) => `${t.nodeId}.${t.property}`).join(', ')} end on a different value than they start on, so the clip cannot loop or be followed. Close each one back on its opening value.`);
   }
 
-  // 5. nothing held: every pose passed straight through, so none of them read
+  // 5. nothing held: every pose passed straight through, so none of them read.
+  //
+  // Only asked of clips shaped like a single gesture. A blink or a talk cycle has no peak
+  // to hold — the repetition IS the motion — and demanding a hold there would be asking
+  // the model to make it worse. Caught by running this over the hand-authored builtins:
+  // it complained about Blink and Talk, which are correct as they are.
+  const gesture = tracks.every((t) => t.keys.length <= 5);
   const held = tracks.some((t) => t.keys.some((k, i) =>
     i > 0 && Math.abs(k.value - t.keys[i - 1].value) < 1e-6 && k.time - t.keys[i - 1].time >= 250));
-  if (!held) notes.push('No pose is held — every keyframe moves straight into the next, so nothing reads. Repeat a value 300-600ms apart at the peak.');
+  if (gesture && !held) notes.push('No pose is held — every keyframe moves straight into the next, so nothing reads. Repeat a value 300-600ms apart at the peak.');
 
   // 6. identical timing on every layer is the clearest tell of machine-made motion
   if (tracks.length >= 3) {
