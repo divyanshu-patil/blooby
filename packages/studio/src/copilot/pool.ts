@@ -92,13 +92,30 @@ export const needsKey = (s: CopilotSettings) => s.endpoint === 'custom' || usesB
  *  gating the editor on that would hide the field you need to add your first key. */
 export const acceptsKeys = (s: CopilotSettings) => s.endpoint === 'custom' || s.endpoint === 'cloud';
 
-/** Cloud models are addressed by a `-cloud` suffix when run through a local daemon. */
+/**
+ * How a cloud model has to be addressed, which depends on HOW the request gets there.
+ *
+ * Through the local daemon it is a proxy instruction: the cloud marker rides on the TAG,
+ * the part after the colon. A tagged model takes it as a tag suffix
+ * (`gpt-oss:120b` -> `gpt-oss:120b-cloud`), an untagged one has no tag to suffix and
+ * takes the marker AS the tag (`glm-5.2` -> `glm-5.2:cloud`). Blindly appending `-cloud`
+ * produced `glm-5.2-cloud`, which names a model that does not exist, and the daemon
+ * answered 404.
+ *
+ * Straight to ollama.com — which is what routing through the backend does — there is no
+ * proxy to instruct and the marker is wrong entirely: the plain name is the model.
+ */
 export function resolveModel(s: CopilotSettings, model: string): string {
   if (s.endpoint !== 'cloud' || !model) return model;
-  return model.endsWith('-cloud') ? model : `${model}-cloud`;
+  if (usesBackend(s)) return stripCloudSuffix(model);
+  if (model.endsWith('-cloud') || model.endsWith(':cloud')) return model;
+  return model.includes(':') ? `${model}-cloud` : `${model}:cloud`;
 }
 
-export const displayModel = (m: string) => m.replace(/-cloud$/, '');
+/** The inverse — what the model is called upstream, with any local proxy marker removed. */
+export const stripCloudSuffix = (m: string) => m.replace(/-cloud$/, '').replace(/:cloud$/, '');
+
+export const displayModel = (m: string) => stripCloudSuffix(m);
 
 /**
  * Fallback catalogue, used because the live list at ollama.com/api/tags is CORS-blocked

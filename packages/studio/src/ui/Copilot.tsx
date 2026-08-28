@@ -2,25 +2,30 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { chatJson, listModels, PoolError, type ChatMessage } from '../copilot/client';
 import { acceptsKeys, baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, resolveModel, saveSettings, usesBackend, type CopilotSettings, type KeyStatus } from '../copilot/pool';
-import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate, type ToolCall } from '../copilot/tools';
+import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate } from '../copilot/tools';
 import { systemPrompt } from '../copilot/prompt';
 import { parseTurn } from '../copilot/parse';
 import { CLOUD_CATALOGUE } from '../copilot/pool';
+import { useCopilotSession, type Turn } from '../copilot/session';
 import { Panel } from './bits';
 
-interface Turn { role: 'user' | 'bot' | 'error'; text: string; calls?: ToolCall[]; done?: boolean }
+const PHASE_LABEL = {
+  thinking: 'thinking…',
+  retrying: 'that batch did not validate — asking again…',
+  applying: 'applying changes…',
+} as const;
 
 export function Copilot() {
   const project = useEditor((s) => s.project);
   const [settings, setSettings] = useState<CopilotSettings>(loadSettings);
   // the cloud catalogue needs no network, so the picker is never empty on the cloud tier
   const [models, setModels] = useState<string[]>(() => (loadSettings().endpoint === 'cloud' ? [...CLOUD_CATALOGUE] : []));
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
+  // the thread lives in a store, not here: this panel is one tab in the right rail, and
+  // switching to Node or Effects unmounts it — which used to throw the conversation away
+  const { turns, input, phase, status, push, patchTurn, setInput, setPhase, setStatus, clear } = useCopilotSession();
+  const busy = phase !== 'idle';
   const [showKeys, setShowKeys] = useState(false);
   const [newKey, setNewKey] = useState('');
-  const [status, setStatus] = useState('');
   const thread = useRef<HTMLDivElement>(null);
 
   useEffect(() => { thread.current?.scrollTo({ top: 1e6 }); }, [turns]);
@@ -54,8 +59,8 @@ export function Copilot() {
     const text = input.trim();
     if (!text || busy) return;
     setInput('');
-    setTurns((t) => [...t, { role: 'user', text }]);
-    setBusy(true);
+    push({ role: 'user', text });
+    setPhase('thinking');
 
     const history: ChatMessage[] = [
       { role: 'system', content: systemPrompt(project) },
@@ -65,13 +70,13 @@ export function Copilot() {
 
     const attempt = async (extra?: string): Promise<Turn> => {
       const msgs = extra ? [...history, { role: 'user' as const, content: extra }] : history;
-      const raw = await chatJson(settings, msgs, RESPONSE_SCHEMA, markKey);
-      const parsed = parseTurn(raw);
+      const { content, thinking } = await chatJson(settings, msgs, RESPONSE_SCHEMA, markKey);
+      const parsed = parseTurn(content);
       const calls = parsed.calls.map((c) => normaliseCall(project, c));
       const problems = calls.map((c) => validate(project, c)).filter(Boolean) as string[];
       if (problems.length) throw new ValidationError(problems.join('; '));
       if (!parsed.reply && !calls.length) throw new ValidationError('no tool calls and nothing to say');
-      return { role: 'bot', text: parsed.reply || `${calls.length} change${calls.length === 1 ? '' : 's'} ready.`, calls };
+      return { role: 'bot', text: parsed.reply || `${calls.length} change${calls.length === 1 ? '' : 's'} ready.`, calls, thinking };
     };
 
     try {
@@ -80,22 +85,24 @@ export function Copilot() {
       catch (e) {
         // one re-prompt with the validator's complaint, then give up
         if (!(e instanceof ValidationError)) throw e;
+        setPhase('retrying');
         turn = await attempt(`Your previous tool calls were rejected: ${e.message}. Use only the layer ids, expression names and preset names listed above, and only the listed properties. Try again.`);
       }
-      setTurns((t) => [...t, turn]);
+      push(turn);
     } catch (e) {
       const msg = e instanceof PoolError || e instanceof Error ? e.message : String(e);
-      setTurns((t) => [...t, { role: 'error', text: msg }]);
+      push({ role: 'error', text: msg });
     } finally {
-      setBusy(false);
+      setPhase('idle');
     }
   };
 
   const apply = (i: number) => {
     const turn = turns[i];
     if (!turn.calls?.length) return;
-    applyCalls(turn.calls);
-    setTurns((t) => t.map((x, n) => (n === i ? { ...x, done: true } : x)));
+    setPhase('applying');
+    try { applyCalls(turn.calls); } finally { setPhase('idle'); }
+    patchTurn(i, { done: true });
   };
 
   return (
@@ -195,6 +202,12 @@ export function Copilot() {
               <div key={i} className={`msg ${t.role === 'user' ? 'user' : t.role === 'error' ? 'err' : 'bot'}`}>
                 <span className="who">{t.role === 'user' ? 'you' : t.role === 'error' ? 'failed' : 'copilot'}</span>
                 <div className="bubble">{t.text}</div>
+                {t.thinking && (
+                  <details className="think">
+                    <summary>thinking</summary>
+                    <pre>{t.thinking}</pre>
+                  </details>
+                )}
                 {!!t.calls?.length && (
                   <div className="proposal" style={{ marginTop: 6 }}>
                     <ul>
@@ -204,7 +217,7 @@ export function Copilot() {
                       {t.done ? <span className="hint">Applied — ⌘Z undoes the whole batch.</span> : (
                         <>
                           <button className="btn sm primary" onClick={() => apply(i)}>Apply {t.calls.length}</button>
-                          <button className="btn sm" onClick={() => setTurns((x) => x.map((y, n) => (n === i ? { ...y, calls: [] } : y)))}>Reject</button>
+                          <button className="btn sm" onClick={() => patchTurn(i, { calls: [] })}>Reject</button>
                         </>
                       )}
                     </div>
@@ -212,7 +225,7 @@ export function Copilot() {
                 )}
               </div>
             ))}
-            {busy && <p className="hint">thinking…</p>}
+            {busy && <p className="hint working">{PHASE_LABEL[phase as keyof typeof PHASE_LABEL]}</p>}
           </div>
           <textarea className="ask" placeholder="Describe the animation you want…" value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -220,7 +233,7 @@ export function Copilot() {
           <div className="row">
             <span className="hint">⌘↵ to send</span>
             <span className="spacer" />
-            <button className="btn sm" disabled={!turns.length} onClick={() => setTurns([])}>Clear</button>
+            <button className="btn sm" disabled={!turns.length || busy} onClick={clear}>Clear</button>
             <button className="btn primary sm" disabled={busy || !input.trim() || !settings.model} onClick={ask}>Send</button>
           </div>
         </div>

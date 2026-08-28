@@ -99,7 +99,7 @@ export async function chatJson(
   messages: ChatMessage[],
   schema: object,
   markKey: (key: string, status: KeyStatus, note?: string) => void,
-): Promise<string> {
+): Promise<{ content: string; thinking?: string }> {
   const res = await call(s, '/api/chat', {
     method: 'POST',
     body: JSON.stringify({
@@ -107,9 +107,12 @@ export async function chatJson(
       messages,
       stream: false,
       format: schema,
-      options: { temperature: 0.15 },
+      // a preset with several tracks is a long reply; Ollama's default budget cuts it
+      // off mid-JSON, which reads downstream as "the model did not return JSON"
+      options: { temperature: 0.15, num_ctx: 8192, num_predict: 4096 },
     }),
   }, markKey);
   const data = await res.json();
-  return data.message?.content ?? data.response ?? '';
+  // reasoning models put their scratchpad in `thinking`; the UI shows it collapsed
+  return { content: data.message?.content ?? data.response ?? '', thinking: data.message?.thinking || undefined };
 }

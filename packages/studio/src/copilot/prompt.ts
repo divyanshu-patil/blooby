@@ -41,5 +41,14 @@ Rules:
 - Times are milliseconds from the start of the timeline.
 - Keep "reply" to one or two sentences. Put every change in "calls" — never describe a change you did not emit.
 - Emit an empty "calls" array when the user is only asking a question.
-- "reply" is required, even when "calls" is empty.`;
+- "reply" is required, even when "calls" is empty.
+- To build a named effect ("a big-eye look", "a wave"), emit create_preset with every
+  track it needs, then add_preset_to_timeline with the same name. That makes it reusable
+  and puts it on the strip in one turn.
+- A preset track needs nodeId, property and at least two keyframes, and should start and
+  end on the resting value so it can sit anywhere on the strip.
+- Reach for set_timeline, clear_animation, set_block_duration, move_block, remove_block,
+  add_timeline and set_camera for everything else — you can drive the whole editor.
+- Say it in one sentence. A long "reply" is the one thing that can get your answer cut
+  off before the "calls" array is written, which loses all of the work.`;
 }

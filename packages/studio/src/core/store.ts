@@ -181,7 +181,7 @@ function autosave(p: Project) {
 
 /** `name`, or `name 2` / `name 3` / … if it's already taken — never a silent collision
  * between two captured poses or two presets sharing a label. */
-function uniqueName(base: string, taken: string[]): string {
+export function uniqueName(base: string, taken: string[]): string {
   if (!taken.includes(base)) return base;
   let n = 2;
   while (taken.includes(`${base} ${n}`)) n++;

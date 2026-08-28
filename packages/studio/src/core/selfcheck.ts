@@ -926,6 +926,23 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('junk is rejected, not guessed', (() => { try { parseTurn('I cannot do that'); return false; } catch { return true; } })());
   ok('unknown tools are dropped', parseTurn('{"calls":[{"name":"drop_database","args":{}}]}').calls.length === 0);
 
+  // what actually broke "create a big eye effect": the JSON itself was fine, but the
+  // model kept talking past the closing brace and the whole blob went to JSON.parse
+  ok('prose AFTER the json', parseTurn('{"reply":"hi","calls":[]}\n\nHope that helps!').reply === 'hi');
+  ok('an unclosed fence still parses', parseTurn('```json\n{"reply":"hi","calls":[]}').reply === 'hi');
+  ok('prose is reported as no JSON, not as a cut-off', (() => {
+    try { parseTurn('I cannot do that'); return false; } catch (e) { return /did not return JSON/.test((e as Error).message); }
+  })());
+
+  // and when a reply genuinely runs out of budget, keep the calls it did manage to emit
+  const cut = '{"reply":"Here is a BigEye preset.","calls":[{"name":"add_preset_to_timeline","args":{"preset":"Blink"}},{"name":"set_eye_par';
+  const salvaged = parseTurn(cut);
+  ok('a truncated response keeps its complete calls',
+    salvaged.calls.length === 1 && salvaged.reply.startsWith('Here is'), JSON.stringify(salvaged));
+  ok('a truncated reply-only string still yields the reply', parseTurn('{"reply":"half a sen').reply === 'half a sen');
+  ok('the new tool names survive the parser',
+    parseTurn('{"calls":[{"name":"set_camera","args":{"property":"distance","value":3}},{"move_block":{"block":0,"index":1}}]}').calls.length === 2);
+
   // normalisation: layer names and argument aliases become the real thing
   const proj = defaultProject();
   const n1 = normaliseCall(proj, { name: 'add_modifier', args: { nodeId: 'Body', kind: 'float', amount: 10, frequency: 0.2, amplitude: 5 } });
@@ -1141,6 +1158,102 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('deleteKeyframes removes every selected keyframe across different tracks in one call',
     !afterDelete.tracks.find((t) => t.id === idleYaw.id)?.keyframes.some((k) => k.id === doomed[0].kfId)
     && !afterDelete.tracks.find((t) => t.id === idleOffsetY.id)?.keyframes.some((k) => k.id === doomed[1].kfId));
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- copilot: the tools that give it the rest of the editor ---------------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const PT = () => activeTimeline(P());
+
+  // every clip-owned keyframe must stay inside its clip's span after any strip edit —
+  // that is the invariant relayoutBlocks exists to hold, and the one a copilot tool that
+  // edits tl.blocks directly would quietly break
+  const glued = () => {
+    const starts = blockStarts(PT());
+    const span = new Map(PT().blocks.map((b, i) => [b.id, [starts[i], starts[i] + b.durationMs]] as const));
+    return PT().tracks.filter((t) => t.blockId).every((t) => {
+      const s = span.get(t.blockId!);
+      return !!s && t.keyframes.every((k) => k.time >= s[0] - 1 && k.time <= s[1] + 1);
+    });
+  };
+
+  const names = () => PT().blocks.map((b) => b.name).join(',');
+  ok('a fresh file opens on the four-beat strip', names() === 'Idle,Blink,Talk,Happy', names());
+
+  // a clip is addressable by name, by id and by index — models reach for all three
+  applyCalls([{ name: 'set_block_duration', args: { block: 'Blink', durationMs: 900 } }]);
+  ok('set_block_duration resizes the clip', PT().blocks[1].durationMs === 900, String(PT().blocks[1].durationMs));
+  ok('and drags every clip-owned keyframe with it', glued());
+
+  applyCalls([{ name: 'move_block', args: { block: 3, index: 0 } }]);
+  ok('move_block reorders the strip', names() === 'Happy,Idle,Blink,Talk', names());
+  ok('reordering keeps the keyframes glued', glued());
+
+  const doomed = PT().blocks.find((b) => b.name === 'Blink')!.id;
+  applyCalls([{ name: 'remove_block', args: { block: 'Blink' } }]);
+  ok('remove_block drops the clip and its tracks',
+    names() === 'Happy,Idle,Talk' && !PT().tracks.some((t) => t.blockId === doomed));
+  ok('removing keeps the keyframes glued', glued());
+
+  const before = P().timelines.length;
+  applyCalls([
+    { name: 'add_timeline', args: { name: 'Wave' } },
+    { name: 'set_timeline', args: { durationMs: 2400, loop: true, fps: 24 } },
+    { name: 'set_camera', args: { property: 'perspective', value: 42 } },
+  ]);
+  ok('add_timeline makes a new state and switches to it',
+    P().timelines.length === before + 1 && PT().name === 'Wave', PT().name);
+  ok('the rest of the batch lands on the timeline it just made',
+    PT().timelineDurationMs === 2400 && PT().loop === true && P().fps === 24);
+  ok('set_camera maps the inspector label "perspective" onto fov', P().rig.camera.fov === 42);
+
+  applyCalls([{ name: 'add_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', atMs: 400, value: 0.2 } }]);
+  applyCalls([{ name: 'clear_animation', args: { nodeId: 'eyeL', property: 'eye.openness' } }]);
+  ok('clear_animation drops the track it names',
+    !PT().tracks.some((t) => t.nodeId === 'eyeL' && t.property === 'eye.openness'));
+
+  ok('one undo reverses a whole tool batch', (() => {
+    const n = P().timelines.length;
+    applyCalls([{ name: 'add_timeline', args: { name: 'Scratch' } }]);
+    useEditor.getState().undo();
+    return P().timelines.length === n;
+  })());
+}
+
+// --- copilot: one natural-language turn becomes a working animation -------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  // the exact request that used to fail: a new preset built from scratch, then staged
+  const turn = parseTurn(JSON.stringify({
+    reply: 'Made a BigEye preset and put it on the strip.',
+    calls: [
+      { name: 'create_preset', args: { name: 'BigEye', durationMs: 1200, tracks: [
+        { nodeId: 'Left eye', property: 'transform.scale.x', keyframes: [{ time: 0, value: 1 }, { time: 400, value: 1.6 }, { time: 1200, value: 1 }] },
+        { nodeId: 'eyeR', property: 'transform.scale.x', keyframes: [{ time: 0, value: 1 }, { time: 400, value: 1.6 }, { time: 1200, value: 1 }] },
+        { nodeId: 'body', property: 'transform.rotation', keyframes: [{ time: 400, value: 0 }, { time: 800, value: 8 }, { time: 1200, value: 0 }] },
+      ] } },
+      { name: 'add_preset_to_timeline', args: { preset: 'BigEye' } },
+    ],
+  }));
+  const staged = turn.calls.map((c) => normaliseCall(P(), c));
+  ok('the whole turn parses', staged.length === 2 && turn.reply.startsWith('Made'));
+  ok('create_preset validates', validate(P(), staged[0]) === null, String(validate(P(), staged[0])));
+
+  applyCalls(staged);
+  const made = P().presets.find((x) => x.name === 'BigEye');
+  ok('the preset exists with all three tracks', !!made && made.tracks.length === 3, String(made?.tracks.length));
+  ok('and is on the strip', activeTimeline(P()).blocks.some((b) => b.name === 'BigEye'));
+  const start = blockStarts(activeTimeline(P())).at(-1)!;
+  ok('the eyes actually grow mid-clip',
+    (valueAt(P(), 'eyeL', 'transform.scale.x', start + 400) as number) > 1.5,
+    String(valueAt(P(), 'eyeL', 'transform.scale.x', start + 400)));
+  ok('the body actually rotates mid-clip',
+    Math.abs(valueAt(P(), 'body', 'transform.rotation', start + 800) as number) > 5);
 
   useEditor.getState().loadProject(defaultProject());
 }
