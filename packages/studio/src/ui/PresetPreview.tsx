@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { COMP } from '../core/defaults';
+import { COMP, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
-import { activeTimeline } from '../core/types';
+
 import { MascotThumb } from './Mascot';
 import type { Preset, Project } from '../core/types';
 
@@ -57,12 +57,7 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
 
   const scene = (() => {
     try {
-      const tl = activeTimeline(project);
-      const temp: Project = {
-        ...project,
-        timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }],
-        activeTimelineId: tl.id,
-      };
+      const temp = presetPreviewProject(project, preset);
       return sceneAt(temp, t, COMP);
     } catch { return null; }
   })();

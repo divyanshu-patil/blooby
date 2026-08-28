@@ -1,5 +1,5 @@
 import { useEditor } from '../core/store';
-import { primitivePath, PRIMITIVE_SHAPES, type PrimitiveShape } from '../core/path';
+import { naturalShape, primitivePath, PRIMITIVE_SHAPES, type PrimitiveShape } from '../core/path';
 import { valueAt } from '../core/scene';
 import { KeyNav, NumberField } from './bits';
 import type { RigNode } from '../core/types';
@@ -26,6 +26,10 @@ export function ShapeEditor({ node }: { node: RigNode }) {
   const live = valueAt(project, node.id, 'shape.path', playhead);
   const path = typeof live === 'string' ? live : node.shapePath;
   const params = node.shape;
+  // with no outline of its own a layer still HAS a shape — the body is an ellipse, an eye
+  // is a stadium — so the editor opens on that rather than on nothing
+  const natural = naturalShape(node.kind, node.primitive);
+  const current: PrimitiveShape = params?.kind ?? (path !== undefined ? 'custom' : natural);
 
   const write = (d: string | undefined, label: string) => {
     // setValue keys it when the property is already animated and pokes the base pose when
@@ -35,7 +39,14 @@ export function ShapeEditor({ node }: { node: RigNode }) {
   };
 
   const applyPrimitive = (kind: PrimitiveShape) => {
-    const next = { kind, points: params?.points ?? (kind === 'star' ? 5 : 6), innerRatio: params?.innerRatio ?? 0.42, cornerRadius: params?.cornerRadius ?? 0.2, rotation: params?.rotation ?? 0 };
+    if (kind === 'custom') return;   // not a thing you can pick — it is what typing produces
+    const next = {
+      kind, points: params?.points ?? (kind === 'star' ? 5 : 6),
+      innerRatio: params?.innerRatio ?? 0.42,
+      cornerRadius: params?.cornerRadius ?? (kind === 'pill' ? 0.5 : 0.2),
+      vertexRadius: params?.vertexRadius ?? 0,
+      rotation: params?.rotation ?? 0,
+    };
     updateNode(node.id, (n) => { n.shape = next; });
     write(primitivePath(kind, next), `shape.${node.id}`);
   };
@@ -56,16 +67,19 @@ export function ShapeEditor({ node }: { node: RigNode }) {
 
       <div className="row">
         {PRIMITIVE_SHAPES.map((k) => (
-          <button key={k} className="btn sm" aria-pressed={params?.kind === k}
-            title={`Use a ${k}`} onClick={() => applyPrimitive(k)}>{k}</button>
+          <button key={k} className="btn sm" aria-pressed={current === k}
+            title={k === natural ? `${k} — this layer's natural shape` : `Use a ${k}`}
+            onClick={() => applyPrimitive(k)}>{k}</button>
         ))}
+        {/* only reachable, never chosen: it is whatever was typed or dragged */}
+        {current === 'custom' && <span className="tag" title="Hand-edited outline">custom</span>}
         {path !== undefined && (
           <button className="btn ghost sm" title="Back to the layer's plain shape"
             onClick={() => write(undefined, `shape.${node.id}`)}>Clear</button>
         )}
       </div>
 
-      {params && (params.kind === 'polygon' || params.kind === 'star') && (
+      {params && (params.kind === 'polygon' || params.kind === 'star' || params.kind === 'circle') && params.kind !== 'circle' && (
         <div className="prop">
           <span /><label className="prop-label"><span className="t">{params.kind === 'star' ? 'Points' : 'Sides'}</span>
             <input type="range" min={3} max={16} step={1} value={params.points ?? 5}
@@ -81,7 +95,15 @@ export function ShapeEditor({ node }: { node: RigNode }) {
           </label><NumberField value={params.innerRatio ?? 0.42} step={0.05} onChange={(v) => tweak({ innerRatio: v })} />
         </div>
       )}
-      {params?.kind === 'rect' && (
+      {params && (params.kind === 'star' || params.kind === 'polygon') && (
+        <div className="prop">
+          <span /><label className="prop-label"><span className="t">Point radius</span>
+            <input type="range" min={0} max={1} step={0.02} value={params.vertexRadius ?? 0}
+              onChange={(e) => tweak({ vertexRadius: +e.target.value })} />
+          </label><NumberField value={params.vertexRadius ?? 0} step={0.1} onChange={(v) => tweak({ vertexRadius: v })} />
+        </div>
+      )}
+      {(params?.kind === 'rect' || params?.kind === 'pill') && (
         <div className="prop">
           <span /><label className="prop-label"><span className="t">Corners</span>
             <input type="range" min={0} max={0.5} step={0.01} value={params.cornerRadius ?? 0.2}

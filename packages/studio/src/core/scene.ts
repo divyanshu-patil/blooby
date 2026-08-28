@@ -544,13 +544,23 @@ export function emitterItems(
 
     const life = Math.max(1, e.lifeMs);
     const rate = Math.max(1, e.rateMs);
-    const slots = Math.max(1, Math.min(e.count, Math.ceil(life / rate)));
+    // an orbit uses every slot it was given: they are positions on a ring, not spawns
+    const slots = e.path === 'orbit'
+      ? Math.max(1, Math.round(e.count))
+      : Math.max(1, Math.min(e.count, Math.ceil(life / rate)));
     const cycle = slots * rate;
     const from = anchor(e.from), to = anchor(e.to);
     const seed = e.seed ?? 0;
 
+    // one revolution per lifeMs, so "lives" reads as "how long a lap takes" on an orbit
+    const orbitPhase = (t / life) % 1;
+
     for (let i = 0; i < slots; i++) {
-      const age = ((t - i * rate) % cycle + cycle) % cycle;
+      // an orbit never dies and never respawns — it goes round. Everything else is born,
+      // travels and fades.
+      const age = e.path === 'orbit'
+        ? ((t + (i / slots) * life) % life)
+        : ((t - i * rate) % cycle + cycle) % cycle;
       if (age >= life) continue;                       // this slot is between spawns
       const u = age / life;
 
@@ -560,7 +570,10 @@ export function emitterItems(
         // ellipse — one gesture, whichever path is selected
         const rx = (e.radiusX ?? Math.hypot(to.x - from.x, to.y - from.y) / unit) * unit;
         const ry = (e.radiusY ?? e.radiusX ?? Math.hypot(to.x - from.x, to.y - from.y) / unit) * unit;
-        const a = 2 * Math.PI * (u + i / slots);
+        // Spaced by INDEX around the ring, not by age. Age-staggering clumped them: with
+        // `count` below life/rate the birth cycle is shorter than a life, so several sat
+        // almost on top of each other. An orbit divides its track evenly, always.
+        const a = 2 * Math.PI * (orbitPhase + i / slots);
         x = from.x + Math.cos(a) * rx;
         y = from.y + Math.sin(a) * ry;
       } else if (e.path === 'fall') {

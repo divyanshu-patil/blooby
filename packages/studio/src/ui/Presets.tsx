@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useEditor } from '../core/store';
-import { COMP } from '../core/defaults';
+import { COMP, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { MascotThumb } from './Mascot';
 import { Panel } from './bits';
@@ -15,8 +15,7 @@ import type { Expression, Preset, Project } from '../core/types';
 
 /** A preset's own pose at its most characteristic moment — the icon *is* the animation. */
 function glyphScene(project: Project, preset: Preset) {
-  const tl = activeTimeline(project);
-  const temp: Project = { ...project, timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }], activeTimelineId: tl.id };
+  const temp = presetPreviewProject(project, preset);
   return sceneAt(temp, characteristicTime(preset), COMP);
 }
 

@@ -673,7 +673,10 @@ export const useEditor = create<Editor>((set, get) => ({
     const base = name?.trim() || `Timeline ${project.timelines.length + 1}`;
     const tl = makeTimeline(uniqueName(base, project.timelines.map((t) => t.name)));
     get().commit((p) => { p.timelines.push(tl); p.activeTimelineId = tl.id; });
-    set({ selection: [], playhead: 0 });
+    // the same reset switching to an existing timeline does. Without it a clip and an
+    // emitter from the OLD timeline stayed selected, so the clip inspector described
+    // something not on screen and a new effect got scoped to a block that is not here.
+    set({ selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null });
   },
 
   renameTimeline(id, name) {
@@ -742,7 +745,19 @@ export const useEditor = create<Editor>((set, get) => ({
   cancelScheduledState() { set({ pendingStateChange: null }); },
   clearStateTransition() { set({ stateTransition: null }); },
 
-  addModifier(m) { get().commit((p) => { at(p).modifiers.push({ ...m, id: uid('m') }); }); },
+  /**
+   * A global effect is bounded to the strip as it stands when you add it.
+   *
+   * Otherwise inserting a preset afterwards silently drops it under a shake nobody asked
+   * to extend over it. The range is visible and draggable, so widening it back is one
+   * gesture — the default just stops being a surprise.
+   */
+  addModifier(m) {
+    get().commit((p) => {
+      const tl = at(p);
+      tl.modifiers.push({ ...boundToStrip(tl, m), id: uid('m') });
+    });
+  },
   updateModifier(id, fn) { get().commit((p) => { const m = at(p).modifiers.find((x) => x.id === id); if (m) fn(m); }, `mod.${id}`); },
   removeModifier(id) { get().commit((p) => { at(p).modifiers = at(p).modifiers.filter((m) => m.id !== id); }); },
 
@@ -765,7 +780,10 @@ export const useEditor = create<Editor>((set, get) => ({
   selectEmitter(id) { set({ selectedEmitterId: id }); },
   addEmitter(e) {
     const id = uid('e');
-    get().commit((p) => { const tl = at(p); (tl.emitters ??= []).push({ ...e, id }); });
+    get().commit((p) => {
+      const tl = at(p);
+      (tl.emitters ??= []).push({ ...boundToStrip(tl, e), id });
+    });
     // select it, so its trajectory handles are on the stage the moment it exists —
     // otherwise a new emitter is a row of numbers with nothing to aim
     set({ selectedEmitterId: id });
@@ -903,6 +921,19 @@ function upsertKeyframe(track: Track, time: number, value: KeyValue) {
   if (existing) { existing.value = value; return; }
   track.keyframes.push({ id: uid('k'), time, value, easingOut: { type: 'preset', name: 'easeInOut' } });
   track.keyframes.sort((a, b) => a.time - b.time);
+}
+
+/**
+ * Where a new global effect stops.
+ *
+ * The end of the tiled clips, not the timeline's duration: `derivedDuration` pads 200ms
+ * past the last keyframe, and a clip appended afterwards starts at `blocksEnd` — inside
+ * that padding. Bounding to the padded figure therefore still let the effect reach over
+ * the very next clip, which is the thing this exists to prevent.
+ */
+function boundToStrip<T extends { blockId?: string; endMs?: number }>(tl: Timeline, e: T): T {
+  if (e.blockId || e.endMs !== undefined) return e;
+  return { ...e, endMs: Math.round(blocksEnd(tl) || tl.timelineDurationMs) };
 }
 
 export function writeKeyframe(p: Project, nodeId: string, property: string, time: number, value: KeyValue, easing: EasingCurve) {

@@ -47,8 +47,9 @@ export interface RigNode {
    * becomes any other. Undefined means the node draws its plain primitive, as always.
    */
   shapePath?: string;
-  /** what generated `shapePath`, so the parameter editor can keep offering its dials */
-  shape?: { kind: 'circle' | 'rect' | 'polygon' | 'star'; points?: number; innerRatio?: number; cornerRadius?: number; rotation?: number };
+  /** what generated `shapePath`, so the parameter editor can keep offering its dials.
+   *  Absent once the path is hand-edited — the dials no longer describe it. */
+  shape?: { kind: 'circle' | 'pill' | 'rect' | 'polygon' | 'star'; points?: number; innerRatio?: number; cornerRadius?: number; vertexRadius?: number; rotation?: number };
 
   svg?: { sourceMarkup: string; viewBox: string };
 }

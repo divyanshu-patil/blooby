@@ -187,16 +187,19 @@ export function morphPath(a: string, b: string, t: number, n = 64): string {
  * All generated in a -0.5..0.5 box, so the renderer scales one to any size and a morph
  * between two of them is about their outlines rather than their dimensions.
  */
-export type PrimitiveShape = 'circle' | 'rect' | 'polygon' | 'star';
-export const PRIMITIVE_SHAPES: PrimitiveShape[] = ['circle', 'rect', 'polygon', 'star'];
+export type PrimitiveShape = 'circle' | 'pill' | 'rect' | 'polygon' | 'star' | 'custom';
+/** `custom` is not generated — it is whatever was typed or dragged, so it is not offered. */
+export const PRIMITIVE_SHAPES: PrimitiveShape[] = ['circle', 'pill', 'rect', 'polygon', 'star'];
 
 export interface ShapeParams {
   /** polygon: sides. star: points. */
   points?: number;
   /** star: how far in the inner vertices sit, 0.05–0.9 */
   innerRatio?: number;
-  /** rect: corner rounding, 0–0.5 of the box */
+  /** rect: corner rounding, 0–0.5 of the box. pill: how round the ends are. */
   cornerRadius?: number;
+  /** star/polygon: rounds the vertices, 0–1 of the way to the neighbouring edge */
+  vertexRadius?: number;
   /** turns the whole outline, in degrees — a star on its point or on its side */
   rotation?: number;
 }
@@ -210,13 +213,13 @@ export function primitivePath(shape: PrimitiveShape, p: ShapeParams = {}): strin
     : v);
   const f = (v: Vec2) => `${round(spin(v).x)} ${round(spin(v).y)}`;
 
-  if (shape === 'circle') {
-    const r = 0.5, c = r * K;
-    return `M ${f({ x: 0, y: -r })} C ${f({ x: c, y: -r })} ${f({ x: r, y: -c })} ${f({ x: r, y: 0 })}`
-      + ` C ${f({ x: r, y: c })} ${f({ x: c, y: r })} ${f({ x: 0, y: r })}`
-      + ` C ${f({ x: -c, y: r })} ${f({ x: -r, y: c })} ${f({ x: -r, y: 0 })}`
-      + ` C ${f({ x: -r, y: -c })} ${f({ x: -c, y: -r })} ${f({ x: 0, y: -r })} Z`;
-  }
+  // A circle as a cubic spline: exact (a rounded 12-gon came out 6.5% short of πr²), and
+  // made of real control points, so turning it turns something and the editor has
+  // something to drag when you want to pull it into an egg.
+  if (shape === 'circle') return circleSpline(8, 0.5, f);
+
+  // the eyes' own shape: a stadium, which is a rect with fully rounded ends
+  if (shape === 'pill') return primitivePath('rect', { ...p, cornerRadius: 0.5 });
 
   if (shape === 'rect') {
     const r = Math.min(0.5, Math.max(0, p.cornerRadius ?? 0));
@@ -234,13 +237,79 @@ export function primitivePath(shape: PrimitiveShape, p: ShapeParams = {}): strin
 
   const n = Math.max(3, Math.round(p.points ?? (shape === 'star' ? 5 : 6)));
   const inner = Math.min(0.9, Math.max(0.05, p.innerRatio ?? 0.42));
-  const count = shape === 'star' ? n * 2 : n;
+  return roundedPolygon(shape === 'star' ? n * 2 : n, 0.5, shape === 'star' ? 0.5 * inner : 0.5,
+    Math.min(1, Math.max(0, p.vertexRadius ?? 0)), f);
+}
+
+/**
+ * A circle as `n` cubic segments.
+ *
+ * The handle length 4/3·tan(π/2n) is the standard approximation, exact to within a few
+ * parts in 10,000 at n=8 — near enough that the area check cannot tell it from πr².
+ */
+function circleSpline(n: number, r: number, f: (v: Vec2) => string): string {
+  const k = r * (4 / 3) * Math.tan(Math.PI / (2 * n));
+  const at = (i: number): Vec2 => {
+    const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+    return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+  };
+  const tangent = (i: number): Vec2 => {
+    const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+    return { x: -Math.sin(a) * k, y: Math.cos(a) * k };
+  };
+  let d = `M ${f(at(0))}`;
+  for (let i = 0; i < n; i++) {
+    const p0 = at(i), p1 = at(i + 1), t0 = tangent(i), t1 = tangent(i + 1);
+    d += ` C ${f({ x: p0.x + t0.x, y: p0.y + t0.y })} ${f({ x: p1.x - t1.x, y: p1.y - t1.y })} ${f(p1)}`;
+  }
+  return `${d} Z`;
+}
+
+/**
+ * A ring of vertices alternating between two radii, with the corners optionally rounded.
+ *
+ * Covers the circle (12 fully-rounded points), the polygon (one radius, sharp) and the
+ * star (two radii, roundable) from one routine — a rounded star is the same construction
+ * as a circle, just with a waist.
+ *
+ * Rounding pulls each corner back along both its edges by `round` and joins them with a
+ * quadratic through the original vertex, which is what a corner radius IS.
+ */
+function roundedPolygon(count: number, outer: number, innerR: number, round: number, f: (v: Vec2) => string): string {
   const verts: Vec2[] = [];
   for (let k = 0; k < count; k++) {
     // start at the top: a star stands on a point rather than lying on its side
     const a = -Math.PI / 2 + (k / count) * Math.PI * 2;
-    const r = shape === 'star' && k % 2 === 1 ? 0.5 * inner : 0.5;
+    const r = innerR !== outer && k % 2 === 1 ? innerR : outer;
     verts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
   }
-  return `M ${f(verts[0])} ${verts.slice(1).map((v) => `L ${f(v)}`).join(' ')} Z`;
+  if (round <= 0) return `M ${f(verts[0])} ${verts.slice(1).map((v) => `L ${f(v)}`).join(' ')} Z`;
+
+  const toward = (from: Vec2, to: Vec2, amount: number): Vec2 => {
+    // never past the midpoint, or neighbouring corners would cross
+    const t = Math.min(0.5, amount);
+    return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+  };
+
+  let d = '';
+  for (let k = 0; k < count; k++) {
+    const prev = verts[(k - 1 + count) % count], cur = verts[k], next = verts[(k + 1) % count];
+    const a = toward(cur, prev, round / 2), b = toward(cur, next, round / 2);
+    d += k === 0 ? `M ${f(a)}` : ` L ${f(a)}`;
+    d += ` Q ${f(cur)} ${f(b)}`;
+  }
+  return `${d} Z`;
+}
+
+/**
+ * The outline a layer already has, before anyone touches the shape editor.
+ *
+ * The body is drawn as an ellipse and the eyes as stadiums, so those are the shapes the
+ * editor should open on — selecting an eye and being told it is a "circle" is a lie, and
+ * morphing away from the wrong resting shape pops on the first frame.
+ */
+export function naturalShape(kind: string, primitive?: { shape: string }): PrimitiveShape {
+  if (kind === 'body') return 'circle';
+  if (primitive?.shape === 'circle') return 'circle';
+  return 'pill';
 }

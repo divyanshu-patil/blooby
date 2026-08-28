@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { COMP, defaultProject } from '../core/defaults';
+import { COMP, defaultProject, presetPreviewProject } from '../core/defaults';
 import { buildScene, evaluateRig, sceneAt } from '../core/scene';
 import { splitKey } from '../core/store';
-import { activeTimeline, CAMERA_ID } from '../core/types';
+import { CAMERA_ID } from '../core/types';
 import { writeProp } from '../core/props';
 import { MascotThumb } from '../ui/Mascot';
-import type { Expression, Preset, Project, Rig } from '../core/types';
+import type { Expression, Preset, Rig } from '../core/types';
 
 /**
  * Plays a submitted asset the way a viewer will eventually see it.
@@ -43,13 +43,7 @@ export function AssetPreview({ kind, data, loop = true, className }: {
     try {
       if (kind === 'preset') {
         if (!preset?.tracks?.length) return null;
-        const tl = activeTimeline(base);
-        const temp: Project = {
-          ...base,
-          timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }],
-          activeTimelineId: tl.id,
-        };
-        return sceneAt(temp, t, COMP);
+        return sceneAt(presetPreviewProject(base, preset as Preset), t, COMP);
       }
 
       // An expression is a pose, not a motion: apply its snapshot straight onto the

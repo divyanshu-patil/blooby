@@ -128,8 +128,13 @@ export function builtinPresets(): Preset[] {
       // recoil: a hard fast pop with the head snapping BACK, held wide, then a settle.
       id: 'p_surprised', name: 'Surprised', source: 'builtin', durationMs: 1300,
       tracks: [
-        ...bothEyes('transform.scale.x', [kf(0, 1), kf(90, 1.72, 'easeOut'), kf(820, 1.6), kf(1300, 1)]),
-        ...bothEyes('transform.length', [kf(0, 1.55), kf(90, 1.95, 'easeOut'), kf(820, 1.8), kf(1300, 1.55)]),
+        // properly saucer-eyed: this was a 1.7x nudge that read as mild interest
+        ...bothEyes('transform.scale.x', [kf(0, 1), kf(90, 2.35, 'easeOut'), kf(820, 2.2), kf(1300, 1)]),
+        ...bothEyes('transform.length', [kf(0, 1.55), kf(90, 2.5, 'easeOut'), kf(820, 2.35), kf(1300, 1.55)]),
+        // NOT bothEyes: distanceFromCenter is signed by side, so copying one eye's values
+        // onto the other would fling the left eye across the face
+        track('eyeL', 'eye.distanceFromCenter', [kf(0, -21), kf(90, -25, 'easeOut'), kf(820, -24), kf(1300, -21)]),
+        track('eyeR', 'eye.distanceFromCenter', [kf(0, 21), kf(90, 25, 'easeOut'), kf(820, 24), kf(1300, 21)]),
         ...bothEyes('eye.openness', [kf(0, 1), kf(90, 1, 'linear'), kf(1300, 1, 'linear')]),
         // the recoil: away and up, then back down to rest
         track('body', 'surface.pitch', [kf(0, 0), kf(110, -9, 'easeOut'), kf(520, -6), kf(900, 1), kf(1300, 0, 'easeOut')]),
@@ -201,8 +206,11 @@ export function builtinPresets(): Preset[] {
         // eyes narrowed and angled inward — this rig has no brows, so the tilt IS the scowl
         ...bothEyes('transform.length', [kf(0, 1.55), kf(300, 0.82, 'easeOut'), kf(1400, 0.82), kf(1800, 1.55)]),
         ...bothEyes('transform.scale.x', [kf(0, 1), kf(300, 1.2, 'easeOut'), kf(1400, 1.2), kf(1800, 1)]),
-        track('eyeL', 'transform.rotation', [kf(0, 0), kf(300, -20, 'easeOut'), kf(1400, -20), kf(1800, 0)]),
-        track('eyeR', 'transform.rotation', [kf(0, 0), kf(300, 20, 'easeOut'), kf(1400, 20), kf(1800, 0)]),
+        // SVG rotates clockwise for a positive angle, so an angry scowl — INNER ends down —
+        // is +ve on the left eye and -ve on the right. These were the wrong way round,
+        // which read as surprise rather than anger.
+        track('eyeL', 'transform.rotation', [kf(0, 0), kf(300, 20, 'easeOut'), kf(1400, 20), kf(1800, 0)]),
+        track('eyeR', 'transform.rotation', [kf(0, 0), kf(300, -20, 'easeOut'), kf(1400, -20), kf(1800, 0)]),
         // swelling up, then a hard forward lunge
         track('body', 'transform.scale.x', [kf(0, 1), kf(300, 1.1, 'easeOut'), kf(1400, 1.1), kf(1800, 1)]),
         track('body', 'transform.scale.y', [kf(0, 1), kf(300, 1.08, 'easeOut'), kf(900, 1.14), kf(1400, 1.08), kf(1800, 1)]),
@@ -236,9 +244,9 @@ export function builtinPresets(): Preset[] {
         track('body', 'flatOffset.y', [kf(0, 0), kf(760, 12, 'easeInOut'), kf(2140, 12), kf(2600, 0)]),
         track('body', 'color', [kf(0, BONE), kf(820, SAD_BLUE, 'easeInOut'), kf(2100, SAD_BLUE), kf(2600, BONE)]),
         ...bothEyes('eye.openness', [kf(0, 1), kf(880, 0.55, 'easeInOut'), kf(2180, 0.55), kf(2600, 1)]),
-        // outer corners down: opposite tilts, the inverse of Angry's inward scowl
-        track('eyeL', 'transform.rotation', [kf(0, 0), kf(940, 14, 'easeInOut'), kf(2220, 14), kf(2600, 0)]),
-        track('eyeR', 'transform.rotation', [kf(0, 0), kf(940, -14, 'easeInOut'), kf(2220, -14), kf(2600, 0)]),
+        // OUTER corners down, the exact inverse of Angry's inward scowl
+        track('eyeL', 'transform.rotation', [kf(0, 0), kf(940, -14, 'easeInOut'), kf(2220, -14), kf(2600, 0)]),
+        track('eyeR', 'transform.rotation', [kf(0, 0), kf(940, 14, 'easeInOut'), kf(2220, 14), kf(2600, 0)]),
       ],
     },
     {
@@ -422,6 +430,33 @@ export function makeTimeline(name: string): Timeline {
 export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId: string): void {
   for (const m of preset.modifiers ?? []) timeline.modifiers.push({ ...m, id: uid('m'), blockId });
   for (const e of preset.emitters ?? []) (timeline.emitters ??= []).push({ ...e, id: uid('e'), blockId });
+}
+
+/**
+ * A throwaway project that plays one preset on its own, for a preview.
+ *
+ * Every preview site used to build this inline with `modifiers: []`, so a preset's own
+ * shake never shook and its emitters never appeared — Sleepy previewed as a mascot with
+ * its eyes shut and no zzz, which is exactly what the preset exists to avoid. One helper,
+ * so a fourth preview cannot get it wrong again.
+ */
+export function presetPreviewProject(project: Project, preset: Preset): Project {
+  const tl = project.timelines.find((t) => t.id === project.activeTimelineId) ?? project.timelines[0];
+  return {
+    ...project,
+    timelines: [{
+      ...tl,
+      tracks: preset.tracks,
+      blocks: [],
+      // the preset's own effects, unscoped: there is no clip here to scope them to, and
+      // the preview IS the clip
+      modifiers: (preset.modifiers ?? []).map((m, i) => ({ ...m, id: `pm${i}`, blockId: undefined })),
+      emitters: (preset.emitters ?? []).map((e, i) => ({ ...e, id: `pe${i}`, blockId: undefined })),
+      timelineDurationMs: Math.max(200, preset.durationMs),
+      durationOverrideMs: Math.max(200, preset.durationMs),
+    }],
+    activeTimelineId: tl.id,
+  };
 }
 
 /** Appends a preset as a block at the end of a timeline. */
