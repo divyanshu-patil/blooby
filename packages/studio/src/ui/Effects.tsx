@@ -1,6 +1,51 @@
 import { useEditor } from '../core/store';
-import { activeTimeline, MODIFIER_KINDS, MODIFIERS, type ModifierKind } from '../core/types';
+import { activeTimeline, MODIFIER_AXES, MODIFIER_KINDS, MODIFIERS, type Emitter, type ModifierKind } from '../core/types';
+import { scopeSpan } from '../core/scene';
+import { hexColor, parseHex } from '../core/color';
 import { NumberField, Panel } from './bits';
+import { RangeBar } from './RangeBar';
+
+/** Ready-made emitters — the same record with different numbers, which is the point. */
+const EMITTER_PRESETS: { label: string; hint: string; make: (nodeId: string) => Omit<Emitter, 'id' | 'blockId'> }[] = [
+  {
+    label: 'Glyphs', hint: 'Characters drifting off — zzz, ♪, ?, !',
+    make: (nodeId) => ({
+      name: 'glyphs', glyphs: ['z', 'z', 'Z'], color: { r: 108, g: 106, b: 128, a: 1 }, size: 26,
+      path: 'arc', from: { nodeId, x: 46, y: -34 }, to: { nodeId, x: 118, y: -150 }, bow: 22,
+      rateMs: 700, lifeMs: 2100, count: 3, fadeStart: 0.45,
+      scaleFrom: 0.45, scaleTo: 1.3, spin: -10, wobble: 5, wobbleFrequency: 1.2, seed: 7,
+    }),
+  },
+  {
+    label: 'Drops', hint: 'Falling and curving — tears, rain, sweat',
+    make: (nodeId) => ({
+      name: 'drops', glyphs: ['●'], color: { r: 96, g: 160, b: 225, a: 1 }, size: 13,
+      path: 'fall', from: { nodeId, x: 0, y: 12 }, to: { nodeId, x: -22, y: 150 }, bow: 8,
+      rateMs: 380, lifeMs: 1200, count: 4, fadeStart: 0.65,
+      scaleFrom: 0.7, scaleTo: 1.1, spin: 0, wobble: 2, wobbleFrequency: 1.2, seed: 2,
+    }),
+  },
+  {
+    label: 'Orbit', hint: 'Objects circling on an ellipse you can size',
+    make: (nodeId) => ({
+      name: 'orbit', glyphs: ['✦', '●', '▲'], color: { r: 84, g: 82, b: 112, a: 1 }, size: 20,
+      path: 'orbit', from: { nodeId, x: 0, y: -128 }, to: { x: 0, y: 0 }, bow: 0,
+      radiusX: 104, radiusY: 34,
+      rateMs: 600, lifeMs: 2400, count: 4, fadeStart: 0.85,
+      scaleFrom: 0.85, scaleTo: 1, spin: 40, wobble: 3, wobbleFrequency: 1.2, seed: 5,
+    }),
+  },
+  {
+    label: 'Confetti', hint: 'A burst raining down — drop it on the playhead and go',
+    make: (nodeId) => ({
+      name: 'confetti', glyphs: ['■', '●', '▲', '✦', '■', '●'],
+      color: { r: 232, g: 106, b: 84, a: 1 }, size: 15,
+      path: 'fall', from: { nodeId, x: 0, y: -150 }, to: { nodeId, x: 0, y: 190 }, bow: 150,
+      rateMs: 90, lifeMs: 1500, count: 16, fadeStart: 0.7,
+      scaleFrom: 1, scaleTo: 0.85, spin: 300, wobble: 14, wobbleFrequency: 2.2, seed: 21,
+    }),
+  },
+];
 
 /** Starting dial positions. Keyed by ModifierKind, so a new effect will not compile
  *  until it has one — the same "add the row, the rest follows" contract as PROPS. */
@@ -26,6 +71,11 @@ export function Effects() {
   const addModifier = useEditor((s) => s.addModifier);
   const updateModifier = useEditor((s) => s.updateModifier);
   const removeModifier = useEditor((s) => s.removeModifier);
+  const addEmitter = useEditor((s) => s.addEmitter);
+  const updateEmitter = useEditor((s) => s.updateEmitter);
+  const removeEmitter = useEditor((s) => s.removeEmitter);
+  const selectEmitter = useEditor((s) => s.selectEmitter);
+  const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
 
   const tl = activeTimeline(project);
   const target = selection[0] ?? project.rig.rootId;
@@ -36,8 +86,14 @@ export function Effects() {
   // fall back to global rather than silently offering to add effects to a dead clip.
   const clipScoped = !!selectedBlockId && !!block;
   const list = tl.modifiers.filter((m) => (clipScoped ? m.blockId === selectedBlockId : !m.blockId));
+  const scope = clipScoped ? selectedBlockId! : undefined;
+  const emitters = (tl.emitters ?? []).filter((e) => (clipScoped ? e.blockId === selectedBlockId : !e.blockId));
+  const span = scopeSpan(tl, scope)[1];
   const add = (kind: ModifierKind, nodeId: string) =>
-    addModifier({ nodeId, kind, ...DEFAULTS[kind], blockId: clipScoped ? selectedBlockId! : undefined });
+    addModifier({ nodeId, kind, ...DEFAULTS[kind], blockId: scope });
+
+  /** Every layer, so an emitter's endpoints can be pinned to one — tears to an eye. */
+  const anchors = Object.values(project.rig.nodes);
 
   return (
     <Panel title="Effects" actions={
@@ -69,7 +125,7 @@ export function Effects() {
         </p>
       )}
       {list.map((m) => (
-        <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, background: 'var(--field)', border: '1px solid var(--line-soft)', borderRadius: 6 }}>
+        <div key={m.id} className="fxcard">
           <div className="row">
             <strong style={{ font: '700 11px var(--display)', letterSpacing: '.1em', textTransform: 'uppercase' }}>{m.kind}</strong>
             <span className="tag">{nodeName(m.nodeId)}{m.kind === 'stretch' && m.nodeId === project.rig.rootId ? ' + all' : m.kind === 'stretch' ? ' + children' : ''}</span>
@@ -91,6 +147,15 @@ export function Effects() {
               <input type="range" min={0} max={40} step={0.5} value={m.amplitude} onChange={(e) => updateModifier(m.id, (x) => { x.amplitude = +e.target.value; })} />
             </label><NumberField value={m.amplitude} step={0.5} onChange={(v) => updateModifier(m.id, (x) => { x.amplitude = v; })} />
           </div>
+          {m.kind === 'pendulum' && (
+            <div className="prop">
+              <span /><label className="prop-label"><span className="t">Axis</span></label>
+              <select className="sel" value={m.axis ?? 'rotation'}
+                onChange={(e) => updateModifier(m.id, (x) => { x.axis = e.target.value as typeof x.axis; })}>
+                {MODIFIER_AXES.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+          )}
           {m.kind === 'shake' ? (
             <div className="prop">
               <span /><label className="prop-label"><span className="t">Seed</span></label>
@@ -103,8 +168,103 @@ export function Effects() {
               </label><NumberField value={m.phase ?? 0} step={0.1} onChange={(v) => updateModifier(m.id, (x) => { x.phase = v; })} />
             </div>
           )}
+          <RangeBar spanMs={span} startMs={m.startMs} endMs={m.endMs} label={clipScoped ? 'Runs in clip' : 'Runs in timeline'}
+            onChange={(a, b) => updateModifier(m.id, (x) => { x.startMs = a; x.endMs = b; })} />
+        </div>
+      ))}
+
+      <div className="divider" />
+      <div className="row">
+        <span className="panel-title" style={{ flex: 1 }}>Emitters</span>
+        {EMITTER_PRESETS.map((e) => (
+          <button key={e.label} className="btn sm" title={e.hint}
+            onClick={() => addEmitter({ ...e.make(project.rig.rootId), blockId: scope })}>+ {e.label}</button>
+        ))}
+      </div>
+
+      {!emitters.length && (
+        <p className="empty-note">
+          Little things leaving the mascot — zzz, ♪, tears, confetti, objects in orbit. One engine:
+          a glyph, a path, some wander, a fade. Pin an endpoint to a layer and it follows that layer,
+          which is how tears come out of the eyes.
+        </p>
+      )}
+
+      {emitters.map((em) => (
+        <div key={em.id} className={`fxcard${selectedEmitterId === em.id ? ' on' : ''}`}
+          onPointerDownCapture={() => selectEmitter(em.id)}>
+          <div className="row">
+            <button className="btn ghost sm icon" aria-pressed={selectedEmitterId === em.id}
+              title={selectedEmitterId === em.id ? 'Its path is on the stage' : 'Show its path on the stage'}
+              onClick={() => selectEmitter(selectedEmitterId === em.id ? null : em.id)}>◎</button>
+            <input className="txt" style={{ flex: 1 }} value={em.name} aria-label="Emitter name"
+              onChange={(e) => updateEmitter(em.id, (x) => { x.name = e.target.value; })} />
+            <input type="color" className="chip-color" title="Colour" value={hexColor(em.color)}
+              onChange={(e) => updateEmitter(em.id, (x) => { x.color = { ...parseHex(e.target.value), a: x.color.a }; })} />
+            <button className="btn ghost sm icon" title="Remove" onClick={() => removeEmitter(em.id)}>✕</button>
+          </div>
+
+          <div className="row">
+            <input className="txt" style={{ flex: 1 }} value={em.glyphs.join(' ')} aria-label="Glyphs"
+              title="Cycled in order, one per particle — separate with spaces"
+              onChange={(e) => updateEmitter(em.id, (x) => { x.glyphs = e.target.value.split(/\s+/).filter(Boolean); })} />
+            <select className="sel" value={em.path} aria-label="Path"
+              onChange={(e) => updateEmitter(em.id, (x) => { x.path = e.target.value as typeof x.path; })}>
+              <option value="arc">arc</option>
+              <option value="orbit">orbit</option>
+              <option value="fall">fall</option>
+            </select>
+          </div>
+
+          {/* endpoints. Pinning to a layer is what makes a tear leave the eye rather than
+              a fixed point in space the head has since moved away from. */}
+          {(['from', 'to'] as const).map((end) => (
+            <div key={end} className="row">
+              <span className="tag" style={{ width: 34 }}>{end}</span>
+              <select className="sel" style={{ flex: 1 }} value={em[end].nodeId ?? ''}
+                aria-label={`${end} attached to`}
+                onChange={(e) => updateEmitter(em.id, (x) => { x[end] = { ...x[end], nodeId: e.target.value || undefined }; })}>
+                <option value="">free</option>
+                {anchors.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+              </select>
+              <NumberField value={em[end].x} onChange={(v) => updateEmitter(em.id, (x) => { x[end] = { ...x[end], x: v }; })} />
+              <NumberField value={em[end].y} onChange={(v) => updateEmitter(em.id, (x) => { x[end] = { ...x[end], y: v }; })} />
+            </div>
+          ))}
+
+          <Dial label="Size" value={em.size} min={4} max={90} step={1} onChange={(v) => updateEmitter(em.id, (x) => { x.size = v; })} />
+          <Dial label={em.path === 'orbit' ? 'Ellipse X' : 'Bow'} value={em.path === 'orbit' ? (em.radiusX ?? 100) : em.bow}
+            min={em.path === 'orbit' ? 10 : -200} max={200} step={1}
+            onChange={(v) => updateEmitter(em.id, (x) => { if (x.path === 'orbit') x.radiusX = v; else x.bow = v; })} />
+          {em.path === 'orbit' && (
+            <Dial label="Ellipse Y" value={em.radiusY ?? em.radiusX ?? 100} min={4} max={200} step={1}
+              onChange={(v) => updateEmitter(em.id, (x) => { x.radiusY = v; })} />
+          )}
+          <Dial label="Every" value={em.rateMs} min={40} max={2000} step={10} onChange={(v) => updateEmitter(em.id, (x) => { x.rateMs = v; })} />
+          <Dial label="Lives" value={em.lifeMs} min={200} max={6000} step={50} onChange={(v) => updateEmitter(em.id, (x) => { x.lifeMs = v; })} />
+          <Dial label="At once" value={em.count} min={1} max={40} step={1} onChange={(v) => updateEmitter(em.id, (x) => { x.count = Math.round(v); })} />
+          <Dial label="Fade from" value={em.fadeStart} min={0} max={1} step={0.01} onChange={(v) => updateEmitter(em.id, (x) => { x.fadeStart = v; })} />
+          <Dial label="Grows to" value={em.scaleTo} min={0.1} max={3} step={0.05} onChange={(v) => updateEmitter(em.id, (x) => { x.scaleTo = v; })} />
+          <Dial label="Spin" value={em.spin} min={-360} max={360} step={5} onChange={(v) => updateEmitter(em.id, (x) => { x.spin = v; })} />
+          <Dial label="Wander" value={em.wobble} min={0} max={40} step={0.5} onChange={(v) => updateEmitter(em.id, (x) => { x.wobble = v; })} />
+
+          <RangeBar spanMs={span} startMs={em.startMs} endMs={em.endMs} label={clipScoped ? 'Runs in clip' : 'Runs in timeline'}
+            onChange={(a, b) => updateEmitter(em.id, (x) => { x.startMs = a; x.endMs = b; })} />
         </div>
       ))}
     </Panel>
+  );
+}
+
+/** One labelled slider + number, which is most of this panel. */
+function Dial({ label, value, min, max, step, onChange }: {
+  label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void;
+}) {
+  return (
+    <div className="prop">
+      <span /><label className="prop-label"><span className="t">{label}</span>
+        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(+e.target.value)} />
+      </label><NumberField value={value} step={step} onChange={onChange} />
+    </div>
   );
 }

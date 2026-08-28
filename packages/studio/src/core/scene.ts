@@ -480,12 +480,14 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
  * than re-projecting, so a tear parented to an eye lands exactly where that eye was drawn,
  * through every squash, roll and perspective divide that put it there.
  */
-export function emitterItems(
-  tl: Timeline, rig: Rig, base: SceneItem[], timeMs: number, view: Viewport,
-): SceneItem[] {
-  const emitters = tl.emitters ?? [];
-  if (!emitters.length) return [];
-
+/**
+ * The mapping between an emitter's rig-unit offsets and the screen, both ways.
+ *
+ * Exported because the stage draws the trajectory handles and has to land them exactly
+ * where the particles come out — two implementations of this would drift the moment the
+ * body scales, and the handle would sit next to the stream rather than on it.
+ */
+export function emitterFrame(rig: Rig, base: SceneItem[], view: Viewport) {
   const root = rig.nodes[rig.rootId];
   const body = base.find((i) => i.id === rig.rootId);
   // rig units -> screen: the body's drawn radius against its authored radius, so an
@@ -495,12 +497,32 @@ export function emitterItems(
     x: body?.cx ?? view.width / 2 + rig.camera.offset.x,
     y: body?.cy ?? view.height / 2 + rig.camera.offset.y,
   };
-
-  const anchor = (a: Anchor) => {
+  const originOf = (a: Anchor) => {
     const on = a.nodeId ? base.find((i) => i.id === a.nodeId) : undefined;
-    return { x: (on?.cx ?? centre.x) + a.x * unit, y: (on?.cy ?? centre.y) + a.y * unit };
+    return { x: on?.cx ?? centre.x, y: on?.cy ?? centre.y };
   };
+  return {
+    unit,
+    /** where this endpoint actually is on screen */
+    anchor: (a: Anchor) => {
+      const o = originOf(a);
+      return { x: o.x + a.x * unit, y: o.y + a.y * unit };
+    },
+    /** the inverse: what offset would put this endpoint at that screen point */
+    toOffset: (a: Anchor, screen: Vec2) => {
+      const o = originOf(a);
+      return { x: (screen.x - o.x) / unit, y: (screen.y - o.y) / unit };
+    },
+  };
+}
 
+export function emitterItems(
+  tl: Timeline, rig: Rig, base: SceneItem[], timeMs: number, view: Viewport,
+): SceneItem[] {
+  const emitters = tl.emitters ?? [];
+  if (!emitters.length) return [];
+
+  const { anchor, unit } = emitterFrame(rig, base, view);
   const out: SceneItem[] = [];
   for (const e of emitters) {
     const t = scopeTime(tl, e, timeMs);

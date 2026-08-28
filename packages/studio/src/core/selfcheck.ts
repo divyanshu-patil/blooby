@@ -6,7 +6,7 @@
 import { bodyTurnScale, effectiveYaw, limbThreshold, perspective, projectToScreen, screenToSurface, silhouetteScale, surfaceNormal } from './curvature';
 import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
-import { activeTrackFor, buildScene, composeScene, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, scopeTime, valueAt } from './scene';
+import { activeTrackFor, buildScene, composeScene, emitterFrame, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, scopeSpan, scopeTime, valueAt } from './scene';
 import { builtinPresets, defaultProject, makeTimeline } from './defaults';
 import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
@@ -1870,6 +1870,69 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('removing the clip removes its emitter', (TL().emitters ?? []).length === before.e - 1);
   ed().removeBlock(angry.id);
   ok('and its effects', TL().modifiers.length === before.m - 1);
+
+  ed().loadProject(defaultProject());
+}
+
+// --- the trajectory handles land where the particles actually come out ----------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+
+  ed().addEmitter({
+    name: 'probe', glyphs: ['z'], color: { r: 0, g: 0, b: 0, a: 1 }, size: 20,
+    path: 'arc', from: { nodeId: 'eyeL', x: -6, y: 10 }, to: { x: 90, y: -120 }, bow: 0,
+    rateMs: 200, lifeMs: 400, count: 2, fadeStart: 1,
+    scaleFrom: 1, scaleTo: 1, spin: 0, wobble: 0, wobbleFrequency: 1,
+  });
+  ok('adding an emitter selects it, so its handles are immediately on the stage',
+    ed().selectedEmitterId === (activeTimeline(P()).emitters ?? []).at(-1)!.id);
+
+  const em = activeTimeline(P()).emitters!.at(-1)!;
+  const rig = evaluateRig(P(), 0);
+  const base = buildScene(rig, VIEW);
+  const f = emitterFrame(rig, base, VIEW);
+
+  // With one slot, no bow and no wander, the particle halfway through its life must sit
+  // exactly halfway between the two handles. If the handles and the evaluator disagree
+  // about the mapping, a handle is drawn next to the stream rather than on it.
+  //
+  // Not tested at u=0: a particle is faded in over its first 12%, so at birth it is
+  // invisible and emitterItems drops it — which is correct, and cost this check a
+  // rewrite before it was measuring the right thing.
+  ed().updateEmitter(em.id, (x) => { x.count = 1; x.rateMs = x.lifeMs; });
+  const start = f.anchor(em.from), end = f.anchor(em.to);
+  const mid = emitterItems(activeTimeline(P()), rig, base, em.lifeMs / 2, VIEW)[0];
+  ok('the handles and the particles agree about where the path is',
+    !!mid && Math.abs(mid.cx - (start.x + end.x) / 2) < 0.01 && Math.abs(mid.cy - (start.y + end.y) / 2) < 0.01,
+    mid ? `${mid.cx.toFixed(2)},${mid.cy.toFixed(2)} vs ${((start.x + end.x) / 2).toFixed(2)},${((start.y + end.y) / 2).toFixed(2)}` : 'no particle');
+
+  // dragging is anchor -> screen -> anchor, and must round-trip
+  const round = f.toOffset(em.from, f.anchor(em.from));
+  ok('screen position round-trips back to the same offset',
+    Math.abs(round.x - em.from.x) < 1e-6 && Math.abs(round.y - em.from.y) < 1e-6, JSON.stringify(round));
+
+  // and the pinned end moves with its layer, which is what pinning is for
+  const wasAnchored = f.anchor(em.from).x;
+  ed().commit((p) => { p.rig.nodes.eyeL.surface.yaw -= 25; });
+  const rig2 = evaluateRig(P(), 0);
+  const f2 = emitterFrame(rig2, buildScene(rig2, VIEW), VIEW);
+  ok('a pinned handle tracks its layer', Math.abs(f2.anchor(em.from).x - wasAnchored) > 4);
+
+  ed().removeEmitter(em.id);
+  ok('removing it clears the selection, so no handles are left pointing at nothing',
+    ed().selectedEmitterId === null);
+
+  // the range bar spans the clip when clip-scoped, the timeline otherwise
+  const tl = activeTimeline(P());
+  ok('a global effect ranges over the whole timeline', scopeSpan(tl, undefined)[1] === tl.timelineDurationMs);
+  const clip = tl.blocks[1];
+  ok('a clip-scoped one ranges over just that clip', scopeSpan(tl, clip.id)[1] === clip.durationMs,
+    `${scopeSpan(tl, clip.id)[1]} vs ${clip.durationMs}`);
+  ok('and a clip that no longer exists falls back to the timeline rather than crashing',
+    scopeSpan(tl, 'gone')[1] === tl.timelineDurationMs);
 
   ed().loadProject(defaultProject());
 }

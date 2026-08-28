@@ -32,6 +32,8 @@ export interface Editor {
    * inspector) toward "this clip" instead of the whole timeline. Distinct from playhead
    * position: scrubbing through a clip shouldn't silently change what you're editing. */
   selectedBlockId: string | null;
+  /** the emitter whose trajectory handles are on the stage, if any */
+  selectedEmitterId: string | null;
   playhead: number;
   playing: boolean;
   loop: boolean;
@@ -128,6 +130,7 @@ export interface Editor {
   updateModifier: (id: string, fn: (m: Modifier) => void) => void;
   removeModifier: (id: string) => void;
 
+  selectEmitter: (id: string | null) => void;
   addEmitter: (e: Omit<Emitter, 'id'>) => void;
   updateEmitter: (id: string, fn: (e: Emitter) => void) => void;
   removeEmitter: (id: string) => void;
@@ -210,6 +213,7 @@ export const useEditor = create<Editor>((set, get) => ({
   selection: [],
   selectedTrackId: null,
   selectedBlockId: null,
+  selectedEmitterId: null,
   playhead: 0,
   playing: false,
   loop: true,
@@ -665,7 +669,7 @@ export const useEditor = create<Editor>((set, get) => ({
     // tracked here too (not just setState) so returnToPreviousState reflects a manual
     // tab click the same as a programmatic switch — "previous" means whatever was active
     // right before this one, regardless of which path changed it.
-    set({ selection: [], playhead: 0, selectedBlockId: null, previousTimelineId: prevId });
+    set({ selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, previousTimelineId: prevId });
   },
 
   setState(nameOrId, opts) {
@@ -688,7 +692,7 @@ export const useEditor = create<Editor>((set, get) => ({
     const prevId = project.activeTimelineId;
     get().commit((p) => { p.activeTimelineId = target.id; });
     set({
-      selection: [], playhead: 0, selectedBlockId: null, pendingStateChange: null,
+      selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, pendingStateChange: null,
       previousTimelineId: prevId,
       stateTransition: fromRig ? { fromRig, durationMs, easing, startedAtMs: performance.now() } : null,
     });
@@ -712,9 +716,19 @@ export const useEditor = create<Editor>((set, get) => ({
 
   // `emitters` is optional on Timeline so old projects load untouched — every write has
   // to seed the array rather than assume it
-  addEmitter(e) { get().commit((p) => { const tl = at(p); (tl.emitters ??= []).push({ ...e, id: uid('e') }); }); },
+  selectEmitter(id) { set({ selectedEmitterId: id }); },
+  addEmitter(e) {
+    const id = uid('e');
+    get().commit((p) => { const tl = at(p); (tl.emitters ??= []).push({ ...e, id }); });
+    // select it, so its trajectory handles are on the stage the moment it exists —
+    // otherwise a new emitter is a row of numbers with nothing to aim
+    set({ selectedEmitterId: id });
+  },
   updateEmitter(id, fn) { get().commit((p) => { const e = at(p).emitters?.find((x) => x.id === id); if (e) fn(e); }, `emit.${id}`); },
-  removeEmitter(id) { get().commit((p) => { const tl = at(p); if (tl.emitters) tl.emitters = tl.emitters.filter((e) => e.id !== id); }); },
+  removeEmitter(id) {
+    get().commit((p) => { const tl = at(p); if (tl.emitters) tl.emitters = tl.emitters.filter((e) => e.id !== id); });
+    if (get().selectedEmitterId === id) set({ selectedEmitterId: null });
+  },
 
   captureExpression(name) {
     const { project, playhead } = get();
@@ -833,7 +847,7 @@ export const useEditor = create<Editor>((set, get) => ({
     const next = { ...defaultProject(), ...migrate(p) };
     setActiveId(galleryId ?? uidGallery());
     autosave(next);
-    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedTrackId: null });
+    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null });
   },
   resetProject() { get().loadProject(defaultProject()); },
 }));

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { COMP } from '../core/defaults';
 import { composeScene, evaluateRig, evaluateWithTransition, type SceneItem } from '../core/scene';
+import { TrajectoryHandles } from './TrajectoryHandles';
 import { bodyTurnScale, screenToSurface } from '../core/curvature';
 import { Shapes } from './Mascot';
 import { activeTimeline } from '../core/types';
@@ -103,6 +104,8 @@ export function Stage() {
   // emitters included, or the preview quietly lies about the finished animation
   const scene = useMemo(() => composeScene(activeTimeline(project), rig, playhead, COMP), [project, rig, playhead]);
   const frame = bodyFrame(rig);
+  const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
+  const selectedEmitter = (activeTimeline(project).emitters ?? []).find((e) => e.id === selectedEmitterId);
   const sel = scene.find((s) => s.id === selection[0]);
 
   const toComp = useCallback((e: { clientX: number; clientY: number }) => {
@@ -236,6 +239,12 @@ export function Stage() {
             fill="none" style={{ stroke: 'rgba(var(--stage-ink), .14)' }} strokeDasharray="4 6" pointerEvents="none" />
         )}
         <Shapes scene={scene} />
+
+        {/* the emitter being edited gets its path drawn over the mascot, with the ends and
+            the fade point draggable — otherwise it is a dozen numbers aiming at nothing */}
+        {selectedEmitter && showGuides && (
+          <TrajectoryHandles emitter={selectedEmitter} rig={rig} scene={scene} view={COMP} toComp={toComp} />
+        )}
 
         {sel && showGuides && (
           <g pointerEvents="none">

@@ -729,3 +729,33 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   .preview-name { font: 600 14px var(--display); color: var(--ink); }
   .preview-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 }
+
+/* ---- effect range, dragged like a clip's in/out points -------------------- */
+.rangebar { display: flex; flex-direction: column; gap: 4px; }
+.rangebar-head { display: flex; align-items: center; gap: 6px; }
+.rangebar-head .t { font: 500 11px var(--ui); color: var(--muted); }
+.rangebar-head .spacer { flex: 1; }
+.rangebar-num { font: 500 10.5px var(--mono); color: var(--muted); }
+.rangebar-head .btn { height: 17px; padding: 0 5px; font-size: 10px; }
+.rangebar-track {
+  position: relative; height: 16px; border-radius: 5px;
+  background: var(--line-soft); border: 1px solid var(--line-soft);
+}
+.rangebar-fill { position: absolute; top: 0; bottom: 0; background: var(--ink); opacity: .16; cursor: grab; }
+.rangebar-fill:active { cursor: grabbing; }
+.rangebar-grip {
+  position: absolute; top: -2px; width: 9px; height: 20px; margin-left: -4.5px; padding: 0;
+  border: 1px solid var(--paper); border-radius: 3px; background: var(--ink); cursor: ew-resize;
+}
+.rangebar-grip:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.fxcard {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  background: var(--field); border: 1px solid var(--line-soft); border-radius: 6px;
+}
+.fxcard .chip-color { flex: none; }
+
+/* ---- emitter trajectory handles on the stage ------------------------------ */
+.traj-dot { cursor: grab; }
+.traj-dot:active { cursor: grabbing; }
+.traj-label { font: 700 10px var(--display); letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
+.fxcard.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
