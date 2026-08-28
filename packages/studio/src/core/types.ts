@@ -238,6 +238,14 @@ export interface Emitter {
   easing?: EasingCurve;
   /** 0 = every particle the same speed, 1 = anywhere from half to double */
   speedJitter?: number;
+  /**
+   * How fast everything travels, as a multiple. Defaults to 1.
+   *
+   * `lifeMs` used to be the only lever, but it means two things at once — how long a
+   * particle exists AND how long it takes to get there — so speeding an orbit up also
+   * emptied it.
+   */
+  speed?: number;
 
   path: EmitterPath;
   from: Anchor;

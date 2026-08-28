@@ -14,7 +14,7 @@ import { activeTransitionAt, blocksEnd, blockStarts, characteristicTime, DEFAULT
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
-import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readProp, resolveProp, writeProp } from './props';
+import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readEffectProp, readProp, resolveProp, writeEffectProp, writeProp } from './props';
 import { MODIFIER_KINDS, MODIFIERS } from './types';
 import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, TOOL_DOCS, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
@@ -1315,10 +1315,23 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   // getProp/setProp, and the property is animatable, inspectable AND known to the agent.
   // These two checks are what make that a guarantee rather than a note in a file.
   const rig = defaultProject().rig;
+  // the same guarantee for an effect's own properties, which live on the timeline rather
+  // than in the rig and so have their own read/write pair
+  const fxProject = defaultProject();
+  const fxTl = activeTimeline(fxProject);
+  fxTl.emitters = [{ ...confetti('body'), id: 'probeEm' }];
+  fxTl.modifiers = [{ id: 'probeMod', nodeId: 'body', kind: 'shake', amount: 50, frequency: 2, amplitude: 8 }];
+
   const missing = NUMERIC_PROPS.filter((path) => {
     const spec = PROPS[path];
-    const nodeId = spec.on === 'camera' ? '__camera' : (path.startsWith('eye.') ? 'eyeL' : rig.rootId);
     const probe = (spec.range![0] + spec.range![1]) / 2;
+    if (spec.on === 'effect') {
+      // amount/frequency/amplitude belong to a modifier, everything else to an emitter
+      const id = ['fx.amount', 'fx.frequency', 'fx.amplitude'].includes(path) ? 'probeMod' : 'probeEm';
+      writeEffectProp(fxTl, id, path, probe);
+      return readEffectProp(fxTl, id, path) !== probe;
+    }
+    const nodeId = spec.on === 'camera' ? '__camera' : (path.startsWith('eye.') ? 'eyeL' : rig.rootId);
     writeProp(rig, nodeId, path, probe);
     return readProp(rig, nodeId, path) !== probe;
   });
@@ -2665,5 +2678,60 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
 
 // --- zip: the CRC everything downstream depends on -----------------------------
 ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as Uint8Array<ArrayBuffer>) === 0xcbf43926);
+
+// --- effects are animatable: a keyframe on an emitter's own property -------------
+{
+  const ed2 = () => useEditor.getState();
+  ed2().loadProject(defaultProject());
+  ed2().commit((p) => {
+    const tl = activeTimeline(p);
+    tl.blocks = []; tl.tracks = []; tl.emitters = []; tl.modifiers = [];
+    tl.emitters.push({ ...confetti('body'), id: 'em1', startMs: undefined, endMs: undefined });
+  });
+  const em = () => activeTimeline(ed2().project).emitters![0];
+
+  ok('an emitter property reads through the same accessor a node one does',
+    typeof valueAt(ed2().project, 'em1', 'fx.size', 0) === 'number');
+
+  // autokey ON, two different values at two different times: the ordinary way a user
+  // animates anything in this editor
+  if (!ed2().autoKey) ed2().toggleAutoKey();
+  ed2().setPlayhead(0);
+  ed2().setValue('em1', 'fx.size', 10);
+  ed2().setPlayhead(1000);
+  ed2().setValue('em1', 'fx.size', 60);
+  const fxTracks = activeTimeline(ed2().project).tracks.filter((t) => t.property === 'fx.size');
+  ok('autokey records it as an ordinary track keyed by the effect id',
+    fxTracks.length === 1 && fxTracks[0].nodeId === 'em1' && fxTracks[0].keyframes.length === 2,
+    `${fxTracks.length} tracks, ${fxTracks[0]?.keyframes.length} keys`);
+  ok('and it interpolates between them like any other property',
+    Math.abs((valueAt(ed2().project, 'em1', 'fx.size', 500) as number) - 35) < 6,
+    String(valueAt(ed2().project, 'em1', 'fx.size', 500)));
+
+  /**
+   * The point of all of it: the scene draws the sampled value, not the stored field.
+   *
+   * Measured as the SAME frame with and without the track rather than as two different
+   * frames — particles are born small and grow, so an early-vs-late comparison passes on
+   * a completely static emitter and proves nothing.
+   */
+  const widthAt = (t: number) => {
+    const items = sceneAt(ed2().project, t, { width: 720, height: 720 }).filter((s) => s.name === em().name);
+    return items.length ? Math.max(...items.map((s) => s.w)) : 0;
+  };
+  const animated = widthAt(980);
+  ed2().commit((p) => { activeTimeline(p).tracks = []; });
+  const stored = widthAt(980);
+  ok('and the scene draws the animated value, not the stored one', animated > stored * 2,
+    `${stored.toFixed(1)} stored -> ${animated.toFixed(1)} animated`);
+
+  // the stored emitter is untouched: effectAt copies, it does not mutate the project
+  // effectAt copies; the value the user sees at 1000ms is a sample, not the stored field
+  ok('animating an effect never rewrites the effect itself', em().size === confetti('body').size,
+    `stored size ${em().size}`);
+
+  if (ed2().autoKey) ed2().toggleAutoKey();
+  ed2().loadProject(defaultProject());
+}
 
 console.log(failures === 0 ? `selfcheck: all checks passed` : `selfcheck: ${failures} FAILED`);

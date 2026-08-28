@@ -4,10 +4,10 @@ import { morphPath } from './path';
 import { shapeResolver } from './emitters';
 import { noise1d } from './noise';
 import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
-import { CAMERA_PROPS, getCameraProp, getProp, NUMERIC_PROPS, readProp, setCameraProp, setProp, writeProp } from './props';
+import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, readEffectProp, readProp, setCameraProp, setProp, writeEffectProp, writeProp } from './props';
 import { activeTimeline } from './types';
 import { activeTransitionAt, blockAt, blockStarts } from './timeline';
-import type { Anchor, ColorStop, EasingCurve, KeyValue, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
+import type { Anchor, ColorStop, EasingCurve, Emitter, KeyValue, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
 const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
@@ -237,6 +237,27 @@ export function blockSampleTime(project: Project, tl: Timeline, blockId: string,
 
 /** evaluateRig without transition blending — what "the incoming clip's own animation" or
  * "the outgoing clip's frozen pose" each independently resolve to at a given instant. */
+/**
+ * An effect with its animated properties applied at this instant.
+ *
+ * Emitters and modifiers are not in the rig, so the track loop in evaluateRigRaw cannot
+ * write to them — but their keyframes are ordinary tracks keyed by the effect's own id,
+ * so both the modifier pass and the emitter pass resolve them through here. A copy, never
+ * the stored effect: the project is what the user is editing.
+ */
+export function effectAt<T extends { id: string }>(project: Project, tl: Timeline, fx: T, timeMs: number): T {
+  let out: T | null = null;
+  for (const track of tl.tracks) {
+    if (track.nodeId !== fx.id || !isEffectProp(track.property)) continue;
+    const sampleT = track.blockId ? blockSampleTime(project, tl, track.blockId, timeMs) : timeMs;
+    const v = sampleTrack(track, sampleT);
+    if (typeof v !== 'number') continue;
+    out = out ?? { ...fx };
+    writeEffectProp({ ...tl, emitters: [out as unknown as Emitter], modifiers: [out as unknown as Modifier] }, fx.id, track.property, v);
+  }
+  return out ?? fx;
+}
+
 function evaluateRigRaw(project: Project, timeMs: number): Rig {
   const rig: Rig = structuredClone(project.rig);
   const tl = activeTimeline(project);
@@ -269,7 +290,7 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
     // dragging the clip elsewhere on the timeline can't change how it looks internally.
     const local = scopeTime(tl, m, timeMs);
     if (local === null) continue;
-    applyModifier(rig, m, local / 1000);
+    applyModifier(rig, effectAt(project, tl, m, timeMs), local / 1000);
   }
   return rig;
 }
@@ -584,6 +605,16 @@ export function emitterItems(
     const tail = stopsAt === Infinity ? 0 : Math.min(EXIT_MS, stopsAt * 0.4);
     const exit = tail > 0 ? Math.min(1, Math.max(0, (stopsAt - t) / tail)) : 1;
     if (exit <= 0) continue;
+
+    /**
+     * And the mirror of it at the other end: the effect arrives rather than appearing.
+     *
+     * An orbit is the case that needs this most — a full ring of five objects popped into
+     * existence on one frame. The individual particles of a stream fade themselves in over
+     * the first stretch of their own life, but nothing covered the effect as a whole.
+     */
+    const head = Math.min(EXIT_MS, stopsAt === Infinity ? EXIT_MS : stopsAt * 0.4);
+    const enter = head > 0 ? Math.min(1, Math.max(0, t / head)) : 1;
     // an orbit uses every slot it was given: they are positions on a ring, not spawns
     const slots = e.path === 'orbit'
       ? Math.max(1, Math.round(e.count))
@@ -605,7 +636,8 @@ export function emitterItems(
       // scrubbing back gives the same picture.
       const jitter = e.speedJitter ?? 0;
       const vary = jitter ? 1 + noise1d(i * 3.1 + 11, seed) * jitter : 1;
-      const rateOf = Math.max(0.05, (pt?.speed ?? 1) * vary);
+      // e.speed is the whole stream's dial; pt.speed is one piece's offset from it
+      const rateOf = Math.max(0.05, (e.speed ?? 1) * (pt?.speed ?? 1) * vary);
 
       // an orbit never dies and never respawns — it goes round. Everything else is born,
       // travels and fades.
@@ -672,7 +704,7 @@ export function emitterItems(
       const fadeIn = orbiting ? 1 : Math.min(1, u / 0.12);
       const fadeSpan = Math.max(1e-3, 1 - e.fadeStart);
       const fadeOut = orbiting || u <= e.fadeStart ? 1 : Math.max(0, 1 - (u - e.fadeStart) / fadeSpan);
-      const alpha = e.color.a * fadeIn * fadeOut * exit;
+      const alpha = e.color.a * fadeIn * fadeOut * exit * enter;
       if (alpha <= 0.002) continue;
 
       // a particle shrinks as it fades rather than staying full size and vanishing. Fading
@@ -690,7 +722,9 @@ export function emitterItems(
        */
       const SHRINK_FROM = 0.35;
       const shrink = fadeOut < SHRINK_FROM ? fadeOut / SHRINK_FROM : 1;
-      const size = e.size * grow * (pt?.sizeScale ?? 1) * unit * shrink * exit;
+      // fadeIn is the particle's own arrival ramp; scaling with it is the exact mirror of
+      // `shrink` on the way out, so a glyph grows in instead of popping at full size
+      const size = e.size * grow * (pt?.sizeScale ?? 1) * unit * shrink * exit * fadeIn * enter;
       const tint = pt?.color ?? e.color;
 
       // what this particle IS: a library/project shape, or a character. `resolveShape` is
@@ -724,7 +758,11 @@ export function emitterItems(
  */
 export function composeScene(project: Project, rig: Rig, timeMs: number, view: Viewport): SceneItem[] {
   const base = buildScene(rig, view);
-  const extra = emitterItems(activeTimeline(project), rig, base, timeMs, view, shapeResolver(project.svgAssets));
+  // emitters resolved here rather than inside emitterItems: this is the level that has the
+  // project, and therefore the clip retiming a block-scoped effect track needs
+  const tl = activeTimeline(project);
+  const resolved = { ...tl, emitters: (tl.emitters ?? []).map((e) => effectAt(project, tl, e, timeMs)) };
+  const extra = emitterItems(resolved, rig, base, timeMs, view, shapeResolver(project.svgAssets));
   if (!extra.length) return base;
   return [...base, ...extra].sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
 }
@@ -740,5 +778,6 @@ export function valueAt(project: Project, nodeId: string, path: string, t: numbe
   const track = activeTrackFor(tl, nodeId, path, t);
   const sampleT = track?.blockId ? blockSampleTime(project, tl, track.blockId, t) : t;
   const sampled = track && sampleTrack(track, sampleT);
-  return sampled !== undefined ? sampled : readProp(project.rig, nodeId, path);
+  if (sampled !== undefined) return sampled;
+  return isEffectProp(path) ? readEffectProp(tl, nodeId, path) : readProp(project.rig, nodeId, path);
 }

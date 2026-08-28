@@ -5,8 +5,8 @@ import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
-import { activeTimeline, MODIFIERS, type Block, type EasingCurve, type Keyframe, type KeyValue, type Track, type Transition } from '../core/types';
-import { PROP_LABEL } from '../core/props';
+import { activeTimeline, MODIFIERS, type Block, type EasingCurve, type Keyframe, type KeyValue, type Project, type Timeline, type Track, type Transition } from '../core/types';
+import { findEffect, PROP_LABEL } from '../core/props';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
@@ -129,16 +129,19 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   // baseline, same convention as the Tracks/Graph zoom just above it.
   const blockPxPerMs = (stripWidth / Math.max(blocksEnd(tl), 1)) * stripZoom;
 
+  const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
   const visible = useMemo(
     () => {
-      const byNode = selection.length ? tl.tracks.filter((t) => selection.includes(t.nodeId)) : tl.tracks;
+      // an effect's tracks are keyed by its own id, so selecting one narrows the lanes to
+      // it exactly the way selecting a layer does — that IS what opening a band shows you
+      const ids = selectedEmitterId ? [...selection, selectedEmitterId] : selection;
+      const byNode = ids.length ? tl.tracks.filter((t) => ids.includes(t.nodeId)) : tl.tracks;
       return isolatedBlockId ? byNode.filter((t) => t.blockId === isolatedBlockId) : byNode;
     },
-    [tl.tracks, selection, isolatedBlockId],
+    [tl.tracks, selection, selectedEmitterId, isolatedBlockId],
   );
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
   const starts = blockStarts(tl);
-  const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
   const selectEmitter = useEditor((s) => s.selectEmitter);
   const [showBands, setShowBands] = useState(true);
 
@@ -550,7 +553,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {PROP_LABEL[t.property] ?? t.property}
                       </span>
-                      <span className="node">{project.rig.nodes[t.nodeId]?.name ?? t.nodeId}</span>
+                      <span className="node">{trackOwner(project, tl, t.nodeId)}</span>
                     </div>
                     {expanded.has(t.id) && numeric && <div className="trow-detail" />}
                   </div>
@@ -854,4 +857,12 @@ export function DurationField() {
       </select>
     </div>
   );
+}
+
+/** What a lane belongs to: a layer, or an effect addressed by its own id. */
+function trackOwner(project: Project, tl: Timeline, nodeId: string): string {
+  const node = project.rig.nodes[nodeId];
+  if (node) return node.name;
+  const fx = findEffect(tl, nodeId);
+  return fx ? ('name' in fx ? fx.name : fx.kind) : nodeId;
 }

@@ -12,6 +12,14 @@ import type { Project } from '../core/types';
  * the copilot ended up being told about properties it could not set and not told about
  * ones it could. See COPILOT.md.
  */
+const EFFECT_PROPERTY_DOCS = NUMERIC_PROPS
+  .filter((path) => PROPS[path].on === 'effect')
+  .map((path) => {
+    const [min, max, , unit] = PROPS[path].range!;
+    return `  ${path.padEnd(18)} ${min}..${max}${unit ? ` ${unit}` : ''}  ${PROPS[path].help}`;
+  })
+  .join('\n');
+
 const PROPERTY_DOCS = NUMERIC_PROPS
   .filter((path) => PROPS[path].on === 'node')
   .map((path) => {
@@ -122,10 +130,16 @@ ${nodes}
 Expressions: ${p.expressions.map((e) => `${e.name}`).join(', ') || 'none'}
 Presets: ${p.presets.map((e) => `${e.name} (${fmtSec(e.durationMs)}, ${e.tracks.length} tracks)`).join(', ')}
 Shapes: ${Object.values(p.rig.nodes).filter((n) => n.shapePath).map((n) => `${n.id} is a ${n.shape?.kind ?? 'custom outline'}`).join(', ') || 'every layer is its natural shape'}
-Effects and emitters running now: ${[
-    ...tl.modifiers.map((m) => `${m.kind} on ${m.nodeId}`),
-    ...(tl.emitters ?? []).map((e) => `"${e.name}" (${e.glyphs.join('')}, ${e.path})`),
-  ].join(', ') || 'none'}
+Effects and emitters running now (the id is what add_keyframe takes in place of a layer):
+${[
+    ...tl.modifiers.map((m) => `  ${m.id} — ${m.kind} on ${m.nodeId}`),
+    ...(tl.emitters ?? []).map((e) => `  ${e.id} — "${e.name}" (${e.glyphs.join('')}, ${e.path})`),
+  ].join('\n') || '  none'}
+
+An effect's own properties are animatable exactly like a layer's: pass the EFFECT's id as
+nodeId and one of these as property. Use them to make a stream speed up, a ring widen, or
+a shake die away — things no keyframe on the rig can do:
+${EFFECT_PROPERTY_DOCS}
 Active timeline: "${tl.name}" — ${fmtSec(tl.timelineDurationMs)} at ${p.fps} fps, ${tl.blocks.length} blocks${tl.loop ? ', loops' : ''}.
 ${p.timelines.length > 1 ? `Other timelines (separate states, not shown here): ${p.timelines.filter((t) => t.id !== tl.id).map((t) => t.name).join(', ')}.` : ''}
 

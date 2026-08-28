@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SHAPE_LIBRARY, shapeById, type ShapeLibraryEntry } from '../core/emitters';
 import { cssColor, hexColor, parseHex } from '../core/color';
 import { useEditor } from '../core/store';
+import { SvgLibrary } from './SvgLibrary';
 import { NumberField } from './bits';
 import type { Emitter, EmitterPart } from '../core/types';
 
@@ -142,9 +143,9 @@ export function PartEditor({ emitter }: { emitter: Emitter }) {
               </div>
             ))}
 
-            {!!project.svgAssets?.length && (
-              <div>
-                <span className="panel-title">yours</span>
+            <div>
+              <span className="panel-title">yours</span>
+              {!!project.svgAssets?.length && (
                 <div className="shapepick-grid">
                   {project.svgAssets.map((a) => (
                     <button key={a.id} className="shapepick-cell" title={a.name}
@@ -153,8 +154,9 @@ export function PartEditor({ emitter }: { emitter: Emitter }) {
                     </button>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
+              <SvgLibrary onPick={(a) => { addPart({ svgAssetId: a.id }); setPicking(false); setPreview(null); }} />
+            </div>
           </div>
         </div>
       )}

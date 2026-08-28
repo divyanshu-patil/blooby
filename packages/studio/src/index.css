@@ -902,3 +902,23 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .scrubbable { cursor: ew-resize; }
 .scrubbable:focus { cursor: text; }
 .scrubbable.scrubbing { border-color: var(--signal); background: #fff; }
+
+/* --- imported SVG artwork: paste one, open several, see what you have ----------- */
+.svglib { display: grid; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-alt); }
+.svglib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 4px; }
+.svglib-item { position: relative; }
+.svglib-item > button:first-child {
+  width: 100%; display: grid; gap: 2px; justify-items: center; padding: 4px 2px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; color: var(--ink);
+}
+.svglib-item.on > button:first-child { border-color: var(--signal); }
+.svglib-item svg { width: 26px; height: 26px; fill: currentColor; }
+.svglib-item span { font-size: 9px; opacity: 0.7; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svglib-x {
+  position: absolute; top: -4px; right: -4px; width: 15px; height: 15px; line-height: 1; font-size: 9px;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  cursor: pointer; opacity: 0; transition: opacity 0.12s;
+}
+.svglib-item:hover .svglib-x, .svglib-x:focus-visible { opacity: 1; }
+.svglib-paste { font: 11px/1.4 ui-monospace, monospace; resize: vertical; }
+.hint.err { color: var(--hot); }

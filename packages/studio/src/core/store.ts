@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
-import { readProp, writeProp } from './props';
+import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
@@ -210,6 +210,23 @@ export function splitKey(key: string): [string, string] {
   return [key.slice(0, i), key.slice(i + 1)];
 }
 
+
+/**
+ * Reading and writing a value without caring where it lives.
+ *
+ * A property path either addresses a rig node (or the camera) or an effect on the active
+ * timeline. Everything above this line — autokey, the stopwatch, undo, the timeline lanes
+ * — is written against nodeId+path and works unchanged for either, which is the whole
+ * reason effects became animatable in one pass instead of growing a parallel system.
+ */
+const read = (p: Project, rig: Rig, nodeId: string, path: string): KeyValue | undefined =>
+  isEffectProp(path) ? readEffectProp(activeTimeline(p), nodeId, path) : readProp(rig, nodeId, path);
+
+const write = (p: Project, nodeId: string, path: string, v: KeyValue): void => {
+  if (isEffectProp(path)) writeEffectProp(activeTimeline(p), nodeId, path, v as number);
+  else writeProp(p.rig, nodeId, path, v);
+};
+
 export const useEditor = create<Editor>((set, get) => ({
   project: load(),
   catalog: [],
@@ -291,7 +308,7 @@ export const useEditor = create<Editor>((set, get) => ({
         upsertKeyframe(t, playhead, value);
         at(p).tracks.push(t);
       } else {
-        writeProp(p.rig, nodeId, property, value);
+        write(p, nodeId, property, value);
       }
     }, label ?? `${nodeId}.${property}${existing ? '.kf' : ''}`);
   },
@@ -318,7 +335,7 @@ export const useEditor = create<Editor>((set, get) => ({
       // the last one: bake the value back down so removing a keyframe never moves the
       // mascot, then drop the empty track rather than leave a blank lane on the strip
       const v = sampleTrack(track, playhead);
-      if (v !== undefined) writeProp(p.rig, nodeId, property, v);
+      if (v !== undefined) write(p, nodeId, property, v);
       at(p).tracks = at(p).tracks.filter((x) => x.id !== t.id);
     });
   },
@@ -330,10 +347,10 @@ export const useEditor = create<Editor>((set, get) => ({
       if (existing) {
         // bake the value at the playhead back down so the pose doesn't jump
         const v = sampleTrack(existing, playhead);
-        if (v !== undefined) writeProp(p.rig, nodeId, property, v);
+        if (v !== undefined) write(p, nodeId, property, v);
         at(p).tracks = at(p).tracks.filter((t) => t.id !== existing.id);
       } else {
-        const v = readProp(p.rig, nodeId, property);
+        const v = read(p, p.rig, nodeId, property);
         if (v === undefined) return;
         // same clip-scoping as setValue's autoKey branch — see its comment
         at(p).tracks.push({ id: uid('t'), nodeId, property, blockId: blockAt(at(p), playhead)?.id, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
@@ -343,7 +360,7 @@ export const useEditor = create<Editor>((set, get) => ({
 
   addKeyframeNow(nodeId, property) {
     const { playhead, project } = get();
-    const v = readProp(evaluateRig(project, playhead), nodeId, property);
+    const v = read(project, evaluateRig(project, playhead), nodeId, property);
     if (v === undefined) return;
     // writeKeyframe rather than a hand-rolled push: it scopes the new track to whichever
     // clip the playhead is in, and that is the scope activeTrackFor — and therefore the
@@ -953,7 +970,7 @@ export function writeKeyframe(p: Project, nodeId: string, property: string, time
     // the anchor stays inside the same clip it's anchoring.
     const anchorAt = owner ? blockStarts(tl)[tl.blocks.indexOf(owner)] : 0;
     if (time > anchorAt + 1) {
-      const base = readProp(p.rig, nodeId, property);
+      const base = read(p, p.rig, nodeId, property);
       if (base !== undefined) track.keyframes.push({ id: uid('k'), time: anchorAt, value: base, easingOut: { type: 'linear' } });
     }
   }

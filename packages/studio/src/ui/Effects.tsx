@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useEditor } from '../core/store';
-import { activeTimeline, MODIFIER_AXES, MODIFIERS } from '../core/types';
+import { SvgLibrary } from './SvgLibrary';
+import { activeTimeline, MODIFIER_AXES } from '../core/types';
 import { scopeSpan } from '../core/scene';
 import { blockStarts } from '../core/timeline';
 import { hexColor, parseHex } from '../core/color';
-import { NumberField } from './bits';
+import { NumberField, PropRow } from './bits';
 import { Collapsible } from './Collapsible';
 import { EffectPicker, MODIFIER_CHOICES, type EffectChoice } from './EffectPicker';
 import { PartEditor } from './PartEditor';
@@ -89,6 +90,7 @@ export function Effects() {
   const selection = useEditor((s) => s.selection);
   const selectedBlockId = useEditor((s) => s.selectedBlockId);
   const playhead = useEditor((s) => s.playhead);
+  const [libFor, setLibFor] = useState<string | null>(null);
   const [targetId, setTargetId] = useState<string | null>(null);
   const [picking, setPicking] = useState<'modifier' | 'effect' | null>(null);
   const selectBlock = useEditor((s) => s.selectBlock);
@@ -99,7 +101,6 @@ export function Effects() {
   const updateEmitter = useEditor((s) => s.updateEmitter);
   const removeEmitter = useEditor((s) => s.removeEmitter);
   const selectEmitter = useEditor((s) => s.selectEmitter);
-  const addSvgAsset = useEditor((s) => s.addSvgAsset);
   const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
 
   const tl = activeTimeline(project);
@@ -131,32 +132,6 @@ export function Effects() {
   /** One per targeted layer, so "both eyes" is one click rather than two identical ones. */
   const addToTargets = (make: (nodeId: string) => void) => targetIds.forEach(make);
 
-  /**
-   * Read an .svg off disk, keep it with the project, and point this emitter at it.
-   *
-   * Only the inside of the <svg> is kept, plus its viewBox — the outer element is
-   * re-created by the renderer at whatever size the particle is, so a file authored at
-   * 512px and one authored at 24px both come out the same size.
-   */
-  const importSvg = (emitterId: string) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.svg,image/svg+xml';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const text = await file.text();
-      const box = /viewBox\s*=\s*["']([^"']+)["']/i.exec(text)?.[1];
-      const inner = /<svg[^>]*>([\s\S]*)<\/svg>/i.exec(text)?.[1];
-      if (!inner) { alert('That file does not look like an SVG.'); return; }
-      const id = addSvgAsset(file.name.replace(/\.svg$/i, ''), inner.trim(), box ?? '0 0 24 24');
-      updateEmitter(emitterId, (x) => {
-        x.svgAssetId = id;
-        x.svg = { sourceMarkup: inner.trim(), viewBox: box ?? '0 0 24 24' };
-      });
-    };
-    input.click();
-  };
 
   /** Every layer, so an emitter's endpoints can be pinned to one — tears to an eye. */
   const anchors = Object.values(project.rig.nodes);
@@ -220,21 +195,9 @@ export function Effects() {
             <span className="spacer" />
             <button className="btn ghost sm icon" title="Remove" onClick={() => removeModifier(m.id)}>✕</button>
           </div>
-          <div className="prop">
-            <span /><label className="prop-label"><span className="t">Amount</span>
-              <input type="range" min={0} max={200} step={1} value={m.amount} onChange={(e) => updateModifier(m.id, (x) => { x.amount = +e.target.value; })} />
-            </label><NumberField value={m.amount} onChange={(v) => updateModifier(m.id, (x) => { x.amount = v; })} />
-          </div>
-          <div className="prop">
-            <span /><label className="prop-label"><span className="t">Frequency</span>
-              <input type="range" min={0.05} max={MODIFIERS[m.kind].maxFrequency} step={0.05} value={m.frequency} onChange={(e) => updateModifier(m.id, (x) => { x.frequency = +e.target.value; })} />
-            </label><NumberField value={m.frequency} step={0.1} onChange={(v) => updateModifier(m.id, (x) => { x.frequency = v; })} />
-          </div>
-          <div className="prop">
-            <span /><label className="prop-label"><span className="t">Amplitude</span>
-              <input type="range" min={0} max={40} step={0.5} value={m.amplitude} onChange={(e) => updateModifier(m.id, (x) => { x.amplitude = +e.target.value; })} />
-            </label><NumberField value={m.amplitude} step={0.5} onChange={(v) => updateModifier(m.id, (x) => { x.amplitude = v; })} />
-          </div>
+          <PropRow nodeId={m.id} property="fx.amount" />
+          <PropRow nodeId={m.id} property="fx.frequency" />
+          <PropRow nodeId={m.id} property="fx.amplitude" />
           {m.kind === 'pendulum' && (
             <div className="prop">
               <span /><label className="prop-label"><span className="t">Axis</span></label>
@@ -329,9 +292,15 @@ export function Effects() {
               <option value="">glyphs (below)</option>
               {(project.svgAssets ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-            <button className="btn sm" title="Import an SVG and keep it with this project"
-              onClick={() => importSvg(em.id)}>Import SVG…</button>
+            <button className="btn sm icon" title="Add artwork — paste an SVG or open files"
+              aria-expanded={libFor === em.id} onClick={() => setLibFor(libFor === em.id ? null : em.id)}>+</button>
           </div>
+          {libFor === em.id && (
+            <SvgLibrary selectedId={em.svgAssetId} onPick={(a) => updateEmitter(em.id, (x) => {
+              x.svgAssetId = a.id;
+              x.svg = { sourceMarkup: a.markup, viewBox: a.viewBox };
+            })} />
+          )}
 
           <div className="row">
             <span className="prop-label" style={{ flex: 1 }}>Path</span>
@@ -361,27 +330,27 @@ export function Effects() {
             </div>
           ))}
 
-          <Dial label="Size" value={em.size} min={4} max={90} step={1} onChange={(v) => updateEmitter(em.id, (x) => { x.size = v; })} />
-          <Dial label={em.path === 'orbit' ? 'Ellipse X' : 'Bow'} value={em.path === 'orbit' ? (em.radiusX ?? 100) : em.bow}
-            min={em.path === 'orbit' ? 10 : -200} max={200} step={1}
-            onChange={(v) => updateEmitter(em.id, (x) => { if (x.path === 'orbit') x.radiusX = v; else x.bow = v; })} />
-          {em.path === 'orbit' && (
+          {/* PropRow, not a plain dial: every one of these is a registered property, so it
+              gets a stopwatch, keyframe chevrons and autokey for free — the same row the
+              node inspector uses, pointed at the effect's id instead of a node's. */}
+          <PropRow nodeId={em.id} property="fx.size" />
+          {em.path === 'orbit' ? (
             <>
-              <Dial label="Ellipse Y" value={em.radiusY ?? em.radiusX ?? 100} min={4} max={200} step={1}
-                onChange={(v) => updateEmitter(em.id, (x) => { x.radiusY = v; })} />
-              <Dial label="Tilt" value={em.orbitTilt ?? 0} min={-90} max={90} step={1}
-                onChange={(v) => updateEmitter(em.id, (x) => { x.orbitTilt = v; })} />
+              <PropRow nodeId={em.id} property="fx.radiusX" />
+              <PropRow nodeId={em.id} property="fx.radiusY" />
+              <PropRow nodeId={em.id} property="fx.orbitTilt" />
             </>
-          )}
-          <Dial label="Every" value={em.rateMs} min={40} max={2000} step={10} onChange={(v) => updateEmitter(em.id, (x) => { x.rateMs = v; })} />
-          <Dial label="Lives" value={em.lifeMs} min={200} max={6000} step={50} onChange={(v) => updateEmitter(em.id, (x) => { x.lifeMs = v; })} />
-          <Dial label="At once" value={em.count} min={1} max={40} step={1} onChange={(v) => updateEmitter(em.id, (x) => { x.count = Math.round(v); })} />
-          <Dial label="Fade from" value={em.fadeStart} min={0} max={1} step={0.01} onChange={(v) => updateEmitter(em.id, (x) => { x.fadeStart = v; })} />
-          <Dial label="Grows to" value={em.scaleTo} min={0.1} max={3} step={0.05} onChange={(v) => updateEmitter(em.id, (x) => { x.scaleTo = v; })} />
-          <Dial label="Spin" value={em.spin} min={-360} max={360} step={5} onChange={(v) => updateEmitter(em.id, (x) => { x.spin = v; })} />
-          <Dial label="Wander" value={em.wobble} min={0} max={40} step={0.5} onChange={(v) => updateEmitter(em.id, (x) => { x.wobble = v; })} />
-          <Dial label="Speed spread" value={em.speedJitter ?? 0} min={0} max={1} step={0.05}
-            onChange={(v) => updateEmitter(em.id, (x) => { x.speedJitter = v; })} />
+          ) : <PropRow nodeId={em.id} property="fx.bow" />}
+          <PropRow nodeId={em.id} property="fx.rateMs" />
+          <PropRow nodeId={em.id} property="fx.lifeMs" />
+          <PropRow nodeId={em.id} property="fx.count" />
+          <PropRow nodeId={em.id} property="fx.fadeStart" />
+          <PropRow nodeId={em.id} property="fx.scaleTo" />
+          <PropRow nodeId={em.id} property="fx.spin" />
+          <PropRow nodeId={em.id} property="fx.wobble" />
+          <PropRow nodeId={em.id} property="fx.speed" />
+          <PropRow nodeId={em.id} property="fx.speedJitter" />
+          <PropRow nodeId={em.id} property="fx.opacity" />
           <div className="prop">
             <span /><label className="prop-label"><span className="t">Travel</span></label>
             <select className="sel" value={easingName(em.easing)} aria-label="Travel easing"
@@ -425,14 +394,3 @@ export function Effects() {
 const easingName = (e?: { type: string; name?: string }) => (e?.type === 'preset' ? e.name! : 'linear');
 
 /** One labelled slider + number, which is most of this panel. */
-function Dial({ label, value, min, max, step, onChange }: {
-  label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void;
-}) {
-  return (
-    <div className="prop">
-      <span /><label className="prop-label"><span className="t">{label}</span>
-        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(+e.target.value)} />
-      </label><NumberField value={value} step={step} onChange={onChange} />
-    </div>
-  );
-}
