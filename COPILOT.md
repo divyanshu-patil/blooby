@@ -165,12 +165,50 @@ applied, proposed-not-applied, or rejected — not just its prose. Rejecting kee
 calls and sets `rejected`, rather than clearing them, so the model can be told not to
 propose the same thing again.
 
+## Two gates, not one
+
+`validate` answers *"will this corrupt the document"*. Everything it lets through is
+legal, and most of it is lifeless — a body that scales by 1.03, four layers moving on
+identical frames, a pose passed through rather than held, a clip that ends somewhere
+other than it started.
+
+`critique` (`copilot/critique.ts`) is the second gate. It reads the tracks a turn
+produced and says what is wrong with them **as animation**, then feeds the same re-prompt
+loop `validate` uses — so a weak first answer is revised once before the user sees it.
+The revision is kept only if it has fewer complaints than the original, and there is
+exactly one: a weak animation beats making someone wait.
+
+It checks: a motion named in the request with nothing animating it; a named motion that
+moves by less than `MIN_CHANGE` for that property; the request being about the mascot
+while nothing touches the body; tracks that do not close back on their opening value; no
+held pose anywhere; and identical keyframe times across every layer.
+
+Two rules when adding a check:
+
+- **Be conservative.** A false complaint costs a round trip and teaches nothing. Magnitude
+  is only ever questioned for a motion the user asked for *by name* — a deliberately
+  subtle idle must pass untouched, and the selfcheck asserts that it does.
+- **`MIN_CHANGE` is not derived from `PROPS.range`.** A range is what is *possible*; 8% of
+  scale's 0.05–3 range is a quarter, far more than "visible". These numbers are what a
+  viewer notices, and they belong next to the check that uses them.
+
+The selfcheck covers each complaint firing on the shape that should trigger it, and — the
+one that matters most — a well-made clip drawing no complaints at all.
+
 ## Rules the copilot code itself follows
 
 - **Validate the batch, not the call.** `create_preset` followed by
   `add_preset_to_timeline` naming it is correct and common. `validateBatch` walks the
   turn against a view that includes what earlier calls will have made. Judging each call
   against the live project rejects the model's best answer.
+- **A create naming something that exists is an edit.** "make it scale more" comes back
+  as `create_preset` with the same name constantly. `normaliseCall` rewrites it to
+  `edit_preset`, which is both what was meant and the only way to avoid two presets
+  sharing a name — `findPreset` resolves by name, so the second would be unreachable.
+- **`describe` runs against the project as it stands.** A batch that creates a preset and
+  places it in one turn names something that does not exist yet, which is how the card
+  read `Add "undefined" to the strip`. Every lookup in `describe` falls back to what the
+  model actually wrote.
 - **Normalise before validating.** `normaliseCall` resolves layer names, short property
   names and argument aliases — at the top level *and* nested inside preset tracks and
   expression snapshots. A rejection should mean the model was wrong, not that it phrased

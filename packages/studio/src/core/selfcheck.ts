@@ -17,6 +17,7 @@ import { MODIFIER_KINDS, MODIFIERS } from './types';
 import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
 import { suggestedStart, systemPrompt } from '../copilot/prompt';
+import { critique } from '../copilot/critique';
 import { baseUrl, CLOUD_CATALOGUE, LOCAL_URL, needsKey, resolveModel, usesBackend } from '../copilot/pool';
 import { listModels } from '../copilot/client';
 import { crc32 } from '../export/zip';
@@ -1565,6 +1566,104 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   applyCalls([{ name: 'add_keyframe', args: { nodeId: 'body', property: 'transform.scale.x', atMs: clipStart + 300, value: 1.8 } }]);
   ok('while add_keyframe at the listed time is what the user actually sees change',
     (valueAt(P(), 'body', 'transform.scale.x', clipStart + 300) as number) === 1.8);
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- copilot: judging the animation, not just the JSON --------------------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const ASK = 'make the mascot scale and rotate and make his eyes wide, then rest';
+
+  const track = (nodeId: string, property: string, keys: [number, number][]) =>
+    ({ nodeId, property, keyframes: keys.map(([time, value]) => ({ time, value })) });
+  const preset = (tracks: unknown[]) =>
+    [{ name: 'create_preset', args: { name: 'X', durationMs: 1400, tracks } }] as ToolCall[];
+
+  // the exact failure the user reported: a body that "scales" by 1.03
+  const timid = critique(P(), preset([
+    track('body', 'transform.scale.x', [[0, 1], [400, 1.03], [900, 1.03], [1400, 1]]),
+    track('body', 'transform.rotation', [[0, 0], [400, 8], [900, 8], [1400, 0]]),
+    track('eyeL', 'transform.length', [[0, 1], [400, 1.7], [900, 1.7], [1400, 1]]),
+  ]), ASK);
+  ok('a body that scales by 0.03 is called out', timid.some((n) => /invisible/.test(n)), timid.join(' | '));
+
+  // a motion the user named with nothing animating it at all
+  const missing = critique(P(), preset([
+    track('eyeL', 'transform.length', [[0, 1], [400, 1.7], [900, 1.7], [1400, 1]]),
+  ]), ASK);
+  ok('rotation asked for and never animated is called out',
+    missing.some((n) => /rotation/.test(n) && /no track animates it/.test(n)), missing.join(' | '));
+
+  // a clip that ends somewhere else cannot loop or be followed
+  const drifts = critique(P(), preset([
+    track('body', 'transform.scale.x', [[0, 1], [400, 1.2], [900, 1.2], [1400, 1.2]]),
+    track('body', 'transform.rotation', [[0, 0], [400, 8], [900, 8], [1400, 0]]),
+    track('eyeL', 'transform.length', [[0, 1], [400, 1.7], [900, 1.7], [1400, 1]]),
+  ]), ASK);
+  ok('a track that does not close back is called out',
+    drifts.some((n) => /cannot loop or be followed/.test(n)), drifts.join(' | '));
+
+  // no hold: every pose passed straight through
+  const rushed = critique(P(), preset([
+    track('body', 'transform.scale.x', [[0, 1], [400, 1.2], [800, 1]]),
+    track('body', 'transform.rotation', [[0, 0], [400, 8], [800, 0]]),
+    track('eyeL', 'transform.length', [[0, 1], [400, 1.7], [800, 1]]),
+  ]), ASK);
+  ok('nothing held is called out', rushed.some((n) => /No pose is held/.test(n)), rushed.join(' | '));
+  ok('and identical timing across every layer too',
+    rushed.some((n) => /same frames/.test(n)), rushed.join(' | '));
+
+  // and the one that matters most: good work must pass silently
+  const good = critique(P(), preset([
+    track('body', 'transform.scale.x', [[0, 1], [380, 1.18], [900, 1.18], [1400, 1]]),
+    track('body', 'transform.scale.y', [[0, 1], [420, 1.06], [940, 1.06], [1400, 1]]),
+    track('body', 'transform.rotation', [[0, 0], [450, 8], [960, 8], [1400, 0]]),
+    track('eyeL', 'transform.length', [[0, 1], [340, 1.7], [880, 1.7], [1400, 1]]),
+  ]), ASK);
+  ok('a well-made clip draws no complaints', good.length === 0, good.join(' | '));
+
+  // a request that names nothing must not be nitpicked on magnitude
+  const quiet = critique(P(), preset([
+    track('body', 'flatOffset.y', [[0, 0], [500, -4], [1000, -4], [1400, 0]]),
+  ]), 'add a gentle idle');
+  ok('a subtle animation nobody asked to be big is left alone',
+    !quiet.some((n) => /invisible/.test(n)), quiet.join(' | '));
+
+  ok('at most three complaints, so the model can act on them', timid.length <= 3 && rushed.length <= 3);
+}
+
+// --- copilot: a same-name create is an edit -------------------------------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  applyCalls([{ name: 'create_preset', args: { name: 'Wave', durationMs: 600, tracks: [
+    { nodeId: 'body', property: 'transform.rotation', keyframes: [{ time: 0, value: 0 }, { time: 300, value: 8 }] },
+  ] } }]);
+  const count = P().presets.length;
+
+  // "make it rotate more" comes back as create_preset with the same name constantly
+  const again = normaliseCall(P(), { name: 'create_preset', args: { name: 'Wave', durationMs: 600, tracks: [
+    { nodeId: 'body', property: 'transform.rotation', keyframes: [{ time: 0, value: 0 }, { time: 300, value: 20 }] },
+  ] } });
+  ok('a create naming an existing preset becomes an edit', again.name === 'edit_preset', again.name);
+  ok('and carries the name across as the target', again.args.preset === 'Wave' && again.args.name === undefined);
+
+  applyCalls([again]);
+  ok('so no second preset appears', P().presets.length === count, `${P().presets.length} vs ${count}`);
+  ok('and the edit landed', P().presets.find((x) => x.name === 'Wave')!.tracks[0].keyframes[1].value === 20);
+
+  // a genuinely new name still creates
+  const fresh = normaliseCall(P(), { name: 'create_preset', args: { name: 'Wave Two', durationMs: 600, tracks: [
+    { nodeId: 'body', property: 'transform.rotation', keyframes: [{ time: 0, value: 0 }, { time: 300, value: 8 }] },
+  ] } });
+  ok('a new name still creates', fresh.name === 'create_preset');
+
+  // describe must not print "undefined" for something the same batch is about to make
+  const line = describe(P(), { name: 'add_preset_to_timeline', args: { preset: 'NotYetMade' } });
+  ok('describe falls back to what the model wrote', line.includes('NotYetMade'), line);
 
   useEditor.getState().loadProject(defaultProject());
 }

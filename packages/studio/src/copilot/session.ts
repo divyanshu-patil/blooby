@@ -15,7 +15,7 @@ export interface Turn {
 }
 
 /** What the copilot is doing right now, so the UI can say so rather than just spin. */
-export type Phase = 'idle' | 'thinking' | 'retrying' | 'applying';
+export type Phase = 'idle' | 'thinking' | 'retrying' | 'revising' | 'applying';
 
 interface CopilotSession {
   turns: Turn[];

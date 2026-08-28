@@ -6,6 +6,7 @@ import { acceptsKeys, baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO,
 import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validateBatch } from '../copilot/tools';
 import { systemPrompt } from '../copilot/prompt';
 import { parseTurn } from '../copilot/parse';
+import { critique } from '../copilot/critique';
 import { CLOUD_CATALOGUE } from '../copilot/pool';
 import { useCopilotSession, type Turn } from '../copilot/session';
 import { Panel } from './bits';
@@ -13,6 +14,7 @@ import { Panel } from './bits';
 const PHASE_LABEL = {
   thinking: 'thinking…',
   retrying: 'that batch did not validate — asking again…',
+  revising: 'the animation was weak — asking for a better one…',
   applying: 'applying changes…',
 } as const;
 
@@ -126,6 +128,20 @@ export function Copilot() {
         setPhase('retrying');
         turn = await attempt(`Your previous tool calls were rejected: ${e.message}. Use only the layer ids, expression names and preset names listed above, and only the listed properties. Try again.`);
       }
+
+      // Everything validate lets through is legal, and most of it is lifeless. Judge it
+      // as animation and give the model one shot at fixing what is specifically wrong —
+      // a complaint about the thing it just made lands where craft advice in the prompt
+      // gets skimmed. One revision only: a weak animation beats making the user wait.
+      const notes = critique(project, turn.calls ?? [], text);
+      if (notes.length) {
+        setPhase('revising');
+        try {
+          const better = await attempt(`That is not good enough as animation yet. ${notes.join(' ')} Send the whole turn again, fixed — same request, better execution.`);
+          if (critique(project, better.calls ?? [], text).length < notes.length) turn = better;
+        } catch { /* keep the first answer: a weak animation beats no animation */ }
+      }
+
       push(turn);
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') push({ role: 'note', text: 'Stopped — nothing was changed.' });

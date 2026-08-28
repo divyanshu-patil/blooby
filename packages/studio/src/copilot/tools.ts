@@ -143,6 +143,16 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
   for (const [from, to] of Object.entries(alias)) {
     if (a[from] !== undefined && a[to] === undefined) { a[to] = a[from]; delete a[from]; }
   }
+  // "make it scale more" often comes back as create_preset with the SAME name. That is an
+  // edit however it is spelled, and letting it through would leave two presets sharing a
+  // name — which findPreset resolves by name, so the second would be unreachable.
+  let name = call.name;
+  if (name === 'create_preset' && findPreset(p, a.name)) {
+    name = 'edit_preset';
+    a.preset = a.name;
+    delete a.name;
+  }
+
   const id = findNode(p, a.nodeId);
   if (id) a.nodeId = id;
   // set_eye_params documents short names (`openness`), so models write them everywhere.
@@ -168,7 +178,7 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
     }
     a.snapshot = out;
   }
-  return { name: call.name, args: a };
+  return { name, args: a };
 }
 
 /**
@@ -292,6 +302,10 @@ export function validate(p: Project, call: ToolCall): string | null {
 export function describe(p: Project, call: ToolCall): string {
   const a = call.args ?? {};
   const name = (id: unknown) => p.rig.nodes[String(id)]?.name ?? String(id);
+  // describe runs against the project as it stands, but a batch that creates a preset and
+  // places it in one turn names something that does not exist yet — which rendered as
+  // `Add "undefined" to the strip`. Fall back to what the model actually wrote.
+  const named = (found: { name: string } | undefined, ref: unknown) => found?.name ?? String(ref ?? '?');
   const at = (v: unknown) => `${((num(v) ?? 0) / 1000).toFixed(2)}s`;
   switch (call.name) {
     case 'set_eye_params': {
@@ -302,9 +316,9 @@ export function describe(p: Project, call: ToolCall): string {
     case 'set_property': return `Set ${name(a.nodeId)} ${a.property} to ${a.value}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
     case 'add_keyframe': return `Key ${name(a.nodeId)} ${a.property} = ${a.value} at ${at(a.atMs)}`;
     case 'create_expression': return `Create expression "${a.name}" from ${Object.keys(a.snapshot as object).length} values`;
-    case 'apply_expression': return `Apply "${findExpression(p, a.expression)?.name}" at ${at(a.atMs)}`;
+    case 'apply_expression': return `Apply "${named(findExpression(p, a.expression), a.expression)}" at ${at(a.atMs)}`;
     case 'create_preset': return `Create preset "${a.name}" (${(a.tracks as unknown[]).length} tracks, ${at(a.durationMs)})`;
-    case 'add_preset_to_timeline': return `Add "${findPreset(p, a.preset)?.name}" to the strip${a.index !== undefined ? ` at slot ${a.index}` : ''}`;
+    case 'add_preset_to_timeline': return `Add "${named(findPreset(p, a.preset), a.preset)}" to the strip${a.index !== undefined ? ` at slot ${a.index}` : ''}`;
     case 'add_modifier': return `Add ${a.kind} to ${name(a.nodeId)} — amount ${a.amount ?? 100}%, ${a.frequency ?? 1} Hz`;
     case 'set_timeline': {
       const bits = [
@@ -318,9 +332,9 @@ export function describe(p: Project, call: ToolCall): string {
       return a.nodeId === undefined
         ? 'Clear every animated track on this timeline'
         : `Clear ${name(a.nodeId)}${a.property ? ` ${a.property}` : ''} animation`;
-    case 'set_block_duration': return `Set clip "${findBlock(p, a.block)?.name}" to ${at(a.durationMs)}`;
-    case 'remove_block': return `Remove clip "${findBlock(p, a.block)?.name}"`;
-    case 'move_block': return `Move clip "${findBlock(p, a.block)?.name}" to slot ${a.index}`;
+    case 'set_block_duration': return `Set clip "${named(findBlock(p, a.block), a.block)}" to ${at(a.durationMs)}`;
+    case 'remove_block': return `Remove clip "${named(findBlock(p, a.block), a.block)}"`;
+    case 'move_block': return `Move clip "${named(findBlock(p, a.block), a.block)}" to slot ${a.index}`;
     case 'add_timeline': return `Add timeline "${a.name}" (a new exported state)`;
     case 'set_camera': return `Set camera ${a.property} to ${a.value}`;
     case 'remove_keyframe': return `Delete the ${name(a.nodeId)} ${a.property} key at ${at(a.atMs)}`;
@@ -331,9 +345,9 @@ export function describe(p: Project, call: ToolCall): string {
         a.durationMs !== undefined ? `${at(a.durationMs)} long` : null,
         Array.isArray(a.tracks) ? `replace its tracks with ${a.tracks.length}` : null,
       ].filter(Boolean);
-      return `Edit preset "${findPreset(p, a.preset)?.name}": ${bits.join(', ')} (clips already on the strip keep their copy)`;
+      return `Edit preset "${named(findPreset(p, a.preset), a.preset)}": ${bits.join(', ')} (clips already on the strip keep their copy)`;
     }
-    case 'morph_between': return `Morph ${findExpression(p, a.from)?.name} → ${findExpression(p, a.to)?.name} at ${at(a.atMs)} over ${a.durationMs}ms`;
+    case 'morph_between': return `Morph ${named(findExpression(p, a.from), a.from)} → ${named(findExpression(p, a.to), a.to)} at ${at(a.atMs)} over ${a.durationMs}ms`;
     default: return call.name;
   }
 }
@@ -385,7 +399,7 @@ export function applyCalls(calls: ToolCall[]) {
         }
         case 'create_preset':
           p.presets.push({
-            id: uid('p'), name: String(a.name), source: 'custom',
+            id: uid('p'), name: uniqueName(String(a.name), p.presets.map((x) => x.name)), source: 'custom',
             durationMs: Math.max(120, num(a.durationMs) ?? 1000), tracks: presetTracks(a.tracks),
           });
           break;
