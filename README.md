@@ -11,10 +11,15 @@ of the app is built around.
 
 ```bash
 pnpm install
-pnpm dev        # http://localhost:5173
+pnpm dev        # web + admin + api, http://localhost:5173
 pnpm check      # the maths + export self-check, runs in node
 pnpm build
 ```
+
+Tasks run through Turborepo on top of pnpm workspaces. `pnpm dev` opens turbo's terminal
+UI — arrow keys switch between the three apps' logs, `i` sends input to the focused one.
+Without a TTY (CI, a script, an agent) it falls back to plain interleaved output on its
+own, so nothing needs a flag.
 
 ## What's here
 
