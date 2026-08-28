@@ -1,4 +1,3 @@
-import { useCallback } from 'react';
 import { movePathAnchor, pathAnchors } from '../core/path';
 import { useEditor } from '../core/store';
 import type { SceneItem } from '../core/scene';
@@ -40,7 +39,10 @@ export function ShapeHandles({ nodeId, item, path, toComp }: {
     return { x: (x * cos + y * sin) / w, y: (-x * sin + y * cos) / h };
   };
 
-  const drag = useCallback((index: number) => (down: React.PointerEvent) => {
+  // deliberately not memoised: it closes over the outline as it currently stands, and a
+  // memo keyed on that would rebuild every render anyway. Each pointerdown starts from
+  // the live path rather than a stale copy.
+  const drag = (index: number) => (down: React.PointerEvent) => {
     down.preventDefault();
     down.stopPropagation();
     // the dials described a star, not whatever this is about to become
@@ -55,9 +57,7 @@ export function ShapeHandles({ nodeId, item, path, toComp }: {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-    // path is captured per render, which is what we want: each pointerdown starts from
-    // the outline as it currently stands rather than from a stale copy
-  }, [nodeId, path, setValue, toComp, updateNode, toLocal]);
+  };
 
   return (
     <g className="shapepts">
