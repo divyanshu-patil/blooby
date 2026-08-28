@@ -34,7 +34,7 @@ export const projectsService = {
   },
 
   /**
-   * Create metadata first so the row owns the id, then write version 1 to S3 under a key
+   * Create metadata first so the row owns the id, then write the JSON to S3 under a key
    * derived from it. If the upload fails the row is removed again — a project the user
    * can see but never open is worse than no project.
    */
@@ -56,7 +56,7 @@ export const projectsService = {
     });
 
     try {
-      const stored = await storage.putProjectJson(userId, created.id, 1, seed);
+      const stored = await storage.putProjectJson(userId, created.id, seed);
       return await projectsRepository.update(created.id, {
         s3Key: stored.key,
         s3Bucket: stored.bucket,
@@ -75,10 +75,12 @@ export const projectsService = {
   },
 
   async remove(projectId: string, userId: string) {
-    const project = await ownedBy(projectId, userId);
+    await ownedBy(projectId, userId);   // 404/403 before anything is destroyed
     await projectsRepository.delete(projectId);
-    // after the row, so a storage hiccup never leaves an undeletable project behind
-    await storage.deleteProjectObjects(userId, projectId, project.currentVersion);
+    // after the row, so a storage hiccup never leaves an undeletable project behind.
+    // Listed by prefix rather than by version count, so anything left over from when
+    // every save had its own key goes too.
+    await storage.deleteProjectObjects(userId, projectId);
   },
 
   async duplicate(projectId: string, userId: string, name?: string) {
@@ -93,11 +95,11 @@ export const projectsService = {
   },
 
   /**
-   * Autosave. Writes a NEW version object rather than overwriting the current one, so a
-   * failed or partial write can never destroy the last good save.
+   * Autosave. Overwrites the project's single object — one file per project, no history.
    *
-   * `expectedVersion` makes concurrent saves safe: if another tab saved first the
-   * compare-and-set matches nothing and the caller is told, instead of silently winning.
+   * `currentVersion` still increments and is still what makes concurrent saves safe: if
+   * another tab saved first the compare-and-set matches nothing and the caller is told,
+   * instead of silently winning. It just no longer names a key.
    */
   async save(projectId: string, userId: string, dto: SaveProjectDataDto) {
     const project = await ownedBy(projectId, userId);
@@ -109,7 +111,7 @@ export const projectsService = {
     }
 
     const nextVersion = project.currentVersion + 1;
-    const stored = await storage.putProjectJson(userId, projectId, nextVersion, dto.project);
+    const stored = await storage.putProjectJson(userId, projectId, dto.project);
 
     const updated = await projectsRepository.bumpVersionIfCurrent(projectId, project.currentVersion, {
       currentVersion: nextVersion,
