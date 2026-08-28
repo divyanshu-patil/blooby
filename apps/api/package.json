@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -b",
     "start": "node dist/index.js",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "seed:presets": "tsx scripts/seed-presets.ts",
     "check:copilot": "tsx scripts/check-copilot-keys.ts"
