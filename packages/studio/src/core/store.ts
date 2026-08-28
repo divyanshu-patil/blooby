@@ -109,6 +109,8 @@ export interface Editor {
   renameTimeline: (id: string, name: string) => void;
   deleteTimeline: (id: string) => void;
   setActiveTimeline: (id: string) => void;
+  /** the authored blend into a state — what setState uses when given no duration */
+  setStateTransition: (id: string, durationMs: number, easing?: EasingCurve) => void;
 
   /**
    * Programmatic state-machine control (spec §14) — each Timeline is a "state" (matching
@@ -713,6 +715,15 @@ export const useEditor = create<Editor>((set, get) => ({
     set({ selection: [], playhead: 0, selectedBlockId: null });
   },
 
+  setStateTransition(id, durationMs, easing) {
+    get().commit((p) => {
+      const tl = p.timelines.find((t) => t.id === id);
+      if (!tl) return;
+      tl.transitionMs = Math.max(0, durationMs);
+      if (easing) tl.transitionEasing = easing;
+    }, `transition.${id}`);
+  },
+
   setActiveTimeline(id) {
     const { project } = get();
     if (!project.timelines.some((t) => t.id === id)) return;
@@ -733,11 +744,13 @@ export const useEditor = create<Editor>((set, get) => ({
     // "at" in the future schedules it — App.tsx's playback tick fires it the instant the
     // playhead reaches that point. "at" already passed (or omitted) switches right now.
     if (opts?.at !== undefined && opts.at > playhead) {
-      set({ pendingStateChange: { timelineId: target.id, atMs: opts.at, durationMs: opts.duration ?? DEFAULT_STATE_TRANSITION_MS, easing: opts.easing ?? DEFAULT_STATE_EASING } });
+      set({ pendingStateChange: { timelineId: target.id, atMs: opts.at, durationMs: opts.duration ?? target.transitionMs ?? DEFAULT_STATE_TRANSITION_MS, easing: opts.easing ?? target.transitionEasing ?? DEFAULT_STATE_EASING } });
       return;
     }
-    const durationMs = opts?.duration ?? DEFAULT_STATE_TRANSITION_MS;
-    const easing = opts?.easing ?? DEFAULT_STATE_EASING;
+    // an explicit duration wins, then the target state's own authored blend, then the
+    // generic default — so `setState('happy')` from a host page honours how it was authored
+    const durationMs = opts?.duration ?? target.transitionMs ?? DEFAULT_STATE_TRANSITION_MS;
+    const easing = opts?.easing ?? target.transitionEasing ?? DEFAULT_STATE_EASING;
     // capture the *actually evaluated* outgoing pose before switching — not just its last
     // raw keyframe — same principle the clip-transition blend uses one level down.
     const fromRig = durationMs > 0 ? evaluateRig(project, playhead) : null;

@@ -14,7 +14,9 @@ export interface BloobyStateMachine {
   enableState(nameOrId: string, opts?: { at?: number; duration?: number; easing?: EasingCurve }): void;
   returnToPreviousState(opts?: { duration?: number; easing?: EasingCurve }): void;
   cancelScheduledState(): void;
-  getStates(): { id: string; name: string }[];
+  /** the authored blend into a state, in ms — what setState uses when given no duration */
+  setStateTransition(nameOrId: string, durationMs: number, easing?: EasingCurve): void;
+  getStates(): { id: string; name: string; transitionMs: number }[];
   getActiveState(): { id: string; name: string } | null;
   /** fires with the new active state whenever it changes — from this API, the editor's
    * own State panel, or a keyboard shortcut; all routes end up at the same store action. */
@@ -37,7 +39,13 @@ export function installPublicApi(): void {
     enableState: (n, o) => useEditor.getState().enableState(n, o),
     returnToPreviousState: (o) => useEditor.getState().returnToPreviousState(o),
     cancelScheduledState: () => useEditor.getState().cancelScheduledState(),
-    getStates: () => useEditor.getState().project.timelines.map((t) => ({ id: t.id, name: t.name })),
+    setStateTransition: (n, ms, e) => {
+      const { project, setStateTransition } = useEditor.getState();
+      const t = project.timelines.find((x) => x.id === n)
+        ?? project.timelines.find((x) => x.name.toLowerCase() === n.toLowerCase());
+      if (t) setStateTransition(t.id, ms, e);
+    },
+    getStates: () => useEditor.getState().project.timelines.map((t) => ({ id: t.id, name: t.name, transitionMs: t.transitionMs ?? 300 })),
     getActiveState: activeOf,
     onStateChange(cb) {
       let last = useEditor.getState().project.activeTimelineId;

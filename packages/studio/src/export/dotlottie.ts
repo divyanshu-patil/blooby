@@ -43,6 +43,21 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
     generator: 'blooby',
     initial: { animation: animations[0].id },
     animations: animations.map((a) => ({ id: a.id })),
+    /**
+     * The authored blend into each state, in ms.
+     *
+     * dotLottie 2.0 has no field for it — a PlaybackState is entered on the frame the
+     * transition fires — so it goes in a namespaced key of our own rather than invented
+     * inside a spec object, which is exactly the mistake that made the first state
+     * machines unreadable. A player ignores it; a host page reads it and passes it to
+     * window.blooby.setState, which is where the lerp actually happens.
+     */
+    blooby: {
+      transitions: Object.fromEntries(animations.map((a) => [a.id, {
+        durationMs: a.timeline.transitionMs ?? 300,
+        easing: a.timeline.transitionEasing ?? { type: 'preset', name: 'easeInOut' },
+      }])),
+    },
   };
 
   if (animations.length > 1) {

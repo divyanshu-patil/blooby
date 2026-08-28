@@ -2734,4 +2734,35 @@ ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as U
   ed2().loadProject(defaultProject());
 }
 
+// --- state transitions: authored per state, honoured by a bare setState -----------
+{
+  const ed3 = () => useEditor.getState();
+  ed3().loadProject(defaultProject());
+  ed3().addTimeline('Happy');
+  const [first, second] = ed3().project.timelines;
+  ed3().setActiveTimeline(first.id);
+
+  ed3().setStateTransition(second.id, 900);
+  ok('a state remembers how long to blend into it',
+    ed3().project.timelines.find((t) => t.id === second.id)?.transitionMs === 900);
+
+  // the integration case: a host page calls setState with no options at all
+  ed3().setState(second.id);
+  ok('and a bare setState uses it rather than the generic default',
+    ed3().stateTransition?.durationMs === 900, String(ed3().stateTransition?.durationMs));
+
+  ed3().clearStateTransition();
+  ed3().setActiveTimeline(first.id);
+  ed3().setState(second.id, { duration: 40 });
+  ok('an explicit duration still wins', ed3().stateTransition?.durationMs === 40,
+    String(ed3().stateTransition?.durationMs));
+
+  // and it survives the round trip into the .lottie a host page reads back
+  ed3().clearStateTransition();
+  const bundle = buildDotLottie(ed3().project, { background: null });
+  ok('the .lottie names every state it bundles', bundle.animations.length === 2, bundle.animations.join(','));
+
+  ed3().loadProject(defaultProject());
+}
+
 console.log(failures === 0 ? `selfcheck: all checks passed` : `selfcheck: ${failures} FAILED`);

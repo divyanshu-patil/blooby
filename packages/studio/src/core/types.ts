@@ -383,6 +383,17 @@ export interface Timeline {
   /** when true, every track eases from its last keyframe back to its t=0 value at the
    * end of the timeline, so a looped playthrough (or export) has no seam. */
   loop: boolean;
+  /**
+   * How long to blend INTO this state, and along what curve.
+   *
+   * Entering a state was always a lerp from the outgoing pose, but the duration lived
+   * only in whatever `setState` happened to be passed — so an integration that called
+   * `setState('happy')` with no options got a generic 300ms no matter how the state was
+   * authored. Stored per state, this is the authored default; an explicit `duration` in
+   * the call still wins. Undefined means DEFAULT_STATE_TRANSITION_MS.
+   */
+  transitionMs?: number;
+  transitionEasing?: EasingCurve;
 }
 
 /** An SVG kept with the project so it can be reused — by an emitter, or as a layer. */
