@@ -14,15 +14,16 @@ import type { Vec2 } from './types';
  * preview than in the export is worse than no morph.
  */
 
-type Seg = { p0: Vec2; p1: Vec2; c1?: Vec2; c2?: Vec2 };
+type Seg = { p0: Vec2; p1: Vec2; c1?: Vec2; c2?: Vec2; /** first segment of a subpath */ head?: true };
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const dist = (a: Vec2, b: Vec2) => Math.hypot(b.x - a.x, b.y - a.y);
 
-/** Parses the subset this app writes and imports: M L H V C S Q T A(chorded) Z. */
+/** Parses the subset this app writes and imports: M L H V C S Q T A Z. */
 function segments(d: string): Seg[] {
   const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? [];
   const segs: Seg[] = [];
+  let opensSubpath = true;
   let i = 0, cmd = '';
   let cur: Vec2 = { x: 0, y: 0 };
   let start: Vec2 = { x: 0, y: 0 };
@@ -45,15 +46,20 @@ function segments(d: string): Seg[] {
     const rel = cmd === cmd.toLowerCase();
     const C = cmd.toUpperCase();
     const step = () => { if (i === before) i++; };
+    const push = (...ss: Seg[]) => {
+      if (ss.length && opensSubpath) { ss[0].head = true; opensSubpath = false; }
+      segs.push(...ss);
+    };
 
     if (C === 'M') {
       cur = pt(rel); start = { ...cur }; lastC = lastQ = null;
       cmd = rel ? 'l' : 'L';   // repeated pairs after M are implicit line-tos
+      opensSubpath = true;
       step();
       continue;
     }
     if (C === 'Z') {
-      if (dist(cur, start) > 1e-9) segs.push({ p0: cur, p1: start });
+      if (dist(cur, start) > 1e-9) push({ p0: cur, p1: start });
       cur = { ...start }; lastC = lastQ = null;
       // numbers after a Z are not valid SVG; drop the command so they fall through to the
       // skip below instead of re-entering this branch, which reads nothing
@@ -61,32 +67,116 @@ function segments(d: string): Seg[] {
       step();
       continue;
     }
-    if (C === 'L') { const p = pt(rel); segs.push({ p0: cur, p1: p }); cur = p; lastC = lastQ = null; step(); continue; }
-    if (C === 'H') { const x = num(); const p = { x: rel ? cur.x + x : x, y: cur.y }; segs.push({ p0: cur, p1: p }); cur = p; lastC = lastQ = null; step(); continue; }
-    if (C === 'V') { const y = num(); const p = { x: cur.x, y: rel ? cur.y + y : y }; segs.push({ p0: cur, p1: p }); cur = p; lastC = lastQ = null; step(); continue; }
-    if (C === 'C') { const c1 = pt(rel), c2 = pt(rel), p = pt(rel); segs.push({ p0: cur, c1, c2, p1: p }); cur = p; lastC = c2; lastQ = null; step(); continue; }
+    if (C === 'L') { const p = pt(rel); push({ p0: cur, p1: p }); cur = p; lastC = lastQ = null; step(); continue; }
+    if (C === 'H') { const x = num(); const p = { x: rel ? cur.x + x : x, y: cur.y }; push({ p0: cur, p1: p }); cur = p; lastC = lastQ = null; step(); continue; }
+    if (C === 'V') { const y = num(); const p = { x: cur.x, y: rel ? cur.y + y : y }; push({ p0: cur, p1: p }); cur = p; lastC = lastQ = null; step(); continue; }
+    if (C === 'C') { const c1 = pt(rel), c2 = pt(rel), p = pt(rel); push({ p0: cur, c1, c2, p1: p }); cur = p; lastC = c2; lastQ = null; step(); continue; }
     if (C === 'S') {
       const c1 = lastC ? { x: 2 * cur.x - lastC.x, y: 2 * cur.y - lastC.y } : cur;
       const c2 = pt(rel), p = pt(rel);
-      segs.push({ p0: cur, c1, c2, p1: p }); cur = p; lastC = c2; lastQ = null; step(); continue;
+      push({ p0: cur, c1, c2, p1: p }); cur = p; lastC = c2; lastQ = null; step(); continue;
     }
     if (C === 'Q' || C === 'T') {
       const q: Vec2 = C === 'Q' ? pt(rel) : (lastQ ? { x: 2 * cur.x - lastQ.x, y: 2 * cur.y - lastQ.y } : cur);
       const p = pt(rel);
       // a quadratic IS a cubic with the control point pulled two-thirds of the way out
-      segs.push({
+      push({
         p0: cur, p1: p,
         c1: { x: cur.x + (2 / 3) * (q.x - cur.x), y: cur.y + (2 / 3) * (q.y - cur.y) },
         c2: { x: p.x + (2 / 3) * (q.x - p.x), y: p.y + (2 / 3) * (q.y - p.y) },
       });
       cur = p; lastQ = q; lastC = null; step(); continue;
     }
-    // arcs are chorded rather than swept: they are rare in this app's own output, and a
-    // straight line between the endpoints keeps an imported path closed and morphable
-    if (C === 'A') { i += 5; const p = pt(rel); segs.push({ p0: cur, p1: p }); cur = p; lastC = lastQ = null; step(); continue; }
+    if (C === 'A') {
+      const rx = num(), ry = num(), rot = num(), large = num(), sweep = num();
+      const p = pt(rel);
+      push(...arcSegs(cur, p, rx, ry, rot, large, sweep));
+      cur = p; lastC = lastQ = null; step(); continue;
+    }
     i++;
   }
   return segs;
+}
+
+/**
+ * One `d` per subpath.
+ *
+ * A path with two `M`s is two separate outlines — the bar and the dot of an exclamation
+ * mark. Flattened as one polyline they get joined by a spurious edge, which in the Lottie
+ * export drew the two as a single filled blob.
+ */
+export function splitSubpaths(d: string): string[] {
+  const segs = segments(d);
+  const out: Seg[][] = [];
+  for (const seg of segs) {
+    if (seg.head || !out.length) out.push([]);
+    out[out.length - 1].push(seg);
+  }
+  return out.filter((g) => g.length).map(serialise);
+}
+
+
+/**
+ * An elliptical arc as cubic segments, per the SVG spec's endpoint parameterisation.
+ *
+ * These used to be chorded — a straight line from start to end — on the grounds that this
+ * app does not write arcs itself. It imports them: half the shape library draws its round
+ * parts with `a`, so an exclamation mark and a quaver's notehead both flattened to slivers
+ * and vanished from the Lottie export while the all-straight `zed` came out fine.
+ */
+function arcSegs(p0: Vec2, p1: Vec2, rx: number, ry: number, rotDeg: number, large: number, sweep: number): Seg[] {
+  if (!rx || !ry || (p0.x === p1.x && p0.y === p1.y)) return [{ p0, p1 }];
+  rx = Math.abs(rx); ry = Math.abs(ry);
+  const phi = (rotDeg * Math.PI) / 180;
+  const cosP = Math.cos(phi), sinP = Math.sin(phi);
+  const dx = (p0.x - p1.x) / 2, dy = (p0.y - p1.y) / 2;
+  const x1 = cosP * dx + sinP * dy, y1 = -sinP * dx + cosP * dy;
+
+  // an arc whose radii cannot span the chord is scaled up until it just can
+  const over = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry);
+  if (over > 1) { const k = Math.sqrt(over); rx *= k; ry *= k; }
+
+  const num = rx * rx * ry * ry - rx * rx * y1 * y1 - ry * ry * x1 * x1;
+  const den = rx * rx * y1 * y1 + ry * ry * x1 * x1;
+  const co = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, num / den));
+  const cxp = (co * rx * y1) / ry, cyp = (-co * ry * x1) / rx;
+  const cx = cosP * cxp - sinP * cyp + (p0.x + p1.x) / 2;
+  const cy = sinP * cxp + cosP * cyp + (p0.y + p1.y) / 2;
+
+  const ang = (ux: number, uy: number, vx: number, vy: number) => {
+    const a = Math.atan2(uy, ux), b = Math.atan2(vy, vx);
+    let d = b - a;
+    if (d < 0) d += 2 * Math.PI;
+    return d;
+  };
+  const th0 = Math.atan2((y1 - cyp) / ry, (x1 - cxp) / rx);
+  let sweepAng = ang((x1 - cxp) / rx, (y1 - cyp) / ry, (-x1 - cxp) / rx, (-y1 - cyp) / ry);
+  if (!sweep) sweepAng -= 2 * Math.PI;
+
+  const on = (th: number): Vec2 => ({
+    x: cx + rx * Math.cos(th) * cosP - ry * Math.sin(th) * sinP,
+    y: cy + rx * Math.cos(th) * sinP + ry * Math.sin(th) * cosP,
+  });
+  const slope = (th: number): Vec2 => ({
+    x: -rx * Math.sin(th) * cosP - ry * Math.cos(th) * sinP,
+    y: -rx * Math.sin(th) * sinP + ry * Math.cos(th) * cosP,
+  });
+
+  // <=90 degrees per cubic: the standard bound where the approximation error stays invisible
+  const n = Math.max(1, Math.ceil(Math.abs(sweepAng) / (Math.PI / 2)));
+  const dth = sweepAng / n;
+  const alpha = (4 / 3) * Math.tan(dth / 4);
+  const out: Seg[] = [];
+  for (let s = 0; s < n; s++) {
+    const a0 = th0 + s * dth, a1 = a0 + dth;
+    const q0 = on(a0), q1 = on(a1), d0 = slope(a0), d1 = slope(a1);
+    out.push({
+      p0: q0, p1: q1,
+      c1: { x: q0.x + alpha * d0.x, y: q0.y + alpha * d0.y },
+      c2: { x: q1.x - alpha * d1.x, y: q1.y - alpha * d1.y },
+    });
+  }
+  return out;
 }
 
 /**

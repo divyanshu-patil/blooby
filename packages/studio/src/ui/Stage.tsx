@@ -129,7 +129,9 @@ export function Stage() {
     (e.target as Element).setPointerCapture?.(e.pointerId);
 
     if (tool === 'turn') {
-      const root = project.rig.nodes[project.rig.rootId];
+      // rig, not project.rig: a drag has to continue from the pose on screen. Seeded from
+      // the base rig instead, an animated yaw read as 0 and the head snapped there.
+      const root = rig.nodes[project.rig.rootId];
       drag.current = { mode: 'turn', id: root.id, ox: p.x, oy: p.y, start: { yaw: root.surface.yaw, pitch: root.surface.pitch } };
       return;
     }
@@ -137,7 +139,7 @@ export function Stage() {
 
     const id = targetOf(item.id);
     select([item.id]);
-    const node = project.rig.nodes[id];
+    const node = rig.nodes[id];
     if (!node) return;
     drag.current = {
       mode: 'move', id, ox: p.x, oy: p.y,
@@ -152,7 +154,7 @@ export function Stage() {
     e.stopPropagation();
     if (!sel) return;
     const id = targetOf(sel.id);
-    const node = project.rig.nodes[id];
+    const node = rig.nodes[id];
     if (!node) return;
     const p = toComp(e);
     (e.target as Element).setPointerCapture?.(e.pointerId);

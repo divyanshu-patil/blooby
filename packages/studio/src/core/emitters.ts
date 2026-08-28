@@ -25,9 +25,18 @@ export interface ShapeLibraryEntry {
 /** Every entry is one filled path, so it can be baked to a Lottie bezier as well as drawn. */
 const filled = (d: string) => `<path d="${d}" fill="currentColor"/>`;
 
-/** Pulls the `d` strings back out of an entry's markup, for the exporter. */
-export const outlinesOf = (markup: string): string[] =>
-  [...markup.matchAll(/\sd="([^"]+)"/g)].map((m) => m[1]);
+/**
+ * Pulls the paths back out of an entry's markup, for the exporter.
+ *
+ * The `fill` comes with them: built-in art paints with `currentColor` so the emitter tints
+ * it, but an imported SVG carries its own colours, and the export has to honour them the
+ * same way the stage does.
+ */
+export const outlinesOf = (markup: string): { d: string; fill?: string }[] =>
+  [...markup.matchAll(/<[^>]*\sd="([^"]+)"[^>]*>/g)].map((m) => ({
+    d: m[1],
+    fill: /\sfill="([^"]+)"/.exec(m[0])?.[1],
+  }));
 
 export const SHAPE_LIBRARY: ShapeLibraryEntry[] = [
   // --- drops: a real teardrop, heavy at the bottom, not a circle -----------------

@@ -247,7 +247,30 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   for (const l of shapeLayers) {
     const geo = l.shapes[0].it[0];
     ok('only ellipses and rounded rects', geo.ty === 'el' || geo.ty === 'rc', geo.ty);
-    if (geo.ty === 'rc') ok('corner radius is min/2 — never a sharp angle', Math.abs(geo.r.k - Math.min(geo.s.k[0], geo.s.k[1]) / 2) < 1e-9);
+    // a pill carries its own animated size and radius rather than being scaled, so the
+    // invariant has to hold on every keyframe, not just on one static pair
+    if (geo.ty === 'rc') {
+      // size and radius are reduced independently, so they do not share keyframe indices —
+      // sample the radius at each size keyframe's own time rather than pairing by position
+      const at = (pr: any, t: number): number[] => {
+        if (pr.a === 0) return Array.isArray(pr.k) ? pr.k : [pr.k];
+        const ks2 = pr.k;
+        if (t <= ks2[0].t) return ks2[0].s;
+        if (t >= ks2[ks2.length - 1].t) return ks2[ks2.length - 1].s;
+        let i2 = 0;
+        while (i2 < ks2.length - 1 && ks2[i2 + 1].t <= t) i2++;
+        const u2 = (t - ks2[i2].t) / (ks2[i2 + 1].t - ks2[i2].t);
+        return ks2[i2].s.map((v: number, d: number) => v + (ks2[i2 + 1].s[d] - v) * u2);
+      };
+      const times: number[] = geo.s.a === 1 ? geo.s.k.map((x: any) => x.t) : [0];
+      ok('corner radius is min/2 — never a sharp angle',
+        times.every((t) => {
+          const sz = at(geo.s, t);
+          // 0.35px covers both channels' own 0.2px reduction tolerance and nothing more:
+          // the bug this catches drifted by tens of pixels
+          return Math.abs(at(geo.r, t)[0] - Math.min(sz[0], sz[1]) / 2) < 0.35;
+        }), `${times.length} frames`);
+    }
     for (const key of ['p', 's', 'r', 'o'] as const) {
       const pr = l.ks[key];
       if (pr.a !== 1) continue;
@@ -284,7 +307,9 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
       worst = Math.max(worst, Math.abs(px - item.cx), Math.abs(py - item.cy));
       const [sx2, sy2] = readProp2(l.ks.s, f);
       const geo = l.shapes[0].it[0];
-      worst = Math.max(worst, Math.abs((sx2 / 100) * geo.s.k[0] - item.w) / 2, Math.abs((sy2 / 100) * geo.s.k[1] - item.h) / 2);
+      // a pill's size is on the rect itself; everything else scales its base geometry
+      const [bw, bh] = geo.s.a === 1 ? readProp2(geo.s, f) : geo.s.k;
+      worst = Math.max(worst, Math.abs((sx2 / 100) * bw - item.w) / 2, Math.abs((sy2 / 100) * bh - item.h) / 2);
     }
   }
   ok('baked playback matches the canvas within a pixel', worst < 1, `worst error ${worst.toFixed(3)}px`);
