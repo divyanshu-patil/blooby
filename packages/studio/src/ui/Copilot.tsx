@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
-import { chatJson, listModels, PoolError, type ChatMessage } from '../copilot/client';
+import { chatJson, listModels, verifyKeys, type ChatMessage } from '../copilot/client';
 import { acceptsKeys, baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, resolveModel, saveSettings, usesBackend, type CopilotSettings, type KeyStatus } from '../copilot/pool';
 import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate } from '../copilot/tools';
 import { systemPrompt } from '../copilot/prompt';
@@ -22,7 +22,7 @@ export function Copilot() {
   const [models, setModels] = useState<string[]>(() => (loadSettings().endpoint === 'cloud' ? [...CLOUD_CATALOGUE] : []));
   // the thread lives in a store, not here: this panel is one tab in the right rail, and
   // switching to Node or Effects unmounts it — which used to throw the conversation away
-  const { turns, input, phase, status, push, patchTurn, setInput, setPhase, setStatus, clear } = useCopilotSession();
+  const { turns, input, phase, status, abort, push, patchTurn, setInput, setPhase, setStatus, setAbort, clear } = useCopilotSession();
   const busy = phase !== 'idle';
   const [showKeys, setShowKeys] = useState(false);
   const [newKey, setNewKey] = useState('');
@@ -44,14 +44,19 @@ export function Copilot() {
     try {
       const list = await listModels(s, markKey);
       setModels(list);
-      setStatus(list.length ? `${list.length} models` : 'no models installed');
       if (list.length && !list.includes(s.model)) patch({ model: list[0] });
+      // on the backend tier the list is a fixed catalogue and proves nothing; what you
+      // actually pressed Check to find out is whether your keys are accepted
+      setStatus(usesBackend(s)
+        ? await verifyKeys(s, markKey)
+        : (list.length ? `${list.length} models` : 'no models installed'));
     } catch (e) {
       // the cloud catalogue is still usable when the daemon is simply not running yet
       setModels(s.endpoint === 'cloud' ? [...CLOUD_CATALOGUE] : []);
-      setStatus(e instanceof Error && /fetch|network/i.test(e.message)
+      const msg = e instanceof Error ? e.message : 'unreachable';
+      setStatus(/fetch|network/i.test(msg) && !usesBackend(s)
         ? 'Ollama not reachable — is it running?'
-        : (e instanceof Error ? e.message.slice(0, 90) : 'unreachable'));
+        : msg.slice(0, 90));
     }
   };
 
@@ -61,16 +66,21 @@ export function Copilot() {
     setInput('');
     push({ role: 'user', text });
     setPhase('thinking');
+    const ac = new AbortController();
+    setAbort(ac);
 
     const history: ChatMessage[] = [
+      // only the real exchange: an error or a "stopped" note is about the copilot, not
+      // something the model said, and replaying it just teaches it to say that
       { role: 'system', content: systemPrompt(project) },
-      ...turns.filter((t) => t.role !== 'error').map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: t.text })),
+      ...turns.filter((t) => t.role === 'user' || t.role === 'bot')
+        .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: t.text })),
       { role: 'user', content: text },
     ];
 
     const attempt = async (extra?: string): Promise<Turn> => {
       const msgs = extra ? [...history, { role: 'user' as const, content: extra }] : history;
-      const { content, thinking } = await chatJson(settings, msgs, RESPONSE_SCHEMA, markKey);
+      const { content, thinking } = await chatJson(settings, msgs, RESPONSE_SCHEMA, markKey, ac.signal);
       const parsed = parseTurn(content);
       const calls = parsed.calls.map((c) => normaliseCall(project, c));
       const problems = calls.map((c) => validate(project, c)).filter(Boolean) as string[];
@@ -90,12 +100,15 @@ export function Copilot() {
       }
       push(turn);
     } catch (e) {
-      const msg = e instanceof PoolError || e instanceof Error ? e.message : String(e);
-      push({ role: 'error', text: msg });
+      if (e instanceof Error && e.name === 'AbortError') push({ role: 'note', text: 'Stopped — nothing was changed.' });
+      else push({ role: 'error', text: e instanceof Error ? e.message : String(e) });
     } finally {
+      setAbort(null);
       setPhase('idle');
     }
   };
+
+  const stop = () => abort?.abort();
 
   const apply = (i: number) => {
     const turn = turns[i];
@@ -199,8 +212,8 @@ export function Copilot() {
               </p>
             )}
             {turns.map((t, i) => (
-              <div key={i} className={`msg ${t.role === 'user' ? 'user' : t.role === 'error' ? 'err' : 'bot'}`}>
-                <span className="who">{t.role === 'user' ? 'you' : t.role === 'error' ? 'failed' : 'copilot'}</span>
+              <div key={i} className={`msg ${t.role === 'user' ? 'user' : t.role === 'error' ? 'err' : t.role === 'note' ? 'note' : 'bot'}`}>
+                <span className="who">{t.role === 'user' ? 'you' : t.role === 'error' ? 'failed' : t.role === 'note' ? 'stopped' : 'copilot'}</span>
                 <div className="bubble">{t.text}</div>
                 {t.thinking && (
                   <details className="think">
@@ -234,7 +247,9 @@ export function Copilot() {
             <span className="hint">⌘↵ to send</span>
             <span className="spacer" />
             <button className="btn sm" disabled={!turns.length || busy} onClick={clear}>Clear</button>
-            <button className="btn primary sm" disabled={busy || !input.trim() || !settings.model} onClick={ask}>Send</button>
+            {busy && phase !== 'applying'
+              ? <button className="btn sm" title="Cancel this request" onClick={stop}>Stop</button>
+              : <button className="btn primary sm" disabled={busy || !input.trim() || !settings.model} onClick={ask}>Send</button>}
           </div>
         </div>
       </div>

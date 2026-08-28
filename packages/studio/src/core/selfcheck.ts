@@ -15,7 +15,8 @@ import { useEditor, writeKeyframe } from './store';
 import { readProp } from './props';
 import { applyCalls, describe, normaliseCall, validate, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
-import { baseUrl, LOCAL_URL, needsKey, resolveModel } from '../copilot/pool';
+import { baseUrl, CLOUD_CATALOGUE, LOCAL_URL, needsKey, resolveModel, usesBackend } from '../copilot/pool';
+import { listModels } from '../copilot/client';
 import { crc32 } from '../export/zip';
 import { activeTimeline } from './types';
 import type { Project, Rig, RigNode } from './types';
@@ -969,6 +970,26 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   ok('local models are untouched', resolveModel({ ...base, endpoint: 'local' }, 'llama3') === 'llama3');
   ok('only a custom endpoint needs a key', !needsKey({ ...base, endpoint: 'cloud' }) && !needsKey({ ...base, endpoint: 'local' }) && needsKey({ ...base, endpoint: 'custom' }));
   ok('custom urls lose their trailing slash', baseUrl({ ...base, endpoint: 'custom', customUrl: 'https://proxy.example/' }) === 'https://proxy.example');
+
+  // the cloud tier has two completely different routes, decided by whether keys exist
+  const daemon = { ...base, endpoint: 'cloud' as const };
+  const backend = { ...daemon, keys: [{ id: 'k', value: 'sk-test', status: 'ok' as const }] };
+  ok('your own keys switch cloud onto the backend', usesBackend(backend) && needsKey(backend));
+  ok('and no keys leaves it on the local daemon', !usesBackend(daemon));
+
+  // the proxy marker is an instruction TO the daemon; straight to ollama.com it is wrong
+  ok('the backend addresses the plain model name',
+    resolveModel(backend, 'gpt-oss:120b') === 'gpt-oss:120b'
+    && resolveModel(backend, 'gpt-oss:120b-cloud') === 'gpt-oss:120b'
+    && resolveModel(backend, 'glm-5.2:cloud') === 'glm-5.2');
+  ok('a tagged model takes -cloud on its tag', resolveModel(daemon, 'qwen3.5:397b') === 'qwen3.5:397b-cloud');
+  ok('an untagged one takes :cloud AS the tag — "glm-5.2-cloud" is a 404',
+    resolveModel(daemon, 'glm-5.2') === 'glm-5.2:cloud');
+
+  // listing must not touch a daemon this route never uses: with no Ollama installed at
+  // all, asking localhost reported "not reachable" for a copilot that worked fine
+  ok('the backend route lists the catalogue without a network call',
+    (await listModels(backend, () => {})).join() === CLOUD_CATALOGUE.join());
 }
 
 // --- multiple timelines: isolated tracks, correct active-timeline redirection --

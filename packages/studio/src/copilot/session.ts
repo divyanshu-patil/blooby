@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import type { ToolCall } from './tools';
 
 export interface Turn {
-  role: 'user' | 'bot' | 'error';
+  /** `note` is the copilot reporting on itself (stopped, skipped) — not a failure, and
+   *  not part of the conversation the model is shown. */
+  role: 'user' | 'bot' | 'error' | 'note';
   text: string;
   calls?: ToolCall[];
   done?: boolean;
@@ -18,12 +20,15 @@ interface CopilotSession {
   input: string;
   phase: Phase;
   status: string;
+  /** the in-flight request, so Stop still works after the panel is unmounted and back */
+  abort: AbortController | null;
 
   push: (t: Turn) => void;
   patchTurn: (i: number, patch: Partial<Turn>) => void;
   setInput: (v: string) => void;
   setPhase: (p: Phase) => void;
   setStatus: (s: string) => void;
+  setAbort: (a: AbortController | null) => void;
   clear: () => void;
 }
 
@@ -41,11 +46,13 @@ export const useCopilotSession = create<CopilotSession>((set) => ({
   input: '',
   phase: 'idle',
   status: '',
+  abort: null,
 
   push: (t) => set((s) => ({ turns: [...s.turns, t] })),
   patchTurn: (i, patch) => set((s) => ({ turns: s.turns.map((x, n) => (n === i ? { ...x, ...patch } : x)) })),
   setInput: (input) => set({ input }),
   setPhase: (phase) => set({ phase }),
   setStatus: (status) => set({ status }),
+  setAbort: (abort) => set({ abort }),
   clear: () => set({ turns: [], input: '', phase: 'idle' }),
 }));

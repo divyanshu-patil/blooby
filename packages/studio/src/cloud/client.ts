@@ -52,7 +52,7 @@ const qs = (params: Record<string, unknown>) => {
 export const api = {
   get: <T>(path: string, params?: Record<string, unknown>, opts?: { auth?: boolean }) =>
     request<T>(`${path}${params ? qs(params) : ''}`, { method: 'GET', ...opts }),
-  post: <T>(path: string, body?: unknown, opts?: { auth?: boolean }) =>
+  post: <T>(path: string, body?: unknown, opts?: { auth?: boolean; signal?: AbortSignal }) =>
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body), ...opts }),
   patch: <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
