@@ -43,6 +43,8 @@ export function Presets() {
   const project = useEditor((s) => s.project);
   const addBlock = useEditor((s) => s.addBlock);
   const renamePreset = useEditor((s) => s.renamePreset);
+  const deletePreset = useEditor((s) => s.deletePreset);
+  const selectBlock = useEditor((s) => s.selectBlock);
   const setPresetColor = useEditor((s) => s.setPresetColor);
   const catalog = useEditor((s) => s.catalog);
   const catalogError = useEditor((s) => s.catalogError);
@@ -108,6 +110,21 @@ export function Presets() {
       {preview && (
         <PresetPreview project={project} preset={preview}
           onAdd={() => { add(preview); setPreview(null); }}
+          onRename={(name) => renamePreset(preview.id, name)}
+          // editing a preset means editing it where you can see it: place it, select it —
+          // which is what puts the clip panel and its "Save to preset" in front of you —
+          // change the keyframes there, and save it back
+          onEdit={() => {
+            add(preview);
+            const placed = activeTimeline(useEditor.getState().project).blocks.at(-1);
+            if (placed) selectBlock(placed.id);
+            setPreview(null);
+          }}
+          // built-ins and library presets are not yours to delete — they come back on
+          // the next load anyway, from the bundle or the catalogue
+          onDelete={preview.source === 'custom'
+            ? () => { deletePreset(preview.id); setPreview(null); }
+            : undefined}
           onClose={() => setPreview(null)} />
       )}
       {publishing && (

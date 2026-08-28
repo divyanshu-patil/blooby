@@ -129,6 +129,10 @@ The system prompt is generated per turn from the live project, in `copilot/promp
 - **custom presets in full**, because `edit_preset` replaces tracks wholesale and the
   model has to carry over what it is not changing. Built-in preset contents are omitted —
   not worth the tokens.
+- **where new animation goes** — an absolute start time computed past everything already
+  on the strip (`suggestedStart`), and the distinction between preset-relative times
+  (`create_preset` starts at 0) and absolute timeline times (`add_keyframe`). Getting
+  these two confused is how the copilot overwrote clip 0 while believing it was appending.
 - the **craft block** (`copilot/craft.ts`) — timings, easing, anticipation, overshoot,
   squash ratios and per-emotion recipes, in this rig's own property paths. Where each
   number comes from is argued in [ANIMATION.md](./ANIMATION.md); change both together.
@@ -136,6 +140,11 @@ The system prompt is generated per turn from the live project, in `copilot/promp
 The keyframe dump is budgeted (`timelineDump`, 4000 chars) and says how many tracks it
 dropped. Chat history is capped at the last 12 turns for the same reason: an unbounded
 thread on top of a full timeline is how a reply gets cut off mid-JSON.
+
+The response schema puts **`plan` first**, before `reply` and `calls`, and requires it.
+Key order in a JSON schema is generation order, so the model states what the request
+means, which recipe it matches, what is already on the timeline and which beats it is
+about to write — and only then emits calls. It is shown collapsed under the reply.
 
 Each of the copilot's own past turns is replayed with **what became of its calls** —
 applied, proposed-not-applied, or rejected — not just its prose. Rejecting keeps the

@@ -108,7 +108,13 @@ export function Copilot() {
       const problems = validateBatch(project, calls).filter(Boolean) as string[];
       if (problems.length) throw new ValidationError(problems.join('; '));
       if (!parsed.reply && !calls.length) throw new ValidationError('no tool calls and nothing to say');
-      return { role: 'bot', text: parsed.reply || `${calls.length} change${calls.length === 1 ? '' : 's'} ready.`, calls, thinking };
+      // the model's own plan is more useful than a reasoning trace, and every model
+      // produces one because the schema requires it
+      return {
+        role: 'bot', calls,
+        text: parsed.reply || `${calls.length} change${calls.length === 1 ? '' : 's'} ready.`,
+        thinking: parsed.plan ?? thinking,
+      };
     };
 
     try {
@@ -284,7 +290,7 @@ export function Copilot() {
                 <div className="bubble">{t.text}</div>
                 {t.thinking && (
                   <details className="think">
-                    <summary>thinking</summary>
+                    <summary>plan</summary>
                     <pre>{t.thinking}</pre>
                   </details>
                 )}

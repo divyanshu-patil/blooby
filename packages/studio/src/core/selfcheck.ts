@@ -8,15 +8,15 @@ import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, valueAt } from './scene';
 import { defaultProject, makeTimeline } from './defaults';
-import { activeTransitionAt, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
+import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
 import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readProp, resolveProp, writeProp } from './props';
 import { MODIFIER_KINDS, MODIFIERS } from './types';
-import { applyCalls, describe, normaliseCall, validate, validateBatch, type ToolCall } from '../copilot/tools';
+import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { parseTurn } from '../copilot/parse';
-import { systemPrompt } from '../copilot/prompt';
+import { suggestedStart, systemPrompt } from '../copilot/prompt';
 import { baseUrl, CLOUD_CATALOGUE, LOCAL_URL, needsKey, resolveModel, usesBackend } from '../copilot/pool';
 import { listModels } from '../copilot/client';
 import { crc32 } from '../export/zip';
@@ -1450,6 +1450,76 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     start > 0 && saved.tracks.every((t) => t.keyframes[0].time === 0));
   ok('while the clip already on the strip keeps its own copy',
     activeTimeline(P()).tracks.filter((t) => t.blockId === clip.id).length > 0);
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- copilot: where new animation lands, and the plan that precedes it ----------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+
+  // a fresh file already has four clips, so "start at 0" would overwrite them
+  const end = blocksEnd(activeTimeline(P()));
+  ok('new work starts after everything on the strip', suggestedStart(P()) === Math.round(end), String(suggestedStart(P())));
+  ok('and the prompt says so in absolute terms', systemPrompt(P()).includes(`starts at ${Math.round(end)}ms`));
+
+  // on an empty strip it must not be 0 either — a clip that opens mid-move reads clipped —
+  // but it must not sit three seconds in doing nothing
+  useEditor.getState().loadProject({ ...defaultProject(), timelines: [makeTimeline('Empty')] } as never);
+  useEditor.getState().addTimeline('Blank');
+  const blank = suggestedStart(P());
+  ok('an empty timeline starts inside the 1.5s ceiling', blank >= 0 && blank <= 1500, String(blank));
+  ok('and the prompt keeps the two kinds of time apart',
+    /times inside a preset are relative/i.test(systemPrompt(P())) && /ABSOLUTE on this timeline/.test(systemPrompt(P())));
+
+  // the plan comes first in the schema, so the model reasons before it emits calls
+  const schema = RESPONSE_SCHEMA as unknown as { properties: Record<string, unknown>; required: readonly string[] };
+  const props = Object.keys(schema.properties);
+  ok('plan is the first key the model fills', props[0] === 'plan', props.join());
+  ok('and it is required', schema.required.includes('plan'));
+
+  const turn = parseTurn('{"plan":"Four beats: rest, grow, hold, blink out.","reply":"Done.","calls":[]}');
+  ok('the plan is parsed off the turn', !!turn.plan?.startsWith('Four beats') && turn.reply === 'Done.');
+  ok('a model that calls it reasoning is understood too',
+    parseTurn('{"reasoning":"same thing","reply":"ok","calls":[]}').plan === 'same thing');
+  ok('and a turn without one still parses', parseTurn('{"reply":"ok","calls":[]}').plan === undefined);
+
+  useEditor.getState().loadProject(defaultProject());
+}
+
+// --- managing your own presets --------------------------------------------------
+{
+  useEditor.getState().loadProject(defaultProject());
+  const ed = () => useEditor.getState();
+  const P = () => useEditor.getState().project;
+
+  ed().commit((p) => {
+    p.presets.push({ id: 'p_mine', name: 'Mine', source: 'custom', durationMs: 600, tracks: [
+      { id: 't1', nodeId: 'eyeL', property: 'eye.openness', keyframes: [
+        { id: 'k1', time: 0, value: 1, easingOut: { type: 'preset', name: 'easeInOut' } },
+        { id: 'k2', time: 300, value: 0, easingOut: { type: 'preset', name: 'easeInOut' } },
+      ] },
+    ] });
+  });
+
+  ed().addBlock('p_mine');
+  const placed = activeTimeline(P()).blocks.at(-1)!;
+  // "Edit on the strip" is place-THEN-select: addBlock does not select on its own, and
+  // without the selection the clip panel — and its Save to preset — never appears
+  ed().selectBlock(placed.id);
+  ok('the placed clip can be selected, which is what "edit" relies on',
+    ed().selectedBlockId === placed.id, String(ed().selectedBlockId));
+
+  ed().renamePreset('p_mine', 'Renamed');
+  ok('rename lands', P().presets.find((x) => x.id === 'p_mine')?.name === 'Renamed');
+
+  const tracksBefore = activeTimeline(P()).tracks.filter((t) => t.blockId === placed.id).length;
+  ed().deletePreset('p_mine');
+  ok('delete removes the preset', !P().presets.some((x) => x.id === 'p_mine'));
+  ok('but the clip made from it keeps its own keyframes',
+    activeTimeline(P()).blocks.some((b) => b.id === placed.id)
+    && activeTimeline(P()).tracks.filter((t) => t.blockId === placed.id).length === tracksBefore);
 
   useEditor.getState().loadProject(defaultProject());
 }

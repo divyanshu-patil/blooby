@@ -19,7 +19,9 @@ animation; these are the differences.
 SHAPE OF A CLIP — the default, unless the request implies otherwise.
 Nothing starts on frame 0. Every clip is four beats:
 
-  rest    0 to X        hold the resting pose. X = 200-400.
+  rest    S to X        hold the resting pose. S is the clip's own start — 0 inside a
+                        preset, the absolute time above for loose keyframes.
+                        X - S = 300-1500, never more than 2000.
   move    X to Y        the actual change. Y - X = the timing band below.
   hold    Y to Z        stay in the new pose. Z - Y = 300-600, longer for an
                         expression the viewer is meant to read.
@@ -60,6 +62,11 @@ OVERSHOOT AND SETTLE. End a lively move past its target, then come back. Oversho
 8-15% of the change, settle over 40-60% of the main duration — a scale to 1.3 goes
 1.0 to 1.34 to 1.3. Never overshoot a blink or anything closing.
 
+READ THE WHOLE REQUEST. Every verb in it is a beat you owe. "the eyes get big and the
+mascot scales and rotates and blinks" is four changes, and a body scale of 1.05 does not
+count as one — if the user names a motion, it has to be visible at a glance. When in
+doubt about how far to push a named motion, take the top of the range, not the bottom.
+
 SQUASH AND STRETCH. Volume is conserved: transform.scale.x and transform.scale.y move
 in opposite directions. Subtle 2-5% (breathing, talking), lively 8-12% (a bounce),
 rubbery 20-50% (comedy only). scale.x 1.08 pairs with scale.y 0.93.
@@ -88,7 +95,11 @@ RECIPES — starting points, not rules. Adjust to what was asked.
   surprised     eye transform.scale.x and transform.length 1.4-1.6, body scale 1.05-1.08
   big/cat eyes  eye transform.length 1.5-1.8 with transform.scale.x 1.3-1.5,
                 eye.distanceFromCenter in by 2-4°, then a blink on the way back.
-                Full shape: rest 300, grow 300, hold 500, return 300 — 1400 total.
+                When the request also says the body scales or rotates, the body must be
+                visibly doing it: transform.scale.x/y 1.14-1.22 (not 1.05 — that is a
+                breath, and nobody sees it) and transform.rotation 6-10°. Squash the pair:
+                scale.x 1.18 with scale.y 1.06, or the body just inflates.
+                Full shape: rest 300, grow 350, hold 500, blink 250, return 300.
   curious       body surface.yaw ±10-18 with transform.rotation ±4-8 the same direction
   nod (yes)     body surface.pitch 0 → +12 → -4 → 0 over 500-700
   shake (no)    body surface.yaw 0 → -14 → +12 → -6 → 0 over 600-800

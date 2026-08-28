@@ -22,6 +22,8 @@ export const TOOL_NAMES = [
 export const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
+    // first, so the model reasons before it emits calls rather than after
+    plan: { type: 'string' },
     reply: { type: 'string' },
     calls: {
       type: 'array',
@@ -35,7 +37,7 @@ export const RESPONSE_SCHEMA = {
       },
     },
   },
-  required: ['reply', 'calls'],
+  required: ['plan', 'reply', 'calls'],
 } as const;
 
 export const TOOL_DOCS = `

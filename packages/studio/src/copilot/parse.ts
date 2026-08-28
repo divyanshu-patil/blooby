@@ -83,7 +83,7 @@ function asCall(item: unknown): ToolCall | null {
   return null;
 }
 
-export interface ParsedTurn { reply: string; calls: ToolCall[] }
+export interface ParsedTurn { reply: string; calls: ToolCall[]; plan?: string }
 
 export function parseTurn(raw: string): ParsedTurn {
   const { json, closed } = extractJson(raw);
@@ -114,8 +114,11 @@ export function parseTurn(raw: string): ParsedTurn {
   const obj = Array.isArray(data) ? {} : (data as Record<string, unknown>);
   const reply = [obj.reply, obj.message, obj.text, obj.summary].find((v) => typeof v === 'string' && v.trim()) as string | undefined;
 
+  const plan = [obj.plan, obj.reasoning, obj.thinking].find((v) => typeof v === 'string' && v.trim()) as string | undefined;
+
   return {
     reply: reply ?? '',
+    plan,
     calls: list.map(asCall).filter((c): c is ToolCall => c !== null),
   };
 }

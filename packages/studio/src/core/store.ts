@@ -134,6 +134,7 @@ export interface Editor {
   morphBetween: (fromId: string, toId: string, atMs: number, durationMs: number, easing: EasingCurve) => void;
   savePreset: (name: string, trackIds: string[], durationMs: number) => void;
   renamePreset: (id: string, name: string) => void;
+  deletePreset: (id: string) => void;
   /** Overwrite the preset a clip came from with that clip's current keyframes. */
   updatePresetFromBlock: (blockId: string) => void;
   setPresetColor: (id: string, color: string | undefined) => void;
@@ -802,6 +803,15 @@ export const useEditor = create<Editor>((set, get) => ({
       const x = p.presets.find((e) => e.id === id);
       if (x && name.trim()) x.name = uniqueName(name.trim(), p.presets.filter((e) => e.id !== id).map((e) => e.name));
     }, `pname.${id}`);
+  },
+
+  /**
+   * Clips already on the strip keep working: they hold their own copy of the keyframes,
+   * and only the little `presetId` backreference goes stale. So this cannot orphan
+   * animation — it removes the template, not what was made from it.
+   */
+  deletePreset(id) {
+    get().commit((p) => { p.presets = p.presets.filter((x) => x.id !== id); });
   },
 
   setPresetColor(id, color) {

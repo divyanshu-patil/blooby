@@ -1,4 +1,4 @@
-import { blockStarts, fmtSec } from '../core/timeline';
+import { blockStarts, blocksEnd, fmtSec } from '../core/timeline';
 import { TOOL_DOCS } from './tools';
 import { ANIMATION_CRAFT } from './craft';
 import { activeTimeline } from '../core/types';
@@ -34,6 +34,21 @@ const keys = (t: { keyframes: { time: number; value: unknown }[] }) =>
  * slower" or "delete that keyframe" had nothing to refer to. Budgeted rather than
  * unbounded — a heavily animated project would otherwise crowd out the tools.
  */
+/**
+ * Where anything new should begin, in ms.
+ *
+ * Left to itself the model writes its first keyframe at 0 and overwrites whatever is
+ * already on the strip, or picks an arbitrary offset. So compute it here: after
+ * everything already tiled on the strip, and never more than START_CEILING into an empty
+ * timeline — a clip whose motion begins three seconds in reads as broken, not as patient.
+ */
+const START_CEILING = 1500;
+export function suggestedStart(p: Project): number {
+  const tl = activeTimeline(p);
+  const end = blocksEnd(tl);
+  return end > 0 ? Math.round(end) : Math.min(START_CEILING, Math.round(tl.timelineDurationMs * 0.15));
+}
+
 function timelineDump(p: Project, budget = 4000): string {
   const tl = activeTimeline(p);
   const starts = blockStarts(tl);
@@ -53,7 +68,22 @@ function timelineDump(p: Project, budget = 4000): string {
   }
   if (dropped) lines.push(`  \u2026and ${dropped} more tracks, not shown. Ask which layer to work on rather than guessing.`);
 
-  return `Clips on the strip (index: name, span):
+  return `WHERE NEW ANIMATION GOES. Two kinds of time, do not mix them up:
+
+  create_preset — the times inside a preset are relative to the PRESET, so its first
+  keyframe is at 0. add_preset_to_timeline then places the whole clip after everything
+  already on the strip and stretches the timeline to fit. This is the route to prefer.
+
+  add_keyframe / move_keyframe / remove_keyframe — times are ABSOLUTE on this timeline.
+  New work there starts at ${suggestedStart(p)}ms, which is past everything already on
+  the strip. Do not write to 0 unless that number is 0 — you would be editing existing
+  clips. Then check it fits: the last keyframe must land inside the timeline with a
+  little air after it, or call set_timeline with a durationMs that does.
+
+Either way the first keyframe is the resting pose and the first movement comes 300-1500ms
+after the clip's own start, never more than 2000ms.
+
+Clips on the strip (index: name, span):
 ${strip}
 
 Keyframes on this timeline, as "<layer>.<property> [clip]: <ms>=<value> \u2026". These are the
@@ -94,8 +124,15 @@ ${timelineDump(p)}
 ${custom.length ? `\nPresets you or the user authored, in full — edit_preset replaces these tracks wholesale,
 so carry over anything you are not deliberately changing:\n${custom.map((x) => `  "${x.name}" (${fmtSec(x.durationMs)})\n${x.tracks.map((t) => `    ${t.nodeId}.${t.property}: ${keys(t)}`).join('\n')}`).join('\n')}` : ''}
 
-Answer with one JSON object and nothing else — no prose, no markdown fence:
-  { "reply": "<one or two sentences>", "calls": [ { "name": "<tool>", "args": { ... } } ] }
+Answer with one JSON object and nothing else — no prose, no markdown fence. Fill the keys
+in this order, because each one depends on the one before it:
+  {
+    "plan": "<what the request means, which of the recipes below it matches, what is
+             already on the timeline that matters, and the beats you are about to write
+             with their times. Work it out here before you write a single call.>",
+    "reply": "<one or two sentences for the user>",
+    "calls": [ { "name": "<tool>", "args": { ... } } ]
+  }
 
 Tools:
 ${TOOL_DOCS}
@@ -103,12 +140,16 @@ ${TOOL_DOCS}
 ${ANIMATION_CRAFT}
 
 Rules:
+- Work through "plan" first: read the request, match it to a recipe, read the keyframes
+  already on the timeline, then decide the beats and their times. Every call must follow
+  from something you said there.
 - Refer to layers by the ids above (body, eyeL, eyeR), not by their display names.
 - A preset track's "property" is a full path from the list above: "eye.openness", not
   "openness". The short names in set_eye_params are that one tool's own shorthand.
 - Prefer existing presets for common beats (Blink, Talk, Happy, Surprised, Thinking, Notify).
-- Times are milliseconds from the start of the timeline, and the ones under "Keyframes"
-  are absolute — a clip starting at 2400ms has its first keyframe at 2400, not at 0.
+- Times are milliseconds. The ones under "Keyframes" are absolute — a clip starting at
+  2400ms has its first keyframe at 2400, not at 0. The ones inside create_preset are not:
+  they are relative to the preset and start at 0.
 - To retime or delete existing animation, use move_keyframe / remove_keyframe with a time
   taken from the list above. To change a value or an easing, call add_keyframe at that
   same time. Do not clear a track and rebuild it to change one keyframe.

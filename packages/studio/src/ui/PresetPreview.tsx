@@ -13,12 +13,24 @@ import type { Preset, Project } from '../core/types';
  * exactly what a still hides. This loops the real animation through the same sceneAt()
  * the stage uses, so what you preview is what lands on the timeline.
  */
-export function PresetPreview({ project, preset, onAdd, onClose }: {
+/**
+ * Preview a preset, and manage it.
+ *
+ * Managing lives here rather than on the chip: the chip already carries a colour swatch,
+ * a thumbnail, a name and a publish button, and hanging rename/edit/delete off it too
+ * would need a menu nobody would find. You are already looking at the thing here.
+ */
+export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDelete, onClose }: {
   project: Project;
   preset: Preset;
   onAdd: () => void;
+  /** place it on the strip and select it, so it can be changed where it is visible */
+  onEdit?: () => void;
+  onRename?: (name: string) => void;
+  onDelete?: () => void;
   onClose: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const [t, setT] = useState(0);
   const raf = useRef(0);
   const span = Math.max(200, preset.durationMs || 1000);
@@ -36,12 +48,12 @@ export function PresetPreview({ project, preset, onAdd, onClose }: {
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key === 'Enter') onAdd();
+      if (e.key === 'Escape') { if (confirming) setConfirming(false); else onClose(); return; }
+      if (e.key === 'Enter' && !confirming) onAdd();
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [onClose, onAdd]);
+  }, [onClose, onAdd, confirming]);
 
   const scene = (() => {
     try {
@@ -77,6 +89,29 @@ export function PresetPreview({ project, preset, onAdd, onClose }: {
           <button className="btn sm" onClick={onClose}>Close</button>
           <button className="btn sm primary" onClick={onAdd}>Add to project</button>
         </div>
+
+        {(onRename || onEdit || onDelete) && (
+          <div className="preview-manage">
+            {onRename && (
+              <button className="btn ghost sm" onClick={() => {
+                const next = prompt('Rename preset', preset.name);
+                if (next?.trim()) onRename(next.trim());
+              }}>Rename</button>
+            )}
+            {onEdit && (
+              <button className="btn ghost sm" title="Put it on the strip and select it, so you can change it where you can see it — then Save to preset in the clip panel"
+                onClick={onEdit}>Edit on the strip</button>
+            )}
+            <span className="spacer" />
+            {onDelete && (confirming
+              ? <>
+                  <span className="hint">Delete “{preset.name}”? Clips already using it keep working.</span>
+                  <button className="btn ghost sm" onClick={() => setConfirming(false)}>Cancel</button>
+                  <button className="btn sm danger" onClick={onDelete}>Delete</button>
+                </>
+              : <button className="btn ghost sm" onClick={() => setConfirming(true)}>Delete</button>)}
+          </div>
+        )}
       </div>
     </div>
   );
