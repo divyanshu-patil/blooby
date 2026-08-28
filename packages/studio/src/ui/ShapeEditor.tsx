@@ -81,7 +81,7 @@ export function ShapeEditor({ node }: { node: RigNode }) {
         )}
       </div>
 
-      {params && (params.kind === 'polygon' || params.kind === 'star' || params.kind === 'circle') && params.kind !== 'circle' && (
+      {params && (params.kind === 'polygon' || params.kind === 'star') && (
         <div className="prop">
           <span /><label className="prop-label"><span className="t">{params.kind === 'star' ? 'Points' : 'Sides'}</span>
             <input type="range" min={3} max={16} step={1} value={params.points ?? 5}
@@ -113,7 +113,11 @@ export function ShapeEditor({ node }: { node: RigNode }) {
           </label><NumberField value={params.cornerRadius ?? 0.2} step={0.05} onChange={(v) => tweak({ cornerRadius: v })} />
         </div>
       )}
-      {params && params.kind !== 'circle' && (
+      {/* circles included: it is a spline now, so turning it moves real control points —
+          which is what you are about to drag, and what a morph aligns against. Hiding it
+          made "the circle is not rotatable" true in the UI even after it stopped being
+          true in the geometry. */}
+      {params && (
         <div className="prop">
           <span /><label className="prop-label"><span className="t">Turn</span>
             <input type="range" min={-180} max={180} step={1} value={params.rotation ?? 0}

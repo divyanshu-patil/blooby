@@ -839,7 +839,7 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .fxbands { position: relative; border-bottom: 1px solid var(--line-soft); }
 .fxband {
   position: absolute; height: 13px; display: flex; align-items: center; overflow: hidden;
-  border-radius: 3px;
+  border-radius: 3px; padding: 0; cursor: pointer; text-align: left;
   /* one hue per effect, so overlapping spans are told apart at a glance */
   background: hsl(var(--fx) 62% 62% / .3);
   border: 1px solid hsl(var(--fx) 58% 46% / .75);

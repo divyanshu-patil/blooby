@@ -140,6 +140,17 @@ export const fmtSec = (ms: number) => `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0
  * start. Sampling the midpoint instead would draw Blink with its eyes open.
  */
 export function characteristicTime(preset: Preset): number {
+  // An emitter IS the preset for Sleepy, Singing and Crying, so the icon has to be a
+  // moment when one is running. Taken first: the most-changed keyframe below can easily
+  // land before the first particle exists, which is how those presets came to be
+  // represented by a plain face.
+  const streams = (preset.emitters ?? []).filter((e) => (e.startMs ?? 0) < preset.durationMs);
+  if (streams.length) {
+    const opens = Math.max(...streams.map((e) => (e.startMs ?? 0) + e.lifeMs * 0.6));
+    const closes = Math.min(...streams.map((e) => (e.endMs ?? preset.durationMs)));
+    if (opens < preset.durationMs) return Math.min(opens, Math.max(closes - 1, opens));
+  }
+
   let best = preset.durationMs * 0.45, score = -1;
   for (const t of preset.tracks) {
     const first = t.keyframes[0]?.value;

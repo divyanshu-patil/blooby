@@ -10,7 +10,7 @@ import { activeTrackFor, buildScene, composeScene, emitterFrame, emitterItems, e
 import { builtinPresets, confetti, defaultProject, makeTimeline, presetPreviewProject } from './defaults';
 import { CONFETTI_COLORS, shapeById, shapeResolver, SHAPE_LIBRARY } from './emitters';
 import { flattenPath, morphPath, movePathAnchor, naturalShape, pathAnchors, primitivePath, PRIMITIVE_SHAPES } from './path';
-import { activeTransitionAt, blocksEnd, blockStarts, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
+import { activeTransitionAt, blocksEnd, blockStarts, characteristicTime, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { useEditor, writeKeyframe } from './store';
@@ -2584,6 +2584,50 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   const star = primitivePath('star', { points: 5 });
   const mid = morphPath(pulled, star, 0.5);
   ok('a hand-edited outline still morphs', mid !== pulled && mid !== star && flattenPath(mid, 32).length === 32);
+}
+
+// --- an orbit leaves the same way everything else does ----------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const P = () => useEditor.getState().project;
+  const VIEW = { width: 720, height: 720 };
+  const at = (t: number) => {
+    const rig = evaluateRig(P(), t);
+    return emitterItems(activeTimeline(P()), rig, buildScene(rig, VIEW), t, VIEW, shapeResolver(P().svgAssets));
+  };
+
+  ed().addEmitter({
+    name: 'ring', glyphs: [], parts: [{ id: 'r', shapeId: 'star', weight: 1, speed: 1, sizeScale: 1, spin: 0 }],
+    color: { r: 0, g: 0, b: 0, a: 1 }, size: 18, path: 'orbit',
+    from: { nodeId: 'body', x: 0, y: -120 }, to: { x: 0, y: 0 }, bow: 0, radiusX: 90, radiusY: 90,
+    rateMs: 500, lifeMs: 1200, count: 4, fadeStart: 1,
+    scaleFrom: 1, scaleTo: 1, spin: 0, wobble: 0, wobbleFrequency: 1,
+    startMs: 0, endMs: 1500,
+  });
+
+  // an orbit has no births to stop, so ending its range used to blink the whole ring off
+  const inside = at(1200), just = at(1800), later = at(2400), gone = at(2800);
+  ok('an orbit runs inside its range', inside.length === 4, String(inside.length));
+  ok('and fades past the end rather than blinking off',
+    just.length === 4 && Math.max(...just.map((i) => i.color.a)) < 1,
+    `${just.length} @ ${Math.max(...just.map((i) => i.color.a)).toFixed(2)}`);
+  ok('shrinking as it fades',
+    Math.max(...just.map((i) => i.w)) < Math.max(...inside.map((i) => i.w)),
+    `${Math.max(...inside.map((i) => i.w)).toFixed(1)} -> ${Math.max(...just.map((i) => i.w)).toFixed(1)}`);
+  ok('further still as it goes on',
+    later.length === 0 || Math.max(...later.map((i) => i.color.a)) < Math.max(...just.map((i) => i.color.a)));
+  ok('and gone one lifetime past the end', gone.length === 0, String(gone.length));
+
+  // a preset whose point IS its emitter must not be iconified as a plain face
+  for (const id of ['p_sleepy', 'p_singing', 'p_crying', 'p_notify']) {
+    const preset = builtinPresets().find((x) => x.id === id)!;
+    const t = characteristicTime(preset);
+    const running = (preset.emitters ?? []).some((e) => t >= (e.startMs ?? 0) && t <= (e.endMs ?? preset.durationMs));
+    ok(`${preset.name}'s icon is a moment when its emitter is running`, running, `t=${Math.round(t)} of ${preset.durationMs}`);
+  }
+
+  ed().loadProject(defaultProject());
 }
 
 // --- zip: the CRC everything downstream depends on -----------------------------

@@ -579,6 +579,15 @@ export function emitterItems(
 
     // ...but nothing new is born after the range closes
     const stopsAt = e.endMs !== undefined ? e.endMs - (e.startMs ?? 0) : Infinity;
+
+    /**
+     * An orbit has no births to stop, so ending its range would blink the whole ring off.
+     * It gets an exit instead: past the end it keeps circling while fading and shrinking
+     * away over one lifetime, which is what every other path gets for free by letting its
+     * last particles finish falling.
+     */
+    const exit = e.path === 'orbit' && t > stopsAt ? 1 - (t - stopsAt) / life : 1;
+    if (exit <= 0) continue;
     // an orbit uses every slot it was given: they are positions on a ring, not spawns
     const slots = e.path === 'orbit'
       ? Math.max(1, Math.round(e.count))
@@ -608,8 +617,8 @@ export function emitterItems(
         ? ((t * rateOf + (i / slots) * life) % life)
         : ((t * rateOf - i * rate) % cycle + cycle) % cycle;
       if (age >= life) continue;                       // this slot is between spawns
-      // an orbit has no births to stop, so it simply ends with its range
-      if (e.path === 'orbit' ? t > stopsAt : t - age > stopsAt) continue;
+      // an orbit is handled by `exit` above; everything else simply stops being born
+      if (e.path !== 'orbit' && t - age > stopsAt) continue;
       // easing shapes the journey itself: an ease-out drop falls fast and settles, where
       // linear travel is the same speed the whole way down
       const u = e.easing ? applyEasing(e.easing, age / life) : age / life;
@@ -648,17 +657,19 @@ export function emitterItems(
         y += noise1d(phase + 31.7, seed) * w;
       }
 
-      // fade in quickly so nothing pops into existence, then out from fadeStart
-      const fadeIn = Math.min(1, u / 0.12);
+      // fade in quickly so nothing pops into existence, then out from fadeStart. An orbit
+      // is never born — it is a position on a ring — so fading it in punched a hole in the
+      // ring every time a slot's phase came round past zero.
+      const fadeIn = e.path === 'orbit' ? 1 : Math.min(1, u / 0.12);
       const tail = Math.max(1e-3, 1 - e.fadeStart);
       const fadeOut = u <= e.fadeStart ? 1 : Math.max(0, 1 - (u - e.fadeStart) / tail);
-      const alpha = e.color.a * fadeIn * fadeOut;
+      const alpha = e.color.a * fadeIn * fadeOut * exit;
       if (alpha <= 0.002) continue;
 
       // a particle shrinks as it fades rather than staying full size and vanishing. Fading
       // alone reads as popping out of existence — the same reason a layer keyframed to
       // `visible: 0` scales away instead of blinking off.
-      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * (pt?.sizeScale ?? 1) * unit * fadeOut;
+      const size = e.size * (e.scaleFrom + (e.scaleTo - e.scaleFrom) * u) * (pt?.sizeScale ?? 1) * unit * fadeOut * exit;
       const tint = pt?.color ?? e.color;
 
       // what this particle IS: a library/project shape, or a character. `resolveShape` is

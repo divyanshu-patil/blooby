@@ -25,7 +25,9 @@ export function clipColor(project: { presets: { id: string; color?: string }[] }
   return block.color ?? project.presets.find((p) => p.id === block.presetId)?.color;
 }
 
-export function Timeline() {
+/** `onOpenEffects` lets the editor switch the right rail to the Effects tab when a span
+ *  on the strip is clicked — the timeline has no business knowing about tabs itself. */
+export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {}) {
   const project = useEditor((s) => s.project);
   const tl = activeTimeline(project);
   const playhead = useEditor((s) => s.playhead);
@@ -137,19 +139,31 @@ export function Timeline() {
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
   const starts = blockStarts(tl);
   const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
+  const selectEmitter = useEditor((s) => s.selectEmitter);
   const [showBands, setShowBands] = useState(true);
+
+  /**
+   * Open the effect a span belongs to: show the panel it lives in, and scope that panel
+   * the same way the effect is scoped, or a clip-scoped effect would not be in the list.
+   */
+  const openEffect = (id: string, kind: 'modifier' | 'emitter') => {
+    const owner = effectSpans.find((e) => e.id === id);
+    selectBlock(owner?.blockId ?? null);
+    selectEmitter(kind === 'emitter' ? id : null);
+    onOpenEffects?.();
+  };
 
   // where each effect actually runs, in absolute timeline time: its scope, narrowed by
   // its own range. One list for modifiers and emitters — they are scoped identically.
   const effectSpans = [
-    ...tl.modifiers.map((m) => ({ ...m, label: MODIFIERS[m.kind].label })),
-    ...(tl.emitters ?? []).map((e) => ({ ...e, label: e.name })),
+    ...tl.modifiers.map((m) => ({ ...m, label: MODIFIERS[m.kind].label, kind2: 'modifier' as const })),
+    ...(tl.emitters ?? []).map((e) => ({ ...e, label: e.name, kind2: 'emitter' as const })),
   ].map((e) => {
     const i = e.blockId ? tl.blocks.findIndex((b) => b.id === e.blockId) : -1;
     const origin = i >= 0 ? blockStarts(tl)[i] : 0;
     const limit = i >= 0 ? tl.blocks[i].durationMs : tl.timelineDurationMs;
     return {
-      id: e.id, label: e.label,
+      id: e.id, label: e.label, kind: e.kind2, blockId: e.blockId,
       from: origin + Math.max(0, e.startMs ?? 0),
       to: origin + Math.min(limit, e.endMs ?? limit),
     };
@@ -158,6 +172,17 @@ export function Timeline() {
   // Stack overlapping spans into rows. Two effects running at once drew on top of each
   // other, so "SHAKE" and "CONFETTI" came out as one unreadable smear. Greedy: each band
   // takes the first row where it does not touch one already there.
+  // A stable hue each, with collisions resolved rather than hoped away: hashing four
+  // effects into twelve slots collides about two times in five, and two bands the same
+  // colour is exactly what the colour is meant to prevent. Deterministic for a given set.
+  const takenHues = new Set<number>();
+  const hueOf = effectSpans.map((e) => {
+    let slot = hueSlot(e.id, e.label);
+    for (let i = 0; i < HUE_SLOTS && takenHues.has(slot); i++) slot = (slot + 1) % HUE_SLOTS;
+    takenHues.add(slot);
+    return slot * (360 / HUE_SLOTS);
+  });
+
   const effectRows: number[] = [];
   const laneOf = effectSpans.map((e) => {
     let lane = effectRows.findIndex((busyUntil) => busyUntil <= e.from);
@@ -556,16 +581,22 @@ export function Timeline() {
                 {effectSpans.length > 0 && (
                   <div className="fxbands" style={{ height: showBands ? effectRows.length * 15 + 3 : 18 }}>
                     {showBands && effectSpans.map((e, i) => (
-                      <div key={e.id} className={`fxband${e.id === selectedEmitterId ? ' on' : ''}`}
-                        title={`${e.label} — ${fmtSec(e.from)} to ${fmtSec(e.to)}`}
+                      <button key={e.id} className={`fxband${e.id === selectedEmitterId ? ' on' : ''}`}
+                        title={`${e.label} — ${fmtSec(e.from)} to ${fmtSec(e.to)} · click to open it`}
+                        // clicking a span opens the thing that drew it: an effect visible
+                        // on the strip with no way to reach it from there is a dead end.
+                        // The pointerdown has to stop here too — .track-lanes owns the
+                        // marquee, and it captures the pointer, so the click never forms.
+                        onPointerDown={(ev) => ev.stopPropagation()}
+                        onClick={(ev) => { ev.stopPropagation(); openEffect(e.id, e.kind); }}
                         style={{
                           left: e.from * pxPerMs, width: Math.max(2, (e.to - e.from) * pxPerMs), top: laneOf[i] * 15,
-                          // a colour per effect, from its own name, so two spans running at
-                          // once are told apart at a glance rather than by reading them
-                          '--fx': effectHue(e.id, e.label),
+                          // a colour per effect, so two spans running at once are told
+                          // apart at a glance rather than by reading them
+                          '--fx': `${hueOf[i]}`,
                         } as React.CSSProperties}>
                         <span>{e.label}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -793,18 +824,19 @@ function Sparkline({ track, width, height, pxPerMs }: { track: Track; width: num
 }
 
 /**
- * A stable hue per effect, so two spans running at once are distinguishable.
+ * Which of twelve evenly spaced hues an effect prefers.
  *
  * Twelve slots 30° apart rather than any hue the hash lands on: an arbitrary hash gave two
  * neighbouring effects colours a few degrees apart, which is no better than one colour.
  * Keyed on the id, not the label — two Shakes on different layers are different effects
- * and should not share a colour just because they share a name.
+ * and should not share a colour just because they share a name. The caller resolves
+ * collisions, because within twelve slots they are common rather than rare.
  */
 const HUE_SLOTS = 12;
-function effectHue(id: string, label: string): string {
+function hueSlot(id: string, label: string): number {
   let h = 0;
   for (const ch of id + label) h = (h * 31 + ch.charCodeAt(0)) % 4096;
-  return `${(h % HUE_SLOTS) * (360 / HUE_SLOTS)}`;
+  return h % HUE_SLOTS;
 }
 
 export function DurationField() {

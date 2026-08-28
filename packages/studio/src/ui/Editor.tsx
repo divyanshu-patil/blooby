@@ -188,7 +188,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
           { min: 220, max: 780, default: 420, content: (
             <div className="timeline-pane" data-tour="timeline">
               <TimelineTabs />
-              <Timeline />
+              <Timeline onOpenEffects={() => setTab('fx')} />
             </div>
           ) },
         ]} />
