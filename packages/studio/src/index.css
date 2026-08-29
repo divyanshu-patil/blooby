@@ -226,7 +226,16 @@ input.txt {
 input.txt:focus { border-color: var(--signal); outline: none; }
 
 /* ---- property row ------------------------------------------------------- */
-.prop { display: grid; grid-template-columns: 15px 1fr 60px; align-items: center; gap: 7px; }
+/* the first column holds the stopwatch alone until the property has keyframes, then the
+   two chevrons appear either side of it — `min-content` so the row does not jump */
+.prop { display: grid; grid-template-columns: min-content 1fr 60px; align-items: center; gap: 7px; }
+.keynav { display: flex; align-items: center; gap: 1px; }
+.keychev {
+  width: 13px; height: 17px; padding: 0; border: 0; border-radius: 3px;
+  background: none; color: var(--muted); font: 600 13px var(--ui); line-height: 1; cursor: pointer;
+}
+.keychev:hover:not(:disabled) { background: var(--field); color: var(--ink); }
+.keychev:disabled { opacity: .25; cursor: default; }
 .prop-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; font: 500 11.5px var(--ui); color: var(--ink-2); }
 .prop-label > .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prop-num {
@@ -234,6 +243,11 @@ input.txt:focus { border-color: var(--signal); outline: none; }
   border: 1px solid transparent; border-radius: 5px; background: var(--field);
   font: 500 11px var(--mono); color: var(--ink);
 }
+/* .prop-num is width:100% because the .prop grid gives it a fixed 60px column. In a plain
+   .row there is no such column, so it took the whole width and collapsed the label beside
+   it to zero — which wrapped "Stacking order" one letter per line. */
+.row > .prop-num { flex: 0 0 62px; width: 62px; }
+.partdials label > .prop-num { flex: 1 1 auto; width: auto; min-width: 42px; }
 .prop-num:hover { border-color: var(--line); }
 .prop-num:focus { border-color: var(--signal); outline: none; background: #fff; }
 
@@ -572,6 +586,7 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 }
 .hint { font: 400 11px var(--ui); color: var(--muted); }
 .row { display: flex; align-items: center; gap: 6px; }
+.row.wrap { flex-wrap: wrap; row-gap: 5px; }
 .divider { height: 1px; background: var(--line-soft); margin: 2px 0; }
 
 .swatches { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -729,3 +744,199 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   .preview-name { font: 600 14px var(--display); color: var(--ink); }
   .preview-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 }
+
+/* ---- effect range, dragged like a clip's in/out points -------------------- */
+.rangebar { display: flex; flex-direction: column; gap: 4px; }
+.rangebar-head { display: flex; align-items: center; gap: 6px; }
+.rangebar-head .t { font: 500 11px var(--ui); color: var(--muted); }
+.rangebar-head .spacer { flex: 1; }
+.rangebar-num { font: 500 10.5px var(--mono); color: var(--muted); }
+.rangebar-head .btn { height: 17px; padding: 0 5px; font-size: 10px; }
+.rangebar-track {
+  position: relative; height: 16px; border-radius: 5px;
+  background: var(--line-soft); border: 1px solid var(--line-soft);
+}
+.rangebar-fill { position: absolute; top: 0; bottom: 0; background: var(--ink); opacity: .16; cursor: grab; }
+.rangebar-fill:active { cursor: grabbing; }
+.rangebar-grip {
+  position: absolute; top: -2px; width: 9px; height: 20px; margin-left: -4.5px; padding: 0;
+  border: 1px solid var(--paper); border-radius: 3px; background: var(--ink); cursor: ew-resize;
+}
+.rangebar-grip:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.fxcard {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  background: var(--field); border: 1px solid var(--line-soft); border-radius: 6px;
+}
+/* NOT .chip-color: that one is a preset-chip hover affordance — absolutely positioned
+   and opacity 0 until the chip is hovered — so reusing it here made every colour swatch
+   in the effects panel invisible and out of flow. */
+.swatch {
+  flex: none; width: 24px; height: 23px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 5px; background: none;
+}
+.swatch::-webkit-color-swatch-wrapper { padding: 2px; }
+.swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
+.swatch:hover { border-color: var(--muted); }
+.partrow .swatch { width: 22px; height: 20px; }
+
+/* ---- emitter trajectory handles on the stage ------------------------------ */
+.traj-dot { cursor: grab; }
+.traj-dot:active { cursor: grabbing; }
+.traj-label { font: 700 10px var(--display); letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
+.fxcard.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.pathdata { min-height: 62px; font: 400 10.5px/1.5 var(--mono); resize: vertical; }
+
+/* ---- collapsible rail sections -------------------------------------------- */
+.fold {
+  border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel);
+  overflow: hidden; flex: none;
+}
+.fold + .fold { margin-top: 8px; }
+.fold-head { display: flex; align-items: center; gap: 6px; padding: 5px 7px 5px 4px; }
+.fold[data-open='true'] .fold-head { border-bottom: 1px solid var(--line-soft); }
+.fold-toggle {
+  display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
+  border: 0; background: none; padding: 3px 4px; cursor: pointer; text-align: left;
+}
+.fold-caret { color: var(--muted); font-size: 13px; line-height: 1; transition: transform .12s ease; }
+.fold[data-open='true'] .fold-caret { transform: rotate(90deg); }
+.fold-title { font: 700 10px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); }
+/* wraps: four add-buttons do not fit the rail on one line, and the clipped one is
+   always the last kind added */
+.fold-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 62%; }
+.fold-head { flex-wrap: wrap; row-gap: 4px; }
+.fold-body { display: flex; flex-direction: column; gap: 8px; padding: 9px; }
+@media (prefers-reduced-motion: reduce) { .fold-caret { transition: none; } }
+
+/* ---- what an emitter throws ----------------------------------------------- */
+.partrow { display: flex; gap: 8px; padding: 6px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel); }
+.partart {
+  width: 34px; height: 34px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--line-soft); border-radius: 5px; background: var(--field);
+}
+.partart svg { width: 22px; height: 22px; }
+.partglyph { font-size: 17px; }
+.partbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.partdials { gap: 8px; }
+.partdials label { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.partdials label > span { font: 500 10px var(--ui); color: var(--muted); }
+
+.shapepick { max-width: 460px; width: min(92vw, 460px); max-height: 86vh; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.shapepick-head { display: flex; align-items: center; gap: 8px; }
+.shapepick-head .spacer { flex: 1; }
+.shapepick-preview {
+  height: 130px; display: grid; place-items: center;
+  border: 1px solid var(--line-soft); border-radius: 8px; background: var(--field);
+}
+.shapepick-preview svg { width: 88px; height: 88px; }
+.shapepick-name { text-align: center; font: 500 11.5px var(--ui); color: var(--muted); min-height: 15px; }
+.shapepick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 6px; margin-top: 4px; }
+.shapepick-cell {
+  aspect-ratio: 1; display: grid; place-items: center; cursor: pointer;
+  border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel); color: var(--ink);
+}
+.shapepick-cell:hover, .shapepick-cell:focus-visible { border-color: var(--ink); outline: none; }
+.shapepick-cell svg { width: 24px; height: 24px; }
+.scopebar { display: flex; align-items: center; gap: 8px; padding: 6px 9px; font-size: 11px;
+  border: 1px solid var(--line-soft); border-radius: 7px; background: var(--field); color: var(--muted); }
+.scopebar strong { color: var(--ink); font-weight: 600; }
+.scopebar .spacer { flex: 1; }
+.targetbar { flex-wrap: wrap; }
+.snap rect { fill: none; stroke: var(--signal); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.snap circle { fill: var(--signal); }
+
+/* ---- effect spans on the strip -------------------------------------------- */
+.fxbands { position: relative; border-bottom: 1px solid var(--line-soft); }
+.fxband {
+  position: absolute; height: 13px; display: flex; align-items: center; overflow: hidden;
+  border-radius: 3px; padding: 0; cursor: pointer; text-align: left;
+  /* one hue per effect, so overlapping spans are told apart at a glance */
+  background: hsl(var(--fx) 62% 62% / .3);
+  border: 1px solid hsl(var(--fx) 58% 46% / .75);
+}
+.fxband.on { background: hsl(var(--fx) 66% 58% / .58); border-color: hsl(var(--fx) 60% 38%); }
+.fxband span { font: 600 9px var(--display); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink); padding: 0 4px; white-space: nowrap; }
+
+.fxbands-toggle {
+  display: flex; align-items: center; gap: 4px; width: 100%; padding: 0 8px; cursor: pointer;
+  border: 0; border-bottom: 1px solid var(--line-soft); background: none;
+  font: 700 9px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.fxbands-toggle:hover { color: var(--ink); }
+.fxbands-toggle .fold-caret { transition: transform .12s ease; }
+.fxbands-toggle[aria-expanded='true'] .fold-caret { transform: rotate(90deg); }
+.shapepts circle { fill: var(--paper); stroke: var(--signal); stroke-width: 2; cursor: grab; }
+.shapepts circle:hover { fill: var(--signal); }
+.shapepts circle:active { cursor: grabbing; }
+
+/* ---- the add-an-effect drawer --------------------------------------------- */
+.drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(10, 10, 12, .34); display: flex; justify-content: flex-end; }
+.drawer {
+  width: min(340px, 92vw); height: 100%; display: flex; flex-direction: column; gap: 10px;
+  background: var(--panel); border-left: 1px solid var(--line); padding: 12px; overflow: auto;
+  animation: drawer-in .16s ease;
+}
+@keyframes drawer-in { from { transform: translateX(14px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }
+.drawer-head { display: flex; align-items: center; gap: 8px; }
+.drawer-head .spacer { flex: 1; }
+.drawer-preview {
+  height: 168px; flex: none; display: grid; place-items: center; overflow: hidden;
+  border: 1px solid var(--line-soft); border-radius: 10px; background: var(--stage-bg, #17161b);
+}
+.drawer-preview svg { width: 100%; height: 100%; }
+.drawer-caption { display: flex; flex-direction: column; gap: 2px; min-height: 34px; }
+.drawer-caption strong { font-size: 13px; }
+.drawer-caption span { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.drawer-list { display: flex; flex-direction: column; gap: 4px; }
+.drawer-item {
+  display: flex; flex-direction: column; gap: 1px; text-align: left; width: 100%;
+  padding: 7px 9px; border: 1px solid transparent; border-radius: 7px; background: none; cursor: pointer;
+}
+.drawer-item:hover, .drawer-item[aria-pressed='true'] { background: var(--field); border-color: var(--line-soft); }
+.drawer-item-name { font: 500 12.5px var(--ui); color: var(--ink); }
+.drawer-item-help { font-size: 11px; color: var(--muted); line-height: 1.35; }
+
+/* a number you can drag across, like every other motion tool */
+.scrubbable { cursor: ew-resize; }
+.scrubbable:focus { cursor: text; }
+.scrubbable.scrubbing { border-color: var(--signal); background: #fff; }
+
+/* --- imported SVG artwork: paste one, open several, see what you have ----------- */
+.svglib { display: grid; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-alt); }
+.svglib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 4px; }
+.svglib-item { position: relative; }
+.svglib-item > button:first-child {
+  width: 100%; display: grid; gap: 2px; justify-items: center; padding: 4px 2px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; color: var(--ink);
+}
+.svglib-item.on > button:first-child { border-color: var(--signal); }
+.svglib-item svg { width: 26px; height: 26px; fill: currentColor; }
+.svglib-item span { font-size: 9px; opacity: 0.7; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svglib-x {
+  position: absolute; top: -4px; right: -4px; width: 15px; height: 15px; line-height: 1; font-size: 9px;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  cursor: pointer; opacity: 0; transition: opacity 0.12s;
+}
+.svglib-item:hover .svglib-x, .svglib-x:focus-visible { opacity: 1; }
+.svglib-paste { font: 11px/1.4 ui-monospace, monospace; resize: vertical; }
+.hint.err { color: var(--hot); }
+
+/* --- the preset rail shows three rows, then admits there are more ---------------- */
+/* The fourth row is deliberately cut mid-chip: a clean edge at a row boundary reads as
+   "that is all of them", which is exactly the wrong thing to say. */
+.chips-peek {
+  /* on the peek itself, not on .chips inside it: custom properties inherit downward, so
+     declaring them on the child left this calc() invalid and clipped nothing */
+  --chip-h: 75px;
+  --chip-gap: 6px;
+  overflow: hidden;
+  max-height: calc(var(--chip-h) * 3 + var(--chip-gap) * 3 + var(--chip-h) * 0.45);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0 74%, rgba(0, 0, 0, .12) 100%);
+  mask-image: linear-gradient(to bottom, #000 0 74%, rgba(0, 0, 0, .12) 100%);
+}
+.chips-more { width: 100%; margin-top: 6px; }
+/* the library is worth two more columns than the rail can give it */
+.drawer.wide { width: min(560px, 96vw); }
+.drawer.wide .chips { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }

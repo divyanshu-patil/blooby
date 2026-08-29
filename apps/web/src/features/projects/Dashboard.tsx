@@ -29,7 +29,17 @@ export function Dashboard({ onOpen }: { onOpen: (id: string) => void }) {
     [q, sort],
   );
 
-  const act = async (fn: () => Promise<unknown>) => { await fn(); reload(); };
+  /**
+   * Delete, duplicate and visibility all run after their menu or dialog has closed, so a
+   * rejection here has nowhere to appear — it used to reject into the void, leaving a
+   * card that looked deleted until the next reload proved otherwise.
+   */
+  const [problem, setProblem] = useState<string | null>(null);
+  const act = async (fn: () => Promise<unknown>) => {
+    setProblem(null);
+    try { await fn(); reload(); }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'That did not work.'); }
+  };
 
   return (
     <>
@@ -45,6 +55,7 @@ export function Dashboard({ onOpen }: { onOpen: (id: string) => void }) {
 
         {loading && <LoadingGrid />}
         {error && <ErrorState message={error} onRetry={reload} />}
+        {problem && <p className="setting-alert" role="alert">{problem}</p>}
 
         {data && !loading && (data.items.length === 0 ? (
           q

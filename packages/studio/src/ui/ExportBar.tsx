@@ -29,7 +29,20 @@ export function ExportBar() {
   const lottieJson = () => {
     const baked = bakeLottie(project, { background, name: project.name });
     download(new Blob([JSON.stringify(baked.json)], { type: 'application/json' }), `${base}.json`);
-    setNote(`${baked.frames} frames → ${baked.keyframeCount} keyframes${baked.skipped.length ? ` · SVG layers skipped: ${baked.skipped.join(', ')}` : ''}`);
+    // Say what it cost and why, before the file size is a surprise. A morphing outline
+    // or an emitter's artwork has no Lottie primitive, so its geometry is written as
+    // vertices on every frame — correct, and much heavier than a circle with an
+    // animated transform.
+    const bakedNames = [...new Set(baked.baked)];
+    setNote([
+      `${baked.frames} frames → ${baked.keyframeCount} keyframes`,
+      bakedNames.length
+        ? `shapes baked to per-frame outlines (${bakedNames.slice(0, 4).join(', ')}${bakedNames.length > 4 ? `, +${bakedNames.length - 4}` : ''}) — accurate, but a much larger file than plain shapes`
+        : '',
+      baked.skipped.length
+        ? `no Lottie equivalent, use GIF/MP4 for these: ${[...new Set(baked.skipped)].join(', ')}`
+        : '',
+    ].filter(Boolean).join(' · '));
   };
 
   const dotLottie = () => {

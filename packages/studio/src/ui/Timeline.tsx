@@ -5,8 +5,8 @@ import { COMP } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
-import { activeTimeline, type Block, type EasingCurve, type Keyframe, type KeyValue, type Track, type Transition } from '../core/types';
-import { PROP_LABEL } from '../core/props';
+import { activeTimeline, MODIFIERS, type Block, type EasingCurve, type Keyframe, type KeyValue, type Project, type Timeline, type Track, type Transition } from '../core/types';
+import { findEffect, PROP_LABEL } from '../core/props';
 import { MascotThumb } from './Mascot';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
@@ -25,7 +25,9 @@ export function clipColor(project: { presets: { id: string; color?: string }[] }
   return block.color ?? project.presets.find((p) => p.id === block.presetId)?.color;
 }
 
-export function Timeline() {
+/** `onOpenEffects` lets the editor switch the right rail to the Effects tab when a span
+ *  on the strip is clicked — the timeline has no business knowing about tabs itself. */
+export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {}) {
   const project = useEditor((s) => s.project);
   const tl = activeTimeline(project);
   const playhead = useEditor((s) => s.playhead);
@@ -127,15 +129,70 @@ export function Timeline() {
   // baseline, same convention as the Tracks/Graph zoom just above it.
   const blockPxPerMs = (stripWidth / Math.max(blocksEnd(tl), 1)) * stripZoom;
 
+  const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
   const visible = useMemo(
     () => {
-      const byNode = selection.length ? tl.tracks.filter((t) => selection.includes(t.nodeId)) : tl.tracks;
+      // an effect's tracks are keyed by its own id, so selecting one narrows the lanes to
+      // it exactly the way selecting a layer does — that IS what opening a band shows you
+      const ids = selectedEmitterId ? [...selection, selectedEmitterId] : selection;
+      const byNode = ids.length ? tl.tracks.filter((t) => ids.includes(t.nodeId)) : tl.tracks;
       return isolatedBlockId ? byNode.filter((t) => t.blockId === isolatedBlockId) : byNode;
     },
-    [tl.tracks, selection, isolatedBlockId],
+    [tl.tracks, selection, selectedEmitterId, isolatedBlockId],
   );
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
   const starts = blockStarts(tl);
+  const selectEmitter = useEditor((s) => s.selectEmitter);
+  const [showBands, setShowBands] = useState(true);
+
+  /**
+   * Open the effect a span belongs to: show the panel it lives in, and scope that panel
+   * the same way the effect is scoped, or a clip-scoped effect would not be in the list.
+   */
+  const openEffect = (id: string, kind: 'modifier' | 'emitter') => {
+    const owner = effectSpans.find((e) => e.id === id);
+    selectBlock(owner?.blockId ?? null);
+    selectEmitter(kind === 'emitter' ? id : null);
+    onOpenEffects?.();
+  };
+
+  // where each effect actually runs, in absolute timeline time: its scope, narrowed by
+  // its own range. One list for modifiers and emitters — they are scoped identically.
+  const effectSpans = [
+    ...tl.modifiers.map((m) => ({ ...m, label: MODIFIERS[m.kind].label, kind2: 'modifier' as const })),
+    ...(tl.emitters ?? []).map((e) => ({ ...e, label: e.name, kind2: 'emitter' as const })),
+  ].map((e) => {
+    const i = e.blockId ? tl.blocks.findIndex((b) => b.id === e.blockId) : -1;
+    const origin = i >= 0 ? blockStarts(tl)[i] : 0;
+    const limit = i >= 0 ? tl.blocks[i].durationMs : tl.timelineDurationMs;
+    return {
+      id: e.id, label: e.label, kind: e.kind2, blockId: e.blockId,
+      from: origin + Math.max(0, e.startMs ?? 0),
+      to: origin + Math.min(limit, e.endMs ?? limit),
+    };
+  }).filter((e) => e.to > e.from);
+
+  // Stack overlapping spans into rows. Two effects running at once drew on top of each
+  // other, so "SHAKE" and "CONFETTI" came out as one unreadable smear. Greedy: each band
+  // takes the first row where it does not touch one already there.
+  // A stable hue each, with collisions resolved rather than hoped away: hashing four
+  // effects into twelve slots collides about two times in five, and two bands the same
+  // colour is exactly what the colour is meant to prevent. Deterministic for a given set.
+  const takenHues = new Set<number>();
+  const hueOf = effectSpans.map((e) => {
+    let slot = hueSlot(e.id, e.label);
+    for (let i = 0; i < HUE_SLOTS && takenHues.has(slot); i++) slot = (slot + 1) % HUE_SLOTS;
+    takenHues.add(slot);
+    return slot * (360 / HUE_SLOTS);
+  });
+
+  const effectRows: number[] = [];
+  const laneOf = effectSpans.map((e) => {
+    let lane = effectRows.findIndex((busyUntil) => busyUntil <= e.from);
+    if (lane < 0) { lane = effectRows.length; effectRows.push(0); }
+    effectRows[lane] = e.to;
+    return lane;
+  });
 
   // a focused track can fall out of `visible` (layer selection changed, track deleted) —
   // an orphaned focus set would just dim every remaining track with nothing emphasized,
@@ -467,6 +524,17 @@ export function Timeline() {
                   </button>
                 )}
               </div>
+              {/* the effect bands sit above the lanes in the other column, so this side
+                  needs the same height or every label slips out of line with its lane */}
+              {effectSpans.length > 0 && (
+                <button className="fxbands-toggle" aria-expanded={showBands}
+                  style={{ height: showBands ? effectRows.length * 15 + 3 : 18 }}
+                  title={showBands ? 'Hide the effect spans' : 'Show the effect spans'}
+                  onClick={() => setShowBands((v) => !v)}>
+                  <span className="fold-caret" aria-hidden>›</span>
+                  {effectSpans.length} effect{effectSpans.length === 1 ? '' : 's'}
+                </button>
+              )}
               {visible.map((t) => {
                 const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                 return (
@@ -485,7 +553,7 @@ export function Timeline() {
                       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {PROP_LABEL[t.property] ?? t.property}
                       </span>
-                      <span className="node">{project.rig.nodes[t.nodeId]?.name ?? t.nodeId}</span>
+                      <span className="node">{trackOwner(project, tl, t.nodeId)}</span>
                     </div>
                     {expanded.has(t.id) && numeric && <div className="trow-detail" />}
                   </div>
@@ -509,6 +577,32 @@ export function Timeline() {
                     <span key={t} style={{ left: t * pxPerMs }}>{(t / 1000).toFixed(t % 1000 ? 1 : 0)}s</span>
                   ))}
                 </div>
+
+                {/* every effect's span, drawn where it actually runs. Dragging a range in
+                    the inspector moves a bar here, so "runs from 0.3s to 1.4s" is a thing
+                    you can see against the clips rather than two numbers to picture. */}
+                {effectSpans.length > 0 && (
+                  <div className="fxbands" style={{ height: showBands ? effectRows.length * 15 + 3 : 18 }}>
+                    {showBands && effectSpans.map((e, i) => (
+                      <button key={e.id} className={`fxband${e.id === selectedEmitterId ? ' on' : ''}`}
+                        title={`${e.label} — ${fmtSec(e.from)} to ${fmtSec(e.to)} · click to open it`}
+                        // clicking a span opens the thing that drew it: an effect visible
+                        // on the strip with no way to reach it from there is a dead end.
+                        // The pointerdown has to stop here too — .track-lanes owns the
+                        // marquee, and it captures the pointer, so the click never forms.
+                        onPointerDown={(ev) => ev.stopPropagation()}
+                        onClick={(ev) => { ev.stopPropagation(); openEffect(e.id, e.kind); }}
+                        style={{
+                          left: e.from * pxPerMs, width: Math.max(2, (e.to - e.from) * pxPerMs), top: laneOf[i] * 15,
+                          // a colour per effect, so two spans running at once are told
+                          // apart at a glance rather than by reading them
+                          '--fx': `${hueOf[i]}`,
+                        } as React.CSSProperties}>
+                        <span>{e.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {visible.map((t) => {
                   const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                   return (
@@ -732,6 +826,22 @@ function Sparkline({ track, width, height, pxPerMs }: { track: Track; width: num
   );
 }
 
+/**
+ * Which of twelve evenly spaced hues an effect prefers.
+ *
+ * Twelve slots 30° apart rather than any hue the hash lands on: an arbitrary hash gave two
+ * neighbouring effects colours a few degrees apart, which is no better than one colour.
+ * Keyed on the id, not the label — two Shakes on different layers are different effects
+ * and should not share a colour just because they share a name. The caller resolves
+ * collisions, because within twelve slots they are common rather than rare.
+ */
+const HUE_SLOTS = 12;
+function hueSlot(id: string, label: string): number {
+  let h = 0;
+  for (const ch of id + label) h = (h * 31 + ch.charCodeAt(0)) % 4096;
+  return h % HUE_SLOTS;
+}
+
 export function DurationField() {
   const project = useEditor((s) => s.project);
   const commit = useEditor((s) => s.commit);
@@ -747,4 +857,12 @@ export function DurationField() {
       </select>
     </div>
   );
+}
+
+/** What a lane belongs to: a layer, or an effect addressed by its own id. */
+function trackOwner(project: Project, tl: Timeline, nodeId: string): string {
+  const node = project.rig.nodes[nodeId];
+  if (node) return node.name;
+  const fx = findEffect(tl, nodeId);
+  return fx ? ('name' in fx ? fx.name : fx.kind) : nodeId;
 }

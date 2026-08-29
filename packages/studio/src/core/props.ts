@@ -1,4 +1,4 @@
-import type { ColorStop, KeyValue, Rig, RigNode } from './types';
+import type { ColorStop, Emitter, KeyValue, Modifier, Rig, RigNode, Timeline } from './types';
 import { CAMERA_ID } from './types';
 
 /** One place that knows how a property path maps onto the rig. */
@@ -17,6 +17,8 @@ export function getProp(node: RigNode, path: string): KeyValue | undefined {
     case 'size.x': return node.size.x;
     case 'size.y': return node.size.y;
     case 'color': return node.color;
+    case 'shape.path': return node.shapePath;
+    case 'visible': return node.presence ?? 1;
     default: return undefined;
   }
 }
@@ -37,6 +39,8 @@ export function setProp(node: RigNode, path: string, v: KeyValue): void {
     case 'size.x': node.size.x = n; break;
     case 'size.y': node.size.y = n; break;
     case 'color': node.color = v as ColorStop; break;
+    case 'shape.path': node.shapePath = typeof v === 'string' ? v : undefined; break;
+    case 'visible': node.presence = Math.min(1, Math.max(0, n)); break;
   }
 }
 
@@ -72,6 +76,51 @@ export function writeProp(rig: Rig, nodeId: string, path: string, v: KeyValue): 
 }
 
 /**
+ * An effect's own properties, addressed the same way a node's are.
+ *
+ * Emitters and modifiers live on the timeline rather than in the rig, so they need their
+ * own read/write pair — but everything above this (keyframes, autokey, the stopwatch, the
+ * timeline lanes, the exporter's per-frame sampling) is written against nodeId+path and
+ * does not care which side of the project the value came from.
+ */
+export function findEffect(tl: Timeline, id: string): Emitter | Modifier | undefined {
+  return (tl.emitters ?? []).find((e) => e.id === id) ?? tl.modifiers.find((m) => m.id === id);
+}
+
+/** `fx.opacity` is the emitter's colour alpha; everything else is a plain field. */
+const FX_FIELD = (path: string) => path.slice(3);
+
+/**
+ * What an optional field reads as when it has never been set.
+ *
+ * Without these the inspector row for, say, an orbit's radius simply vanished on an
+ * emitter that had never had one written, because the field really is undefined until
+ * something writes it — and a row you cannot see is a property you cannot keyframe.
+ */
+const FX_DEFAULT: Record<string, number> = {
+  'fx.speed': 1, 'fx.speedJitter': 0, 'fx.orbitTilt': 0, 'fx.radiusX': 100, 'fx.radiusY': 100,
+  'fx.scaleFrom': 1, 'fx.wobble': 0,
+};
+
+export function readEffectProp(tl: Timeline, id: string, path: string): number | undefined {
+  const fx = findEffect(tl, id);
+  if (!fx) return undefined;
+  if (path === 'fx.opacity') return 'color' in fx ? fx.color.a : undefined;
+  const v = (fx as unknown as Record<string, unknown>)[FX_FIELD(path)];
+  if (typeof v === 'number') return v;
+  // an orbit that was given a width but no height is a circle, not a default-sized one
+  if (path === 'fx.radiusY') return readEffectProp(tl, id, 'fx.radiusX');
+  return FX_DEFAULT[path];
+}
+
+export function writeEffectProp(tl: Timeline, id: string, path: string, v: number): void {
+  const fx = findEffect(tl, id);
+  if (!fx) return;
+  if (path === 'fx.opacity') { if ('color' in fx) fx.color = { ...fx.color, a: v }; return; }
+  (fx as unknown as Record<string, unknown>)[FX_FIELD(path)] = v;
+}
+
+/**
  * Every animatable property, defined once.
  *
  * This table is the ONLY definition. The inspector's label and slider, what the renderer
@@ -88,8 +137,11 @@ export function writeProp(rig: Rig, nodeId: string, path: string, v: KeyValue): 
 export interface PropSpec {
   /** what the inspector calls it */
   label: string;
-  /** node properties live on a RigNode, camera properties on the rig itself */
-  on: 'node' | 'camera';
+  /**
+   * Where the property lives: on a RigNode, on the rig's camera, or on an effect —
+   * a modifier or an emitter, addressed by its own id in place of a nodeId.
+   */
+  on: 'node' | 'camera' | 'effect';
   /** [min, max, step, unit] — the inspector slider, and the sane range the copilot is told.
    *  Omitted for non-numeric properties, which are keyframeable but not copilot-settable. */
   range?: [number, number, number, string];
@@ -99,8 +151,12 @@ export interface PropSpec {
 }
 
 export const PROPS: Record<string, PropSpec> = {
-  'surface.yaw': { on: 'node', label: 'Yaw', range: [-90, 90, 0.5, '\u00b0'],
-    help: 'Turns the feature around the sphere. Negative is left, positive is right. It foreshortens near the rim and hides past \u00b190\u00b0.' },
+  // \u00b1360 rather than \u00b190: the projection already carries a feature round the back of
+  // the sphere and out the other side at 300\u00b0 \u2014 only this range stopped a full spin being
+  // reachable. The slider is coarser for it; the number field and the stage's turn tool
+  // are how a gaze actually gets aimed.
+  'surface.yaw': { on: 'node', label: 'Yaw', range: [-360, 360, 0.5, '\u00b0'],
+    help: 'Turns the feature around the sphere. Negative is left, positive is right. It hides behind the silhouette past \u00b190\u00b0 and comes back out the other side \u2014 0 to 360 on the body is a full spin.' },
   'surface.pitch': { on: 'node', label: 'Pitch', range: [-90, 90, 0.5, '\u00b0'],
     help: 'The same, vertically. Negative is up, positive is down.' },
   'flatOffset.x': { on: 'node', label: 'Offset X', range: [-300, 300, 1, 'px'],
@@ -123,6 +179,10 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'The authored width in pixels. Prefer transform.scale.x for animation \u2014 this resizes the drawing itself.' },
   'size.y': { on: 'node', label: 'Height', range: [1, 300, 1, 'px'],
     help: 'The authored height in pixels. Prefer transform.scale.y for animation.' },
+  visible: { on: 'node', label: 'Visible', range: [0, 1, 0.01, ''],
+    help: 'How present the layer is. 1 is normal, 0 is gone — it fades AND shrinks to nothing, so keyframing it to 0 is how a feature leaves rather than pops out. Use it to retire a shape before the next clip.' },
+  'shape.path': { on: 'node', label: 'Shape',
+    help: 'An SVG path outline. Keyframe it and the shape morphs from one to the next. Not a number, so the copilot cannot set it.' },
   color: { on: 'node', label: 'Color',
     help: 'Fill colour. Keyframeable in the editor, but it is not a number, so the copilot cannot set it.' },
 
@@ -134,7 +194,53 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'Pans the whole view horizontally, in pixels.' },
   'camera.offset.y': { on: 'camera', label: 'Pan Y', range: [-300, 300, 1, 'px'],
     help: 'Pans the whole view vertically, in pixels.' },
+
+  /* --- effects: an emitter or a modifier, keyed by its own id instead of a node's ---
+   * `fx.` rather than the bare field name so nothing can collide with a node property,
+   * and so one prefix test tells the store which side of the project to write to. */
+  'fx.size': { on: 'effect', label: 'Size', range: [2, 200, 1, 'px'],
+    help: 'Emitter only. How big each thing it throws is, before its own scale ramp.' },
+  'fx.speed': { on: 'effect', label: 'Speed', range: [0.1, 4, 0.05, '\u00d7'],
+    help: 'Emitter only. How fast everything travels, as a multiple of normal. On an orbit this is how fast the ring turns.' },
+  'fx.rateMs': { on: 'effect', label: 'Every', range: [40, 2000, 10, 'ms'],
+    help: 'Emitter only. Milliseconds between spawns. Smaller is a denser stream.' },
+  'fx.count': { on: 'effect', label: 'At once', range: [1, 40, 1, ''],
+    help: 'Emitter only. How many may be alive at a time — on an orbit, how many sit on the ring.' },
+  'fx.spin': { on: 'effect', label: 'Spin', range: [-720, 720, 5, '\u00b0'],
+    help: 'Emitter only. Degrees each thing turns over one full life.' },
+  'fx.bow': { on: 'effect', label: 'Bow', range: [-200, 200, 1, 'px'],
+    help: 'Emitter only. Sideways bend of the path — what makes a tear curve instead of falling flat.' },
+  'fx.fadeStart': { on: 'effect', label: 'Fade at', range: [0, 1, 0.01, ''],
+    help: 'Emitter only. How far through its life a thing starts fading out. 1 means it never does.' },
+  'fx.radiusX': { on: 'effect', label: 'Ellipse X', range: [0, 400, 1, 'px'],
+    help: 'Orbit only. Half-width of the ring.' },
+  'fx.radiusY': { on: 'effect', label: 'Ellipse Y', range: [0, 400, 1, 'px'],
+    help: 'Orbit only. Half-height of the ring.' },
+  'fx.orbitTilt': { on: 'effect', label: 'Tilt', range: [-90, 90, 1, '\u00b0'],
+    help: 'Orbit only. Tilts the whole ring, so it reads as seen at an angle.' },
+  'fx.opacity': { on: 'effect', label: 'Opacity', range: [0, 1, 0.01, ''],
+    help: 'Emitter only. Overall opacity of everything it throws.' },
+  'fx.lifeMs': { on: 'effect', label: 'Lives', range: [200, 6000, 50, 'ms'],
+    help: 'Emitter only. How long one thing lives — and therefore how long it takes to travel its path. On an orbit it is how long a full lap takes.' },
+  'fx.scaleFrom': { on: 'effect', label: 'Starts at', range: [0.05, 3, 0.05, '\u00d7'],
+    help: 'Emitter only. Size at birth, as a multiple of Size.' },
+  'fx.scaleTo': { on: 'effect', label: 'Grows to', range: [0.05, 3, 0.05, '\u00d7'],
+    help: 'Emitter only. Size at the end of its life, as a multiple of Size.' },
+  'fx.wobble': { on: 'effect', label: 'Wander', range: [0, 40, 0.5, 'px'],
+    help: 'Emitter only. How much each thing drifts sideways as it travels.' },
+  'fx.speedJitter': { on: 'effect', label: 'Speed spread', range: [0, 1, 0.05, ''],
+    help: 'Emitter only. 0 is a conveyor belt, 1 spreads the stream from half to double speed.' },
+  'fx.amount': { on: 'effect', label: 'Amount', range: [0, 200, 1, '%'],
+    help: 'Modifier only. How strong the shake, swing or pulse is. 0 turns it off.' },
+  'fx.frequency': { on: 'effect', label: 'Frequency', range: [0, 12, 0.1, 'Hz'],
+    help: 'Modifier only. How many times a second it repeats.' },
+  'fx.amplitude': { on: 'effect', label: 'Amplitude', range: [0, 200, 1, ''],
+    help: 'Modifier only. How far it travels at full amount, in the unit that modifier moves.' },
 };
+
+/** Every animatable property of an emitter or a modifier. */
+export const EFFECT_PROPS: string[] = Object.keys(PROPS).filter((k) => PROPS[k].on === 'effect');
+export const isEffectProp = (path: string) => path.startsWith('fx.');
 
 const pathsWhere = (f: (s: PropSpec) => boolean) => Object.keys(PROPS).filter((k) => f(PROPS[k]));
 

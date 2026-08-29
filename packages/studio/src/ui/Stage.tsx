@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { COMP } from '../core/defaults';
-import { buildScene, evaluateRig, evaluateWithTransition, type SceneItem } from '../core/scene';
+import { composeScene, evaluateRig, evaluateWithTransition, type SceneItem } from '../core/scene';
+import { TrajectoryHandles } from './TrajectoryHandles';
+import { ShapeHandles } from './ShapeHandles';
 import { bodyTurnScale, screenToSurface } from '../core/curvature';
 import { Shapes } from './Mascot';
+import { activeTimeline } from '../core/types';
 import type { Project, Rig } from '../core/types';
 
 type Mode = 'idle' | 'move' | 'scale' | 'rotate' | 'turn' | 'pan';
@@ -98,8 +101,12 @@ export function Stage() {
     // wall-clock progress" signal, not itself a value read inside this computation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, playhead, stateTransition, transitionTick]);
-  const scene = useMemo(() => buildScene(rig, COMP), [rig]);
+  // composeScene, not buildScene: the stage must draw exactly what the exporter bakes,
+  // emitters included, or the preview quietly lies about the finished animation
+  const scene = useMemo(() => composeScene(project, rig, playhead, COMP), [project, rig, playhead]);
   const frame = bodyFrame(rig);
+  const selectedEmitterId = useEditor((s) => s.selectedEmitterId);
+  const selectedEmitter = (activeTimeline(project).emitters ?? []).find((e) => e.id === selectedEmitterId);
   const sel = scene.find((s) => s.id === selection[0]);
 
   const toComp = useCallback((e: { clientX: number; clientY: number }) => {
@@ -122,7 +129,9 @@ export function Stage() {
     (e.target as Element).setPointerCapture?.(e.pointerId);
 
     if (tool === 'turn') {
-      const root = project.rig.nodes[project.rig.rootId];
+      // rig, not project.rig: a drag has to continue from the pose on screen. Seeded from
+      // the base rig instead, an animated yaw read as 0 and the head snapped there.
+      const root = rig.nodes[project.rig.rootId];
       drag.current = { mode: 'turn', id: root.id, ox: p.x, oy: p.y, start: { yaw: root.surface.yaw, pitch: root.surface.pitch } };
       return;
     }
@@ -130,7 +139,7 @@ export function Stage() {
 
     const id = targetOf(item.id);
     select([item.id]);
-    const node = project.rig.nodes[id];
+    const node = rig.nodes[id];
     if (!node) return;
     drag.current = {
       mode: 'move', id, ox: p.x, oy: p.y,
@@ -145,7 +154,7 @@ export function Stage() {
     e.stopPropagation();
     if (!sel) return;
     const id = targetOf(sel.id);
-    const node = project.rig.nodes[id];
+    const node = rig.nodes[id];
     if (!node) return;
     const p = toComp(e);
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -233,6 +242,17 @@ export function Stage() {
             fill="none" style={{ stroke: 'rgba(var(--stage-ink), .14)' }} strokeDasharray="4 6" pointerEvents="none" />
         )}
         <Shapes scene={scene} />
+
+        {/* the emitter being edited gets its path drawn over the mascot, with the ends and
+            the fade point draggable — otherwise it is a dozen numbers aiming at nothing */}
+        {/* the selected layer's outline as draggable points, when it has one */}
+        {sel?.path && showGuides && selection.length === 1 && (
+          <ShapeHandles nodeId={selection[0]} item={sel} path={sel.path} toComp={toComp} />
+        )}
+
+        {selectedEmitter && showGuides && (
+          <TrajectoryHandles emitter={selectedEmitter} rig={rig} scene={scene} view={COMP} toComp={toComp} />
+        )}
 
         {sel && showGuides && (
           <g pointerEvents="none">

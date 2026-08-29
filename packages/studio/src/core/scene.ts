@@ -1,17 +1,21 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
+import { morphPath } from './path';
+import { shapeResolver } from './emitters';
 import { noise1d } from './noise';
 import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
-import { CAMERA_PROPS, getCameraProp, getProp, NUMERIC_PROPS, readProp, setCameraProp, setProp, writeProp } from './props';
+import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, readEffectProp, readProp, setCameraProp, setProp, writeEffectProp, writeProp } from './props';
 import { activeTimeline } from './types';
 import { activeTransitionAt, blockAt, blockStarts } from './timeline';
-import type { ColorStop, EasingCurve, KeyValue, Modifier, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
+import type { Anchor, ColorStop, EasingCurve, Emitter, KeyValue, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
 const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
 
 export function lerpValue(a: KeyValue, b: KeyValue, t: number): KeyValue {
   if (typeof a === 'number' && typeof b === 'number') return a + (b - a) * t;
+  // two path strings: a real morph, not a switch at the halfway mark
+  if (typeof a === 'string' && typeof b === 'string') return morphPath(a, b, t);
   if (isColor(a) && isColor(b)) return lerpColor(a, b, t);
   if (isVec(a) && isVec(b)) return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   return a;
@@ -75,6 +79,14 @@ export function activeTrackFor(tl: Timeline, nodeId: string, property: string, t
   return fallback;
 }
 
+const PENDULUM_AXIS: Record<ModifierAxis, string> = {
+  rotation: 'transform.rotation',
+  x: 'flatOffset.x',
+  y: 'flatOffset.y',
+  yaw: 'surface.yaw',
+  pitch: 'surface.pitch',
+};
+
 function applyModifier(rig: Rig, m: Modifier, tSec: number) {
   const gain = (m.amount / 100) * m.amplitude;
   if (gain === 0) return;
@@ -96,6 +108,15 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number) {
     const cur = getProp(node, path);
     if (typeof cur === 'number') setProp(node, path, cur + d);
   };
+
+  // A pendulum is a sine on ONE chosen axis. Rotation is the one that actually reads as a
+  // pendulum — a hanging weight swings, it does not slide — but the axis is a dial because
+  // the same motion on flatOffset.x is what a slow sway wants.
+  if (m.kind === 'pendulum') {
+    const s = Math.sin(2 * Math.PI * m.frequency * tSec + (m.phase ?? 0)) * gain;
+    bump(PENDULUM_AXIS[m.axis ?? 'rotation'], s);
+    return;
+  }
   if (m.kind === 'shake') {
     const seed = m.seed ?? 0;
     const p = tSec * m.frequency;
@@ -216,6 +237,27 @@ export function blockSampleTime(project: Project, tl: Timeline, blockId: string,
 
 /** evaluateRig without transition blending — what "the incoming clip's own animation" or
  * "the outgoing clip's frozen pose" each independently resolve to at a given instant. */
+/**
+ * An effect with its animated properties applied at this instant.
+ *
+ * Emitters and modifiers are not in the rig, so the track loop in evaluateRigRaw cannot
+ * write to them — but their keyframes are ordinary tracks keyed by the effect's own id,
+ * so both the modifier pass and the emitter pass resolve them through here. A copy, never
+ * the stored effect: the project is what the user is editing.
+ */
+export function effectAt<T extends { id: string }>(project: Project, tl: Timeline, fx: T, timeMs: number): T {
+  let out: T | null = null;
+  for (const track of tl.tracks) {
+    if (track.nodeId !== fx.id || !isEffectProp(track.property)) continue;
+    const sampleT = track.blockId ? blockSampleTime(project, tl, track.blockId, timeMs) : timeMs;
+    const v = sampleTrack(track, sampleT);
+    if (typeof v !== 'number') continue;
+    out = out ?? { ...fx };
+    writeEffectProp({ ...tl, emitters: [out as unknown as Emitter], modifiers: [out as unknown as Modifier] }, fx.id, track.property, v);
+  }
+  return out ?? fx;
+}
+
 function evaluateRigRaw(project: Project, timeMs: number): Rig {
   const rig: Rig = structuredClone(project.rig);
   const tl = activeTimeline(project);
@@ -246,15 +288,41 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
     // check block-scoped tracks already use, so a Shake added to just "Blink" can't leak
     // into neighboring clips. The effect's own phase runs from the clip's start, too, so
     // dragging the clip elsewhere on the timeline can't change how it looks internally.
-    let originMs = 0;
-    if (m.blockId) {
-      const w = blockWindow(tl, m.blockId);
-      if (!w || timeMs < w[0] || timeMs > w[1]) continue;
-      originMs = w[0];
-    }
-    applyModifier(rig, m, (timeMs - originMs) / 1000);
+    const local = scopeTime(tl, m, timeMs);
+    if (local === null) continue;
+    applyModifier(rig, effectAt(project, tl, m, timeMs), local / 1000);
   }
   return rig;
+}
+
+/**
+ * How far into an effect's own run `timeMs` is, or null when it is not running.
+ *
+ * Scope is the clip when `blockId` is set and the whole timeline otherwise; `startMs`/
+ * `endMs` narrow it further, measured from the start of that scope. The returned time
+ * counts from `startMs`, not from the scope, so an effect with a range begins at rest
+ * rather than picking up mid-swing — and because everything here is relative, dragging a
+ * clip elsewhere on the strip cannot change how the effect inside it looks.
+ */
+export function scopeTime(
+  tl: Timeline, e: { blockId?: string; startMs?: number; endMs?: number }, timeMs: number,
+): number | null {
+  let originMs = 0;
+  if (e.blockId) {
+    const w = blockWindow(tl, e.blockId);
+    if (!w || timeMs < w[0] || timeMs > w[1]) return null;
+    originMs = w[0];
+  }
+  const local = timeMs - originMs;
+  if (e.startMs !== undefined && local < e.startMs) return null;
+  if (e.endMs !== undefined && local > e.endMs) return null;
+  return local - (e.startMs ?? 0);
+}
+
+/** [start, end] of an effect's scope on the timeline — what its range handles slide in. */
+export function scopeSpan(tl: Timeline, blockId: string | undefined): [number, number] {
+  const w = blockId ? blockWindow(tl, blockId) : null;
+  return w ? [0, w[1] - w[0]] : [0, tl.timelineDurationMs];
 }
 
 // numeric only: color is keyframeable in the editor but there is nothing to interpolate
@@ -274,6 +342,10 @@ function blendRigInto(to: Rig, from: Rig, amount: number): void {
       setProp(node, path, isAngle(path) ? lerpAngle(a, b, amount) : a + (b - a) * amount);
     }
     if (other.color && node.color) node.color = lerpColor(other.color, node.color, amount);
+    // a transition across a shape change morphs too, rather than popping at the seam
+    if (other.shapePath && node.shapePath && other.shapePath !== node.shapePath) {
+      node.shapePath = morphPath(other.shapePath, node.shapePath, amount);
+    }
   }
   for (const path of CAMERA_PROPS) {
     const a = getCameraProp(from, path), b = getCameraProp(to, path);
@@ -340,6 +412,10 @@ export interface SceneItem {
   depth: number;
   zIndex: number;
   svg?: { sourceMarkup: string; viewBox: string };
+  /** a glyph rather than a shape — what an emitter puts on screen. `h` is the font size. */
+  text?: string;
+  /** an outline in a -0.5..0.5 box, drawn scaled into the w/h box instead of the primitive */
+  path?: string;
 }
 
 export interface Viewport { width: number; height: number }
@@ -376,10 +452,15 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   // rx is the *sphere* radius that features are placed on; the drawn outline is its
   // silhouette, which perspective pushes outward. Keep them separate or features escape.
   const limb = silhouetteScale(rig.camera.fov, rig.camera.distance);
-  if (root.visible) {
+  const rootSeen = root.presence ?? 1;
+  if (root.visible && rootSeen > 0.002) {
     out.push({
-      id: root.id, name: root.name, shape: 'ellipse', cx, cy, w: rx * limb * 2, h: ry * limb * 2,
-      r: Math.min(rx, ry) * limb, rotation: roll, color: root.color, depth: -2, zIndex: root.zIndex,
+      id: root.id, name: root.name, shape: 'ellipse', cx, cy,
+      w: rx * limb * 2 * rootSeen, h: ry * limb * 2 * rootSeen,
+      r: Math.min(rx, ry) * limb * rootSeen, rotation: roll,
+      color: rootSeen < 1 ? { ...root.color, a: root.color.a * rootSeen } : root.color,
+      depth: -2, zIndex: root.zIndex,
+      ...(root.shapePath ? { path: root.shapePath } : {}),
     });
   }
 
@@ -404,16 +485,26 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
       const ax = px + lx * cos - ly * sin;
       const ay = py + lx * sin + ly * cos;
 
-      const w = node.size.x * node.transform.scale.x * p.sx * cum;
-      const h = eyeHeight(node) * node.transform.scale.y * p.sy * cum;
+      // presence fades AND shrinks: a feature keyframed out shrinks away rather than
+      // blinking off, which is what makes it usable as a transition into the next clip
+      const seen = node.presence ?? 1;
+      if (seen <= 0.002) { walk(node, px, py, pr, R, { x: 0, y: 0 }, cum); continue; }
+
+      const w = node.size.x * node.transform.scale.x * p.sx * cum * seen;
+      const h = eyeHeight(node) * node.transform.scale.y * p.sy * cum * seen;
       const rot = pr + node.transform.rotation;
 
-      const color = p.alpha < 1 ? { ...node.color, a: node.color.a * p.alpha } : node.color;
+      const a = p.alpha * seen;
+      const color = a < 1 ? { ...node.color, a: node.color.a * a } : node.color;
       if (node.kind === 'svgLayer' && node.svg) {
         out.push({ id: node.id, name: node.name, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
       } else if (node.kind !== 'group') {
         const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
-        out.push({ id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot, color, depth: p.depth, zIndex: node.zIndex });
+        out.push({
+          id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2,
+          rotation: rot, color, depth: p.depth, zIndex: node.zIndex,
+          ...(node.shapePath ? { path: node.shapePath } : {}),
+        });
       }
       walk(node, ax, ay, rot, Math.max(w, h) / 2, { x: 0, y: 0 }, cum * scaleOf(node));
     }
@@ -424,8 +515,286 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   return out;
 }
 
-export const sceneAt = (project: Project, t: number, view: Viewport) =>
-  buildScene(evaluateRig(project, t), view);
+/**
+ * Everything an emitter has on screen at `timeMs`.
+ *
+ * Particles are not simulated — there is no state to carry between frames, because there
+ * is no frame loop to carry it through. `sceneAt(t)` has to be answerable for any t in any
+ * order (the timeline scrubs, the exporter jumps, a thumbnail asks for one instant), so
+ * each particle is a pure function of its slot index and the time. Slot i is simply
+ * `i * rateMs` behind the emitter's clock, wrapping every `slots * rateMs`.
+ *
+ * `base` is the already-built rig scene: anchors read positions straight out of it rather
+ * than re-projecting, so a tear parented to an eye lands exactly where that eye was drawn,
+ * through every squash, roll and perspective divide that put it there.
+ */
+/**
+ * The mapping between an emitter's rig-unit offsets and the screen, both ways.
+ *
+ * Exported because the stage draws the trajectory handles and has to land them exactly
+ * where the particles come out — two implementations of this would drift the moment the
+ * body scales, and the handle would sit next to the stream rather than on it.
+ */
+export function emitterFrame(rig: Rig, base: SceneItem[], view: Viewport) {
+  const root = rig.nodes[rig.rootId];
+  const body = base.find((i) => i.id === rig.rootId);
+  // rig units -> screen: the body's drawn radius against its authored radius, so an
+  // emitter keeps its proportions when the mascot scales or the viewport changes
+  const unit = root && body && root.size.x > 0 ? (body.w / 2) / root.size.x : 1;
+  const centre = {
+    x: body?.cx ?? view.width / 2 + rig.camera.offset.x,
+    y: body?.cy ?? view.height / 2 + rig.camera.offset.y,
+  };
+  const itemOf = (a: Anchor) => (a.nodeId ? base.find((i) => i.id === a.nodeId) : undefined);
+  const originOf = (a: Anchor) => {
+    const on = itemOf(a);
+    return { x: on?.cx ?? centre.x, y: on?.cy ?? centre.y };
+  };
+  // a relative anchor measures in half-widths of the layer it is pinned to, so the point
+  // rides that layer as it scales, squashes and blinks
+  const scaleOf = (a: Anchor) => {
+    const on = itemOf(a);
+    return a.rel && on ? { x: Math.max(1e-6, on.w / 2), y: Math.max(1e-6, on.h / 2) } : { x: unit, y: unit };
+  };
+  return {
+    unit,
+    /** where this endpoint actually is on screen */
+    anchor: (a: Anchor) => {
+      const o = originOf(a), s = scaleOf(a);
+      return { x: o.x + a.x * s.x, y: o.y + a.y * s.y };
+    },
+    /** the inverse: what offset would put this endpoint at that screen point */
+    toOffset: (a: Anchor, screen: Vec2) => {
+      const o = originOf(a), s = scaleOf(a);
+      return { x: (screen.x - o.x) / s.x, y: (screen.y - o.y) / s.y };
+    },
+  };
+}
+
+export function emitterItems(
+  tl: Timeline, rig: Rig, base: SceneItem[], timeMs: number, view: Viewport,
+  /** turns a shape id into markup. Injected so core/scene need not know the library. */
+  resolveShape?: (shapeId?: string, svgAssetId?: string, glyph?: string) => { sourceMarkup: string; viewBox: string } | undefined,
+): SceneItem[] {
+  const emitters = tl.emitters ?? [];
+  if (!emitters.length) return [];
+
+  const { anchor, unit } = emitterFrame(rig, base, view);
+  const out: SceneItem[] = [];
+  for (const e of emitters) {
+    const life = Math.max(1, e.lifeMs);
+    const rate = Math.max(1, e.rateMs);
+    const t = scopeTime(tl, e, timeMs);
+    if (t === null) continue;
+
+    const stopsAt = e.endMs !== undefined ? e.endMs - (e.startMs ?? 0) : Infinity;
+
+    /**
+     * How an emitter leaves, and why it happens INSIDE its range rather than after it.
+     *
+     * Trailing past the end was worse in both directions: a long-lived particle kept
+     * going most of the way to the next clip, so a range you shortened looked like it did
+     * nothing — and a clip boundary still cut hard, because letting particles outlive
+     * their clip would rain them over whatever comes next.
+     *
+     * So the last stretch of the range IS the exit: births stop, and everything still on
+     * screen fades and shrinks to nothing by the moment the range closes. The range is
+     * then exactly what it says, and its end is animated rather than a switch.
+     */
+    const EXIT_MS = 420;
+    const tail = stopsAt === Infinity ? 0 : Math.min(EXIT_MS, stopsAt * 0.4);
+    const exit = tail > 0 ? Math.min(1, Math.max(0, (stopsAt - t) / tail)) : 1;
+    if (exit <= 0) continue;
+
+    /**
+     * And the mirror of it at the other end: the effect arrives rather than appearing.
+     *
+     * An orbit is the case that needs this most — a full ring of five objects popped into
+     * existence on one frame. The individual particles of a stream fade themselves in over
+     * the first stretch of their own life, but nothing covered the effect as a whole.
+     */
+    const head = Math.min(EXIT_MS, stopsAt === Infinity ? EXIT_MS : stopsAt * 0.4);
+    const enter = head > 0 ? Math.min(1, Math.max(0, t / head)) : 1;
+    // an orbit uses every slot it was given: they are positions on a ring, not spawns
+    const slots = e.path === 'orbit'
+      ? Math.max(1, Math.round(e.count))
+      : Math.max(1, Math.min(e.count, Math.ceil(life / rate)));
+    const cycle = slots * rate;
+    const from = anchor(e.from), to = anchor(e.to);
+    const seed = e.seed ?? 0;
+
+    // one revolution per lifeMs, so "lives" reads as "how long a lap takes" on an orbit
+    const orbitPhase = (t / life) % 1;
+
+    const parts = e.parts?.length ? e.parts : null;
+
+    for (let i = 0; i < slots; i++) {
+      const pt = parts ? parts[i % parts.length] : null;
+
+      // Per-particle speed. A stream where everything travels at one rate reads as a
+      // conveyor belt; jitter spreads it across a range, deterministically by slot so
+      // scrubbing back gives the same picture.
+      const jitter = e.speedJitter ?? 0;
+      const vary = jitter ? 1 + noise1d(i * 3.1 + 11, seed) * jitter : 1;
+      // e.speed is the whole stream's dial; pt.speed is one piece's offset from it
+      const rateOf = Math.max(0.05, (e.speed ?? 1) * (pt?.speed ?? 1) * vary);
+
+      // an orbit never dies and never respawns — it goes round. Everything else is born,
+      // travels and fades.
+      const age = e.path === 'orbit'
+        ? ((t * rateOf + (i / slots) * life) % life)
+        : ((t * rateOf - i * rate) % cycle + cycle) % cycle;
+
+      /**
+       * Spin runs on an UNWRAPPED clock, unlike everything else driven by `u`.
+       *
+       * On an orbit `u` restarts at every lap, so an object spinning 90° over a life
+       * snapped back to 0° the instant it crossed the seam — visible as a rotation that
+       * resets partway round the ring. A particle that is born and dies has no seam to
+       * cross, so for those the two clocks are identical.
+       */
+      const spinPhase = e.path === 'orbit'
+        ? (t * rateOf + (i / slots) * life) / life
+        : age / life;
+      if (age >= life) continue;                       // this slot is between spawns
+      // when this particle started, in the emitter's OWN clock. `age` is measured on the
+      // slot's speed-scaled clock, so subtracting it from unscaled `t` compared two
+      // different times and let births through (or cut them) at the wrong moment.
+      const born = (t * rateOf - age) / rateOf;
+      // nothing new is born once the exit has begun — an orbit has no births to stop
+      if (e.path !== 'orbit' && born > stopsAt - tail) continue;
+      /**
+       * Two clocks, deliberately: `life` is how far through its life the particle is, and
+       * `travel` is how far along its path.
+       *
+       * They used to be one, which meant an overshooting travel curve corrupted the fade,
+       * the growth and the cull along with the movement. Notify's elastic badge swung
+       * outside 0..1 several times per life and so it blinked on and off at full size,
+       * half size, nothing — the erratic behaviour was the easing leaking into every
+       * other thing `u` drove. Easing shapes the journey; life is always linear.
+       */
+      const u = age / life;
+      const travel = e.easing ? applyEasing(e.easing, u) : u;
+
+      let x: number, y: number;
+      if (e.path === 'orbit') {
+        // radius defaults to the from->to distance, so dragging the end handle sizes the
+        // ellipse — one gesture, whichever path is selected
+        const rx = (e.radiusX ?? Math.hypot(to.x - from.x, to.y - from.y) / unit) * unit;
+        const ry = (e.radiusY ?? e.radiusX ?? Math.hypot(to.x - from.x, to.y - from.y) / unit) * unit;
+        // Spaced by INDEX around the ring, not by age. Age-staggering clumped them: with
+        // `count` below life/rate the birth cycle is shorter than a life, so several sat
+        // almost on top of each other. An orbit divides its track evenly, always.
+        const a = 2 * Math.PI * (orbitPhase + i / slots);
+        // the ring can be tilted, so it reads as a halo seen at an angle rather than
+        // always lying flat
+        const ox = Math.cos(a) * rx, oy = Math.sin(a) * ry;
+        const tilt = ((e.orbitTilt ?? 0) * Math.PI) / 180;
+        const ct = Math.cos(tilt), st = Math.sin(tilt);
+        x = from.x + ox * ct - oy * st;
+        y = from.y + ox * st + oy * ct;
+      } else if (e.path === 'fall') {
+        // horizontal at a constant rate, vertical accelerating — gravity, cheaply
+        x = from.x + (to.x - from.x) * travel + (i / slots - 0.5) * 2 * e.bow * unit;
+        y = from.y + (to.y - from.y) * travel * travel;
+      } else {
+        x = from.x + (to.x - from.x) * travel;
+        y = from.y + (to.y - from.y) * travel;
+        // a quadratic bump perpendicular to travel: 0 at both ends, widest in the middle
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const bow = e.bow * unit * 4 * travel * (1 - travel);
+        x += (-dy / len) * bow;
+        y += (dx / len) * bow;
+      }
+
+      if (e.wobble) {
+        const w = e.wobble * unit;
+        const phase = u * e.wobbleFrequency * (life / 1000) + i * 7.3;
+        x += noise1d(phase, seed) * w;
+        y += noise1d(phase + 31.7, seed) * w;
+      }
+
+      /**
+       * An orbit is a position on a ring, not something born and lost: it neither fades in
+       * (which punched a hole in the ring each time a slot's phase crossed zero) nor fades
+       * or shrinks on its way round. Its only fade is the exit. Everything else is born,
+       * travels and fades out from `fadeStart`.
+       */
+      const orbiting = e.path === 'orbit';
+      const fadeIn = orbiting ? 1 : Math.min(1, u / 0.12);
+      const fadeSpan = Math.max(1e-3, 1 - e.fadeStart);
+      const fadeOut = orbiting || u <= e.fadeStart ? 1 : Math.max(0, 1 - (u - e.fadeStart) / fadeSpan);
+      const alpha = e.color.a * fadeIn * fadeOut * exit * enter;
+      if (alpha <= 0.002) continue;
+
+      // a particle shrinks as it fades rather than staying full size and vanishing. Fading
+      // alone reads as popping out of existence — the same reason a layer keyframed to
+      // `visible: 0` scales away instead of blinking off.
+      const grow = orbiting ? 1 : e.scaleFrom + (e.scaleTo - e.scaleFrom) * u;
+      /**
+       * Shrinking only at the very end, not across the whole fade.
+       *
+       * Multiplying size by `fadeOut` outright cancels the growth a glyph is authored
+       * with: zzz rise from 0.45x to 1.35x while fading from 42% of their life, so the two
+       * fought and they peaked at a third of their intended size — small enough to be
+       * invisible in an export. Below 35% alpha the particle is on its way out anyway, and
+       * that is the stretch where shrinking reads as leaving rather than as never arriving.
+       */
+      const SHRINK_FROM = 0.35;
+      const shrink = fadeOut < SHRINK_FROM ? fadeOut / SHRINK_FROM : 1;
+      // fadeIn is the particle's own arrival ramp; scaling with it is the exact mirror of
+      // `shrink` on the way out, so a glyph grows in instead of popping at full size
+      const size = e.size * grow * (pt?.sizeScale ?? 1) * unit * shrink * exit * fadeIn * enter;
+      const tint = pt?.color ?? e.color;
+
+      // what this particle IS: a library/project shape, or a character. `resolveShape` is
+      // passed in rather than looked up here, so core/scene stays free of the library.
+      const glyph = pt?.glyph ?? e.glyphs[i % Math.max(1, e.glyphs.length)] ?? '';
+      // a typed character that the library has a vector for is DRAWN, not typed: the font
+      // it used is not in any Lottie player, so those particles could not be exported
+      const art = pt?.shapeId || pt?.svgAssetId
+        ? resolveShape?.(pt.shapeId, pt.svgAssetId)
+        : (e.svg ?? resolveShape?.(undefined, undefined, glyph) ?? undefined);
+
+      out.push({
+        id: `${e.id}#${i}`, name: e.name, shape: 'pill',
+        cx: x, cy: y, w: size, h: size, r: size / 2,
+        rotation: (e.spin + (pt?.spin ?? 0)) * spinPhase,
+        color: { ...tint, a: (tint.a ?? 1) * (alpha / Math.max(1e-6, e.color.a)) },
+        depth: 3, zIndex: 900,
+        ...(art ? { svg: art } : { text: glyph }),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The rig plus whatever its emitters have on screen, in draw order.
+ *
+ * The editor's stage needs the evaluated rig for its own handles, so it cannot go through
+ * `sceneAt` — but it must not therefore draw a different picture than the exporter does.
+ * Both call this.
+ */
+/**
+ * Takes the whole project rather than a timeline: it needs the imported SVGs to resolve a
+ * particle's artwork, and a call site that had to remember to pass a resolver separately
+ * would eventually forget and render every particle blank.
+ */
+export function composeScene(project: Project, rig: Rig, timeMs: number, view: Viewport): SceneItem[] {
+  const base = buildScene(rig, view);
+  // emitters resolved here rather than inside emitterItems: this is the level that has the
+  // project, and therefore the clip retiming a block-scoped effect track needs
+  const tl = activeTimeline(project);
+  const resolved = { ...tl, emitters: (tl.emitters ?? []).map((e) => effectAt(project, tl, e, timeMs)) };
+  const extra = emitterItems(resolved, rig, base, timeMs, view, shapeResolver(project.svgAssets));
+  if (!extra.length) return base;
+  return [...base, ...extra].sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
+}
+
+export const sceneAt = (project: Project, t: number, view: Viewport): SceneItem[] =>
+  composeScene(project, evaluateRig(project, t), t, view);
 
 /** Current value of a property, tracks included — what the inspector shows. Mirrors
  * evaluateRig's own per-track sampling (block speed/loop included) so the inspector can
@@ -435,5 +804,6 @@ export function valueAt(project: Project, nodeId: string, path: string, t: numbe
   const track = activeTrackFor(tl, nodeId, path, t);
   const sampleT = track?.blockId ? blockSampleTime(project, tl, track.blockId, t) : t;
   const sampled = track && sampleTrack(track, sampleT);
-  return sampled !== undefined ? sampled : readProp(project.rig, nodeId, path);
+  if (sampled !== undefined) return sampled;
+  return isEffectProp(path) ? readEffectProp(tl, nodeId, path) : readProp(project.rig, nodeId, path);
 }

@@ -77,12 +77,17 @@ canvas, the block thumbnails and the exporter all render through the same
 
 ## Verification
 
-`pnpm check` runs `src/core/selfcheck.ts` in node. It covers the sphere projection and
-its inverse across fov and head angles, the perspective silhouette against the closed
-form `R·D/√(D²−R²)`, easing curves, OKLCH round-trips, angular interpolation, track
-sampling — and then bakes a six-block project with shake to Lottie, **reads it back the
-way a player would, and compares it against the canvas frame by frame** (worst case under
-a pixel).
+`pnpm test` runs the whole suite with Vitest — 817 tests across the editor engine, the
+API, and both front ends. Each file sits beside the module it covers (`core/curvature.test.ts`,
+`export/lottie.test.ts`, `services/copilot.service.test.ts`, `features/Moderation.test.tsx`),
+so a change and its checks are in the same directory. The apps render through
+Testing Library in jsdom; the editor engine and the API are plain node.
+
+`pnpm run ci` is what the PR workflow runs: lint, typecheck and test across every
+package. `pnpm run test:coverage` prints a per-file table in the terminal.
+
+These replaced a hand-rolled runner that counted failures and printed them — and never
+set a non-zero exit code, so a broken assertion could not fail a build.
 
 `npm run copilot:test -- gpt-oss:120b "make the mascot blink twice then look surprised"`
 runs the copilot end to end against a real Ollama — system prompt, parse, normalise,

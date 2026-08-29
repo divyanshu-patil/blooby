@@ -1,11 +1,11 @@
 import { create } from 'zustand';
-import { defaultProject, makeTimeline, uid } from './defaults';
-import { readProp, writeProp } from './props';
+import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
+import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
-import type { Block, EasingCurve, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
+import type { Block, EasingCurve, Emitter, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
@@ -32,6 +32,8 @@ export interface Editor {
    * inspector) toward "this clip" instead of the whole timeline. Distinct from playhead
    * position: scrubbing through a clip shouldn't silently change what you're editing. */
   selectedBlockId: string | null;
+  /** the emitter whose trajectory handles are on the stage, if any */
+  selectedEmitterId: string | null;
   playhead: number;
   playing: boolean;
   loop: boolean;
@@ -65,6 +67,7 @@ export interface Editor {
   setValue: (nodeId: string, property: string, value: KeyValue, label?: string) => void;
   trackFor: (nodeId: string, property: string) => Track | undefined;
   toggleTrack: (nodeId: string, property: string) => void;
+  toggleKeyframe: (nodeId: string, property: string) => void;
   addKeyframeNow: (nodeId: string, property: string) => void;
   moveKeyframe: (trackId: string, kfId: string, time: number) => void;
   /** set several keyframes (from a multi-select drag) to explicit absolute times in one
@@ -106,6 +109,8 @@ export interface Editor {
   renameTimeline: (id: string, name: string) => void;
   deleteTimeline: (id: string) => void;
   setActiveTimeline: (id: string) => void;
+  /** the authored blend into a state — what setState uses when given no duration */
+  setStateTransition: (id: string, durationMs: number, easing?: EasingCurve) => void;
 
   /**
    * Programmatic state-machine control (spec §14) — each Timeline is a "state" (matching
@@ -127,6 +132,15 @@ export interface Editor {
   addModifier: (m: Omit<Modifier, 'id'>) => void;
   updateModifier: (id: string, fn: (m: Modifier) => void) => void;
   removeModifier: (id: string) => void;
+
+  /** Keeps an SVG with the project, so it survives a save and an emitter can point at it. */
+  addSvgAsset: (name: string, markup: string, viewBox: string) => string;
+  removeSvgAsset: (id: string) => void;
+
+  selectEmitter: (id: string | null) => void;
+  addEmitter: (e: Omit<Emitter, 'id'>) => void;
+  updateEmitter: (id: string, fn: (e: Emitter) => void) => void;
+  removeEmitter: (id: string) => void;
 
   captureExpression: (name: string) => void;
   renameExpression: (id: string, name: string) => void;
@@ -198,6 +212,62 @@ export function splitKey(key: string): [string, string] {
   return [key.slice(0, i), key.slice(i + 1)];
 }
 
+
+/**
+ * Reading and writing a value without caring where it lives.
+ *
+ * A property path either addresses a rig node (or the camera) or an effect on the active
+ * timeline. Everything above this line — autokey, the stopwatch, undo, the timeline lanes
+ * — is written against nodeId+path and works unchanged for either, which is the whole
+ * reason effects became animatable in one pass instead of growing a parallel system.
+ */
+const read = (p: Project, rig: Rig, nodeId: string, path: string): KeyValue | undefined =>
+  isEffectProp(path) ? readEffectProp(activeTimeline(p), nodeId, path) : readProp(rig, nodeId, path);
+
+const write = (p: Project, nodeId: string, path: string, v: KeyValue): void => {
+  if (isEffectProp(path)) writeEffectProp(activeTimeline(p), nodeId, path, v as number);
+  else writeProp(p.rig, nodeId, path, v);
+};
+
+
+/**
+ * The effects that belong with a stretch of a timeline, as a preset carries them.
+ *
+ * A preset is "the animation", not "the keyframes": Sleepy without its zzz is a mascot
+ * with its eyes shut. savePreset only ever copied tracks, so every preset a user made
+ * lost its emitters and modifiers — and since publishing sends that object as-is, the
+ * community queue was full of presets with nothing to preview.
+ *
+ * `startMs`/`endMs` are relative to the effect's own scope, so a clip-scoped one already
+ * uses the origin the preset wants and a global one has to be rebased off the span.
+ */
+function effectsFor<T extends { blockId?: string; startMs?: number; endMs?: number }>(
+  all: T[], blockIds: Set<string>, start: number, durationMs: number,
+): Omit<T, 'id' | 'blockId'>[] {
+  const out: Omit<T, 'id' | 'blockId'>[] = [];
+  for (const fx of all) {
+    if (fx.blockId) {
+      if (!blockIds.has(fx.blockId)) continue;
+      const { id, blockId, ...rest } = fx as T & { id?: string };
+      void id; void blockId;
+      out.push(rest as Omit<T, 'id' | 'blockId'>);
+      continue;
+    }
+    // global: keep it only if it actually overlaps the span being saved, then rebase
+    const from = fx.startMs ?? 0;
+    const to = fx.endMs ?? Infinity;
+    if (to <= start || from >= start + durationMs) continue;
+    const { id, blockId, ...rest } = fx as T & { id?: string };
+    void id; void blockId;
+    out.push({
+      ...(rest as Omit<T, 'id' | 'blockId'>),
+      startMs: Math.max(0, from - start),
+      ...(fx.endMs === undefined ? {} : { endMs: Math.min(durationMs, to - start) }),
+    });
+  }
+  return out;
+}
+
 export const useEditor = create<Editor>((set, get) => ({
   project: load(),
   catalog: [],
@@ -206,6 +276,7 @@ export const useEditor = create<Editor>((set, get) => ({
   selection: [],
   selectedTrackId: null,
   selectedBlockId: null,
+  selectedEmitterId: null,
   playhead: 0,
   playing: false,
   loop: true,
@@ -278,9 +349,36 @@ export const useEditor = create<Editor>((set, get) => ({
         upsertKeyframe(t, playhead, value);
         at(p).tracks.push(t);
       } else {
-        writeProp(p.rig, nodeId, property, value);
+        write(p, nodeId, property, value);
       }
     }, label ?? `${nodeId}.${property}${existing ? '.kf' : ''}`);
+  },
+
+  /**
+   * The stopwatch: is there a keyframe at the playhead, and put one there or take it away.
+   *
+   * It used to mean "this property has a track at all", which stayed lit after the
+   * playhead moved off the keyframe and turned an innocent-looking second click into
+   * "delete every keyframe on this property". Now it means exactly what it looks like.
+   */
+  toggleKeyframe(nodeId, property) {
+    const { playhead, project } = get();
+    const track = activeTrackFor(activeTimeline(project), nodeId, property, playhead);
+    // 1ms, matching writeKeyframe's own idea of "the same keyframe"
+    const here = track?.keyframes.find((k) => Math.abs(k.time - playhead) < 1);
+    if (!track || !here) { get().addKeyframeNow(nodeId, property); return; }
+
+    get().commit((p) => {
+      const t = at(p).tracks.find((x) => x.id === track.id);
+      if (!t) return;
+      t.keyframes = t.keyframes.filter((k) => k.id !== here.id);
+      if (t.keyframes.length) return;
+      // the last one: bake the value back down so removing a keyframe never moves the
+      // mascot, then drop the empty track rather than leave a blank lane on the strip
+      const v = sampleTrack(track, playhead);
+      if (v !== undefined) write(p, nodeId, property, v);
+      at(p).tracks = at(p).tracks.filter((x) => x.id !== t.id);
+    });
   },
 
   toggleTrack(nodeId, property) {
@@ -290,10 +388,10 @@ export const useEditor = create<Editor>((set, get) => ({
       if (existing) {
         // bake the value at the playhead back down so the pose doesn't jump
         const v = sampleTrack(existing, playhead);
-        if (v !== undefined) writeProp(p.rig, nodeId, property, v);
+        if (v !== undefined) write(p, nodeId, property, v);
         at(p).tracks = at(p).tracks.filter((t) => t.id !== existing.id);
       } else {
-        const v = readProp(p.rig, nodeId, property);
+        const v = read(p, p.rig, nodeId, property);
         if (v === undefined) return;
         // same clip-scoping as setValue's autoKey branch — see its comment
         at(p).tracks.push({ id: uid('t'), nodeId, property, blockId: blockAt(at(p), playhead)?.id, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
@@ -303,14 +401,14 @@ export const useEditor = create<Editor>((set, get) => ({
 
   addKeyframeNow(nodeId, property) {
     const { playhead, project } = get();
-    const rig = evaluateRig(project, playhead);
-    const v = readProp(rig, nodeId, property);
+    const v = read(project, evaluateRig(project, playhead), nodeId, property);
     if (v === undefined) return;
-    get().commit((p) => {
-      let track = at(p).tracks.find((t) => t.nodeId === nodeId && t.property === property);
-      if (!track) { track = { id: uid('t'), nodeId, property, keyframes: [] }; at(p).tracks.push(track); }
-      upsertKeyframe(track, playhead, v);
-    });
+    // writeKeyframe rather than a hand-rolled push: it scopes the new track to whichever
+    // clip the playhead is in, and that is the scope activeTrackFor — and therefore the
+    // renderer, and the stopwatch — can actually see. This used to create a GLOBAL track,
+    // which inside a clip is invisible: the keyframe existed and did nothing. It also
+    // grabbed the first track for the property regardless of which clip owned it.
+    get().commit((p) => { writeKeyframe(p, nodeId, property, playhead, v, { type: 'preset', name: 'easeInOut' }); });
   },
 
   moveKeyframe(trackId, kfId, time) {
@@ -435,6 +533,7 @@ export const useEditor = create<Editor>((set, get) => ({
           keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
         });
       }
+      attachPresetEffects(tl, preset, blockId);
       const shifted = tl.blocks.slice(at0).map((b) => b.id);
       if (shifted.length) {
         const set2 = new Set(shifted);
@@ -632,7 +731,10 @@ export const useEditor = create<Editor>((set, get) => ({
     const base = name?.trim() || `Timeline ${project.timelines.length + 1}`;
     const tl = makeTimeline(uniqueName(base, project.timelines.map((t) => t.name)));
     get().commit((p) => { p.timelines.push(tl); p.activeTimelineId = tl.id; });
-    set({ selection: [], playhead: 0 });
+    // the same reset switching to an existing timeline does. Without it a clip and an
+    // emitter from the OLD timeline stayed selected, so the clip inspector described
+    // something not on screen and a new effect got scoped to a block that is not here.
+    set({ selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null });
   },
 
   renameTimeline(id, name) {
@@ -652,6 +754,15 @@ export const useEditor = create<Editor>((set, get) => ({
     set({ selection: [], playhead: 0, selectedBlockId: null });
   },
 
+  setStateTransition(id, durationMs, easing) {
+    get().commit((p) => {
+      const tl = p.timelines.find((t) => t.id === id);
+      if (!tl) return;
+      tl.transitionMs = Math.max(0, durationMs);
+      if (easing) tl.transitionEasing = easing;
+    }, `transition.${id}`);
+  },
+
   setActiveTimeline(id) {
     const { project } = get();
     if (!project.timelines.some((t) => t.id === id)) return;
@@ -660,7 +771,7 @@ export const useEditor = create<Editor>((set, get) => ({
     // tracked here too (not just setState) so returnToPreviousState reflects a manual
     // tab click the same as a programmatic switch — "previous" means whatever was active
     // right before this one, regardless of which path changed it.
-    set({ selection: [], playhead: 0, selectedBlockId: null, previousTimelineId: prevId });
+    set({ selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, previousTimelineId: prevId });
   },
 
   setState(nameOrId, opts) {
@@ -672,18 +783,20 @@ export const useEditor = create<Editor>((set, get) => ({
     // "at" in the future schedules it — App.tsx's playback tick fires it the instant the
     // playhead reaches that point. "at" already passed (or omitted) switches right now.
     if (opts?.at !== undefined && opts.at > playhead) {
-      set({ pendingStateChange: { timelineId: target.id, atMs: opts.at, durationMs: opts.duration ?? DEFAULT_STATE_TRANSITION_MS, easing: opts.easing ?? DEFAULT_STATE_EASING } });
+      set({ pendingStateChange: { timelineId: target.id, atMs: opts.at, durationMs: opts.duration ?? target.transitionMs ?? DEFAULT_STATE_TRANSITION_MS, easing: opts.easing ?? target.transitionEasing ?? DEFAULT_STATE_EASING } });
       return;
     }
-    const durationMs = opts?.duration ?? DEFAULT_STATE_TRANSITION_MS;
-    const easing = opts?.easing ?? DEFAULT_STATE_EASING;
+    // an explicit duration wins, then the target state's own authored blend, then the
+    // generic default — so `setState('happy')` from a host page honours how it was authored
+    const durationMs = opts?.duration ?? target.transitionMs ?? DEFAULT_STATE_TRANSITION_MS;
+    const easing = opts?.easing ?? target.transitionEasing ?? DEFAULT_STATE_EASING;
     // capture the *actually evaluated* outgoing pose before switching — not just its last
     // raw keyframe — same principle the clip-transition blend uses one level down.
     const fromRig = durationMs > 0 ? evaluateRig(project, playhead) : null;
     const prevId = project.activeTimelineId;
     get().commit((p) => { p.activeTimelineId = target.id; });
     set({
-      selection: [], playhead: 0, selectedBlockId: null, pendingStateChange: null,
+      selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, pendingStateChange: null,
       previousTimelineId: prevId,
       stateTransition: fromRig ? { fromRig, durationMs, easing, startedAtMs: performance.now() } : null,
     });
@@ -701,9 +814,54 @@ export const useEditor = create<Editor>((set, get) => ({
   cancelScheduledState() { set({ pendingStateChange: null }); },
   clearStateTransition() { set({ stateTransition: null }); },
 
-  addModifier(m) { get().commit((p) => { at(p).modifiers.push({ ...m, id: uid('m') }); }); },
+  /**
+   * A global effect is bounded to the strip as it stands when you add it.
+   *
+   * Otherwise inserting a preset afterwards silently drops it under a shake nobody asked
+   * to extend over it. The range is visible and draggable, so widening it back is one
+   * gesture — the default just stops being a surprise.
+   */
+  addModifier(m) {
+    get().commit((p) => {
+      const tl = at(p);
+      tl.modifiers.push({ ...boundToStrip(tl, m), id: uid('m') });
+    });
+  },
   updateModifier(id, fn) { get().commit((p) => { const m = at(p).modifiers.find((x) => x.id === id); if (m) fn(m); }, `mod.${id}`); },
   removeModifier(id) { get().commit((p) => { at(p).modifiers = at(p).modifiers.filter((m) => m.id !== id); }); },
+
+  // `emitters` is optional on Timeline so old projects load untouched — every write has
+  // to seed the array rather than assume it
+  addSvgAsset(name, markup, viewBox) {
+    const id = uid('svg');
+    get().commit((p) => { (p.svgAssets ??= []).push({ id, name, markup, viewBox }); });
+    return id;
+  },
+  removeSvgAsset(id) {
+    get().commit((p) => {
+      if (p.svgAssets) p.svgAssets = p.svgAssets.filter((a) => a.id !== id);
+      // an emitter pointing at a deleted asset would render nothing and look broken;
+      // drop back to its glyphs, which it still has
+      for (const tl of p.timelines) for (const e of tl.emitters ?? []) if (e.svgAssetId === id) { delete e.svgAssetId; delete e.svg; }
+    });
+  },
+
+  selectEmitter(id) { set({ selectedEmitterId: id }); },
+  addEmitter(e) {
+    const id = uid('e');
+    get().commit((p) => {
+      const tl = at(p);
+      (tl.emitters ??= []).push({ ...boundToStrip(tl, e), id });
+    });
+    // select it, so its trajectory handles are on the stage the moment it exists —
+    // otherwise a new emitter is a row of numbers with nothing to aim
+    set({ selectedEmitterId: id });
+  },
+  updateEmitter(id, fn) { get().commit((p) => { const e = at(p).emitters?.find((x) => x.id === id); if (e) fn(e); }, `emit.${id}`); },
+  removeEmitter(id) {
+    get().commit((p) => { const tl = at(p); if (tl.emitters) tl.emitters = tl.emitters.filter((e) => e.id !== id); });
+    if (get().selectedEmitterId === id) set({ selectedEmitterId: null });
+  },
 
   captureExpression(name) {
     const { project, playhead } = get();
@@ -767,9 +925,13 @@ export const useEditor = create<Editor>((set, get) => ({
       const picked = at(p).tracks.filter((t) => trackIds.includes(t.id));
       if (!picked.length) return;
       const start = Math.min(...picked.flatMap((t) => t.keyframes.map((k) => k.time)));
+      const tl = at(p);
+      const blockIds = new Set(picked.map((t) => t.blockId).filter((x): x is string => !!x));
       const preset: Preset = {
         id: uid('p'), name: uniqueName(name, p.presets.map((x) => x.name)), source: 'custom', durationMs,
         tracks: picked.map((t) => ({ id: uid('t'), nodeId: t.nodeId, property: t.property, keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })) })),
+        modifiers: effectsFor(tl.modifiers, blockIds, start, durationMs),
+        emitters: effectsFor(tl.emitters ?? [], blockIds, start, durationMs),
       };
       p.presets.push(preset);
     });
@@ -795,6 +957,9 @@ export const useEditor = create<Editor>((set, get) => ({
         id: uid('t'), nodeId: t.nodeId, property: t.property,
         keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })),
       }));
+      const only = new Set([blockId]);
+      preset.modifiers = effectsFor(tl.modifiers, only, start, block.durationMs);
+      preset.emitters = effectsFor(tl.emitters ?? [], only, start, block.durationMs);
     });
   },
 
@@ -822,7 +987,7 @@ export const useEditor = create<Editor>((set, get) => ({
     const next = { ...defaultProject(), ...migrate(p) };
     setActiveId(galleryId ?? uidGallery());
     autosave(next);
-    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedTrackId: null });
+    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null });
   },
   resetProject() { get().loadProject(defaultProject()); },
 }));
@@ -832,6 +997,19 @@ function upsertKeyframe(track: Track, time: number, value: KeyValue) {
   if (existing) { existing.value = value; return; }
   track.keyframes.push({ id: uid('k'), time, value, easingOut: { type: 'preset', name: 'easeInOut' } });
   track.keyframes.sort((a, b) => a.time - b.time);
+}
+
+/**
+ * Where a new global effect stops.
+ *
+ * The end of the tiled clips, not the timeline's duration: `derivedDuration` pads 200ms
+ * past the last keyframe, and a clip appended afterwards starts at `blocksEnd` — inside
+ * that padding. Bounding to the padded figure therefore still let the effect reach over
+ * the very next clip, which is the thing this exists to prevent.
+ */
+function boundToStrip<T extends { blockId?: string; endMs?: number }>(tl: Timeline, e: T): T {
+  if (e.blockId || e.endMs !== undefined) return e;
+  return { ...e, endMs: Math.round(blocksEnd(tl) || tl.timelineDurationMs) };
 }
 
 export function writeKeyframe(p: Project, nodeId: string, property: string, time: number, value: KeyValue, easing: EasingCurve) {
@@ -851,7 +1029,7 @@ export function writeKeyframe(p: Project, nodeId: string, property: string, time
     // the anchor stays inside the same clip it's anchoring.
     const anchorAt = owner ? blockStarts(tl)[tl.blocks.indexOf(owner)] : 0;
     if (time > anchorAt + 1) {
-      const base = readProp(p.rig, nodeId, property);
+      const base = read(p, p.rig, nodeId, property);
       if (base !== undefined) track.keyframes.push({ id: uid('k'), time: anchorAt, value: base, easingOut: { type: 'linear' } });
     }
   }

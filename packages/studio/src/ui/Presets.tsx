@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useEditor } from '../core/store';
-import { COMP } from '../core/defaults';
+import { COMP, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { MascotThumb } from './Mascot';
 import { Panel } from './bits';
@@ -15,8 +15,7 @@ import type { Expression, Preset, Project } from '../core/types';
 
 /** A preset's own pose at its most characteristic moment — the icon *is* the animation. */
 function glyphScene(project: Project, preset: Preset) {
-  const tl = activeTimeline(project);
-  const temp: Project = { ...project, timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }], activeTimelineId: tl.id };
+  const temp = presetPreviewProject(project, preset);
   return sceneAt(temp, characteristicTime(preset), COMP);
 }
 
@@ -37,6 +36,9 @@ const FILTER_HINT: Record<Filter, string> = {
 
 type Sort = 'default' | 'newest' | 'popular';
 
+/** Six chips — the .chips grid is two columns, so three complete rows. */
+const PEEK = 6;
+
 const SORT_LABEL: Record<Sort, string> = { default: 'library order', newest: 'newest', popular: 'popular' };
 
 export function Presets() {
@@ -53,6 +55,7 @@ export function Presets() {
   const [preview, setPreview] = useState<Preset | null>(null);
   const [publishing, setPublishing] = useState<Preset | null>(null);
   const [published, setPublished] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
   // the shared library and this file's own presets browse as one list; a catalogue entry
   // already pulled into the project (addBlock copies it in) must not show up twice
   const all = useMemo(() => {
@@ -75,6 +78,10 @@ export function Presets() {
    * actually being used. Fire-and-forget: the count is a metric, and failing to record
    * one must never stop the preset landing on the timeline.
    */
+  // three full rows of two, plus one more row that gets cut in half by the fade
+  const peeking = list.length > PEEK;
+  const shown = peeking ? list.slice(0, PEEK + 2) : list;
+
   const add = (preset: Preset) => {
     addBlock(preset.id);
     if (preset.source === 'official' || preset.source === 'community') void assetsApi.markUsed(preset.id);
@@ -132,35 +139,32 @@ export function Presets() {
           onClose={() => setPublishing(null)}
           onDone={(n) => { setPublishing(null); setPublished(n); }} />
       )}
-      <div className="chips">
-        {list.map((preset) => (
-          // a plain <button> can't nest the color swatch's own <input type="color"> without
-          // invalid/broken interactive-inside-interactive markup, so this one's a div
-          // acting as a button — role/tabIndex/onKeyDown restore what <button> gave for free.
-          <div key={preset.id} className="chip" draggable role="button" tabIndex={0}
-            title={`Preview ${preset.name} · ${(preset.durationMs / 1000).toFixed(1)}s — drag straight onto the strip to skip the preview, double-click to rename`}
-            onDragStart={(e) => { e.dataTransfer.setData('text/blooby-preset', preset.id); e.dataTransfer.effectAllowed = 'copy'; }}
-            onClick={() => setPreview(preset)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPreview(preset); } }}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              const name = prompt('Rename preset', preset.name);
-              if (name?.trim()) renamePreset(preset.id, name);
-            }}>
-            <input type="color" className="chip-color" title="Accent color — shows on this preset's clips"
-              value={preset.color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
-              onChange={(e) => setPresetColor(preset.id, e.target.value)} />
-            <MascotThumb className="glyph" scene={glyphScene(project, preset)} view={COMP} />
-            {preset.name}
-            {/* only your own work can be submitted — a builtin or something already in
-                the shared library has nowhere to go */}
-            {hasBackend && preset.source === 'custom' && (
-              <button className="chip-pub" title={`Publish "${preset.name}" to the community`}
-                onClick={(e) => { e.stopPropagation(); setPublishing(preset); }}>Publish</button>
-            )}
-          </div>
-        ))}
+      {/* Three rows, then a fourth cut off mid-chip and faded — enough to browse from
+          without the rail's other panels being pushed off the bottom, and obviously
+          truncated rather than looking like the whole library. */}
+      <div className={peeking ? 'chips-peek' : undefined}>
+        <div className="chips">
+          {shown.map((preset) => (
+            <PresetChip key={preset.id} project={project} preset={preset}
+              onOpen={() => setPreview(preset)}
+              onRename={(name) => renamePreset(preset.id, name)}
+              onColor={(c) => setPresetColor(preset.id, c)}
+              onPublish={hasBackend && preset.source === 'custom' ? () => setPublishing(preset) : undefined} />
+          ))}
+        </div>
       </div>
+      {list.length > PEEK && (
+        <button className="btn sm chips-more" onClick={() => setBrowsing(true)}>
+          Show all {list.length}
+        </button>
+      )}
+      {browsing && (
+        <PresetDrawer project={project} presets={list} title={`${FILTER_LABEL[filter]} presets`}
+          onOpen={(preset) => { setBrowsing(false); setPreview(preset); }}
+          onRename={renamePreset} onColor={setPresetColor}
+          onPublish={hasBackend ? (preset) => { setBrowsing(false); setPublishing(preset); } : undefined}
+          onClose={() => setBrowsing(false)} />
+      )}
       {!list.length && (
         <p className="empty-note">
           {filter === 'custom' ? 'Save a selection of tracks from the timeline to make one.'
@@ -170,6 +174,98 @@ export function Presets() {
         </p>
       )}
     </Panel>
+  );
+}
+
+/**
+ * One preset in the library, in the rail or in the drawer.
+ *
+ * A plain <button> cannot nest the colour swatch's own <input type="color"> without
+ * invalid interactive-inside-interactive markup, so this is a div acting as one —
+ * role/tabIndex/onKeyDown restore what <button> gave for free.
+ */
+function PresetChip({ project, preset, onOpen, onRename, onColor, onPublish }: {
+  project: Project;
+  preset: Preset;
+  onOpen: () => void;
+  onRename: (name: string) => void;
+  onColor: (color: string) => void;
+  /** absent for anything that is not yours to publish — a builtin has nowhere to go */
+  onPublish?: () => void;
+}) {
+  return (
+    <div className="chip" draggable role="button" tabIndex={0}
+      title={`Preview ${preset.name} · ${(preset.durationMs / 1000).toFixed(1)}s — drag straight onto the strip to skip the preview, double-click to rename`}
+      onDragStart={(e) => { e.dataTransfer.setData('text/blooby-preset', preset.id); e.dataTransfer.effectAllowed = 'copy'; }}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        const name = prompt('Rename preset', preset.name);
+        if (name?.trim()) onRename(name);
+      }}>
+      <input type="color" className="chip-color" title="Accent color — shows on this preset's clips"
+        value={preset.color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
+        onChange={(e) => onColor(e.target.value)} />
+      <MascotThumb className="glyph" scene={glyphScene(project, preset)} view={COMP} />
+      {preset.name}
+      {onPublish && (
+        <button className="chip-pub" title={`Publish "${preset.name}" to the community`}
+          onClick={(e) => { e.stopPropagation(); onPublish(); }}>Publish</button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The whole library, in the same sliding panel the effect picker uses.
+ *
+ * The rail can only ever show a handful before it crowds out the layers and the strip
+ * below it, and scrolling a two-column grid inside a narrow rail is a poor way to browse
+ * twenty of anything. This is where you go to look at all of them.
+ */
+function PresetDrawer({ project, presets, title, onOpen, onRename, onColor, onPublish, onClose }: {
+  project: Project;
+  presets: Preset[];
+  title: string;
+  onOpen: (p: Preset) => void;
+  onRename: (id: string, name: string) => void;
+  onColor: (id: string, color: string) => void;
+  onPublish?: (p: Preset) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onClose]);
+
+  const hit = q.trim().toLowerCase();
+  const shown = hit ? presets.filter((p) => p.name.toLowerCase().includes(hit)) : presets;
+
+  return (
+    <div className="drawer-scrim" role="presentation" onClick={onClose}>
+      <aside className="drawer wide" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-head">
+          <strong>{title}</strong>
+          <span className="spacer" />
+          <button className="btn ghost sm" onClick={onClose}>Close</button>
+        </div>
+        <input className="inp" value={q} autoFocus placeholder={`Search ${presets.length} presets`}
+          aria-label="Search presets" onChange={(e) => setQ(e.target.value)} />
+        <div className="chips">
+          {shown.map((preset) => (
+            <PresetChip key={preset.id} project={project} preset={preset}
+              onOpen={() => onOpen(preset)}
+              onRename={(name) => onRename(preset.id, name)}
+              onColor={(c) => onColor(preset.id, c)}
+              onPublish={onPublish && preset.source === 'custom' ? () => onPublish(preset) : undefined} />
+          ))}
+        </div>
+        {!shown.length && <p className="empty-note">Nothing matches “{q}”.</p>}
+      </aside>
+    </div>
   );
 }
 

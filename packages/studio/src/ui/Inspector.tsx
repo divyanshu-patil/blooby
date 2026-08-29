@@ -3,7 +3,8 @@ import { useEditor } from '../core/store';
 import { cssColor, hexColor, oklchToRgb, parseHex, rgbToOklch } from '../core/color';
 import { valueAt } from '../core/scene';
 import { activeTimeline, CAMERA_ID, type ColorStop } from '../core/types';
-import { NumberField, Panel, PropRow } from './bits';
+import { KeyNav, NumberField, Panel, PropRow } from './bits';
+import { ShapeEditor } from './ShapeEditor';
 import { INK, BONE } from '../core/defaults';
 import { blockStarts, fmtSec } from '../core/timeline';
 import { easingLabel } from '../core/easing';
@@ -19,16 +20,18 @@ const SWATCHES: ColorStop[] = [
   { r: 226, g: 128, b: 178, a: 1 },
 ];
 
-export function ColorField({ value, onChange, onToggleTrack, animated }: {
-  value: ColorStop; onChange: (c: ColorStop) => void; onToggleTrack?: () => void; animated?: boolean;
+export function ColorField({ value, onChange, onToggleTrack, keyNavFor }: {
+  value: ColorStop; onChange: (c: ColorStop) => void; onToggleTrack?: () => void;
+  /** the layer whose colour this is, so the stopwatch and chevrons work on it */
+  keyNavFor?: string;
 }) {
   const lch = rgbToOklch(value);
   const set = (patch: Partial<typeof lch>) => onChange({ ...oklchToRgb({ ...lch, ...patch }), a: value.a });
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
       <div className="prop">
-        {onToggleTrack
-          ? <button className="stopwatch" aria-pressed={!!animated} title="Animate colour" onClick={onToggleTrack} />
+        {onToggleTrack && keyNavFor
+          ? <KeyNav nodeId={keyNavFor} property="color" onToggle={onToggleTrack} />
           : <span />}
         <label className="prop-label"><span className="t">Fill</span></label>
         <input type="color" value={hexColor(value)} aria-label="Fill colour"
@@ -70,13 +73,12 @@ function MultiNodeInspector({ ids }: { ids: string[] }) {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const setValue = useEditor((s) => s.setValue);
-  const toggleTrack = useEditor((s) => s.toggleTrack);
+  const toggleKeyframe = useEditor((s) => s.toggleKeyframe);
   const select = useEditor((s) => s.select);
 
   const nodes = ids.map((i) => project.rig.nodes[i]).filter((n): n is NonNullable<typeof n> => !!n);
   const names = nodes.map((n) => n.name).join(', ');
   const colorNow = valueAt(project, ids[0], 'color', playhead) as ColorStop;
-  const colorTrack = activeTimeline(project).tracks.some((t) => ids.includes(t.nodeId) && t.property === 'color');
 
   return (
     <Panel title={`${nodes.length} layers`} actions={<span className="tag">{names.slice(0, 28)}{names.length > 28 ? '…' : ''}</span>}>
@@ -87,10 +89,11 @@ function MultiNodeInspector({ ids }: { ids: string[] }) {
       <PropRow nodeId={ids} property="transform.rotation" />
       {nodes.every((n) => n.kind !== 'body') && <PropRow nodeId={ids} property="transform.length" />}
       {nodes.every((n) => n.kind === 'eye') && <PropRow nodeId={ids} property="eye.openness" />}
+      <PropRow nodeId={ids} property="visible" />
 
       <div className="divider" />
-      <ColorField value={colorNow ?? nodes[0].color} animated={colorTrack}
-        onToggleTrack={() => { for (const i of ids) toggleTrack(i, 'color'); }}
+      <ColorField value={colorNow ?? nodes[0].color} keyNavFor={ids[0]}
+        onToggleTrack={() => { for (const i of ids) toggleKeyframe(i, 'color'); }}
         onChange={(c) => { for (const i of ids) setValue(i, 'color', c, 'multi.color'); }} />
 
       <div className="divider" />
@@ -105,7 +108,7 @@ export function NodeInspector() {
   const selection = useEditor((s) => s.selection);
   const updateNode = useEditor((s) => s.updateNode);
   const setValue = useEditor((s) => s.setValue);
-  const toggleTrack = useEditor((s) => s.toggleTrack);
+  const toggleKeyframe = useEditor((s) => s.toggleKeyframe);
 
   if (selection.length > 1) return <MultiNodeInspector ids={selection} />;
 
@@ -114,7 +117,6 @@ export function NodeInspector() {
   if (!node) return <Panel title="Node"><p className="empty-note">Select a layer on the stage or in the list — shift-click to select more than one.</p></Panel>;
 
   const colorNow = valueAt(project, node.id, 'color', playhead) as ColorStop;
-  const colorTrack = activeTimeline(project).tracks.some((t) => t.nodeId === node.id && t.property === 'color');
   const isRoot = node.id === project.rig.rootId;
   const parents = Object.values(project.rig.nodes).filter((n) => n.id !== node.id && n.kind !== 'svgLayer');
 
@@ -166,9 +168,14 @@ export function NodeInspector() {
       <PropRow nodeId={node.id} property="size.x" label={isRoot ? 'Radius' : 'Width'} />
       {!isRoot && <PropRow nodeId={node.id} property="size.y" label="Height" />}
 
+      <PropRow nodeId={node.id} property="visible" />
+
       <div className="divider" />
-      <ColorField value={colorNow ?? node.color} animated={colorTrack}
-        onToggleTrack={() => toggleTrack(node.id, 'color')}
+      <ShapeEditor node={node} />
+
+      <div className="divider" />
+      <ColorField value={colorNow ?? node.color} keyNavFor={node.id}
+        onToggleTrack={() => toggleKeyframe(node.id, 'color')}
         onChange={(c) => setValue(node.id, 'color', c, `color.${node.id}`)} />
 
       <div className="divider" />
@@ -301,14 +308,16 @@ export function ClipInspector() {
   );
 }
 
-export function CameraPanel() {
-  return (
-    <Panel title="Camera">
+/** `bare` drops the panel chrome, for when it is already inside a collapsible section. */
+export function CameraPanel({ bare }: { bare?: boolean } = {}) {
+  const rows = (
+    <>
       <PropRow nodeId={CAMERA_ID} property="camera.fov" />
       <PropRow nodeId={CAMERA_ID} property="camera.distance" />
       <PropRow nodeId={CAMERA_ID} property="camera.offset.x" />
       <PropRow nodeId={CAMERA_ID} property="camera.offset.y" />
       <p className="hint">Perspective 0° is orthographic — features slide flat across the face. Open it up and the near side swells while the rim hides behind the silhouette.</p>
-    </Panel>
+    </>
   );
+  return bare ? rows : <Panel title="Camera">{rows}</Panel>;
 }

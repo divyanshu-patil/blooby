@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { COMP } from '../core/defaults';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { COMP, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
-import { activeTimeline } from '../core/types';
-import { MascotThumb } from './Mascot';
+
+import { MascotThumb, sceneBounds, unionBounds, type Bounds } from './Mascot';
+import type { SceneItem } from '../core/scene';
 import type { Preset, Project } from '../core/types';
 
 /**
@@ -20,6 +21,66 @@ import type { Preset, Project } from '../core/types';
  * a thumbnail, a name and a publish button, and hanging rename/edit/delete off it too
  * would need a menu nobody would find. You are already looking at the thing here.
  */
+/**
+ * A preset playing on a loop, as a scene — the one place that decides what previewing a
+ * preset means.
+ *
+ * The editor's preview card and the admin's review queue both show the same thing to the
+ * same person at different moments, so they cannot be allowed to drift: this is that
+ * agreement, and `presetPreviewProject` below it is what carries the preset's own
+ * emitters and modifiers in.
+ */
+export function usePresetScene(project: Project, preset: Preset | null): {
+  scene: SceneItem[] | null;
+  /** the whole loop's frame, so playback does not reframe itself as particles fly */
+  box: Bounds | null;
+} {
+  const span = Math.max(200, preset?.durationMs || 1000);
+  const [t, setT] = useState(0);
+  const raf = useRef(0);
+
+  useEffect(() => {
+    if (!preset) return;
+    const started = performance.now();
+    const tick = () => {
+      // loop, so a short preset is judged over several passes rather than one glimpse
+      setT((performance.now() - started) % span);
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [span, preset]);
+
+  /**
+   * One frame for the whole loop, sampled once when the preset changes.
+   *
+   * Clamped to the composition because that is what the stage and the exporter show: a
+   * particle that has drifted off-stage must not be allowed to shrink the mascot to fit it.
+   */
+  const box = useMemo(() => {
+    if (!preset) return null;
+    const temp = presetPreviewProject(project, preset);
+    let b: Bounds | null = null;
+    for (let i = 0; i < SAMPLES; i++) {
+      try { b = unionBounds(b, sceneBounds(sceneAt(temp, (i / SAMPLES) * span, COMP))); } catch { /* skip */ }
+    }
+    return b && {
+      x0: Math.max(0, b.x0), y0: Math.max(0, b.y0),
+      x1: Math.min(COMP.width, b.x1), y1: Math.min(COMP.height, b.y1),
+    };
+  }, [project, preset, span]);
+
+  // no `tracks.length` guard: a preset can be nothing but a confetti burst or a shake,
+  // and refusing to preview those was how an effects-only submission looked broken
+  if (!preset) return { scene: null, box: null };
+  try {
+    return { scene: sceneAt(presetPreviewProject(project, preset), t, COMP), box };
+  } catch { return { scene: null, box }; }
+}
+
+/** Enough of the loop to catch the widest moment without making a preview stutter open. */
+const SAMPLES = 24;
+
 export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDelete, onClose }: {
   project: Project;
   preset: Preset;
@@ -31,20 +92,8 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
   onClose: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [t, setT] = useState(0);
-  const raf = useRef(0);
   const span = Math.max(200, preset.durationMs || 1000);
-
-  useEffect(() => {
-    const started = performance.now();
-    const tick = () => {
-      // loop, so a short preset is judged over several passes rather than one glimpse
-      setT(((performance.now() - started) % span));
-      raf.current = requestAnimationFrame(tick);
-    };
-    raf.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf.current);
-  }, [span, preset.id]);
+  const { scene, box } = usePresetScene(project, preset);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -55,25 +104,13 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
     return () => window.removeEventListener('keydown', key);
   }, [onClose, onAdd, confirming]);
 
-  const scene = (() => {
-    try {
-      const tl = activeTimeline(project);
-      const temp: Project = {
-        ...project,
-        timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }],
-        activeTimelineId: tl.id,
-      };
-      return sceneAt(temp, t, COMP);
-    } catch { return null; }
-  })();
-
   return (
     <div className="scrim" onClick={onClose} role="presentation">
       <div className="preview-card" role="dialog" aria-modal="true" aria-label={`Preview ${preset.name}`}
         onClick={(e) => e.stopPropagation()}>
         <div className="preview-stage">
           {scene
-            ? <MascotThumb scene={scene} view={COMP} />
+            ? <MascotThumb scene={scene} view={COMP} box={box} />
             : <p className="empty-note">This preset can’t be previewed.</p>}
         </div>
 

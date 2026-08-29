@@ -20,19 +20,22 @@ export function StateMachine() {
   const cancelScheduledState = useEditor((s) => s.cancelScheduledState);
   const returnToPreviousState = useEditor((s) => s.returnToPreviousState);
 
-  const [duration, setDuration] = useState(300); // matches the store's own default
-  const [easing, setEasing] = useState<EasingCurve>({ type: 'preset', name: 'easeInOut' });
+  const setStateTransition = useEditor((s) => s.setStateTransition);
   const [curveOpen, setCurveOpen] = useState(false);
   const [atSec, setAtSec] = useState('');
 
   const active = project.timelines.find((t) => t.id === project.activeTimelineId);
   const previous = project.timelines.find((t) => t.id === previousTimelineId);
   const pendingTarget = project.timelines.find((t) => t.id === pendingStateChange?.timelineId);
+  const easing: EasingCurve = active?.transitionEasing ?? { type: 'preset', name: 'easeInOut' };
 
+  // no duration passed on purpose: the trigger has to behave exactly like a host page
+  // calling setState(name), so the panel tests the blend as authored rather than an
+  // ad-hoc one that ships nowhere
   const trigger = (id: string, scheduled: boolean) => {
-    const opts = { duration, easing, ...(scheduled && atSec.trim() ? { at: Math.max(0, parseFloat(atSec)) * 1000 } : {}) };
-    setState(id, opts);
+    setState(id, scheduled && atSec.trim() ? { at: Math.max(0, parseFloat(atSec)) * 1000 } : undefined);
   };
+  const blendOf = (t: { transitionMs?: number }) => t.transitionMs ?? 300;
 
   return (
     <Panel title="State machine">
@@ -49,6 +52,11 @@ export function StateMachine() {
               className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px] ${isActive ? 'border-signal bg-signal-soft' : 'border-line-soft bg-field'}`}>
               <span className={`h-1.5 w-1.5 flex-none rounded-full ${isActive ? 'bg-signal' : 'bg-line'}`} />
               <span className="flex-1 font-medium text-ink-2">{t.name}</span>
+              <input type="number" min={0} step={20} className="prop-num" style={{ width: 56 }}
+                title="How long a switch INTO this state blends for, in ms. 0 is an instant cut."
+                aria-label={`Blend into ${t.name}, ms`}
+                value={blendOf(t)}
+                onChange={(e) => setStateTransition(t.id, Math.max(0, Math.round(+e.target.value)))} />
               {isActive ? (
                 <span className="text-[10px] font-medium uppercase tracking-wide text-signal">active</span>
               ) : (
@@ -63,19 +71,13 @@ export function StateMachine() {
       </div>
 
       <div className="divider" />
-      <span className="panel-title">Transition</span>
-      <div className="flex items-center gap-2">
-        <span className="prop-label" style={{ width: 62 }}>Duration</span>
-        <input type="number" min={0} step={20} className="prop-num" style={{ width: 64 }}
-          value={duration} onChange={(e) => setDuration(Math.max(0, Math.round(+e.target.value)))} />
-        <span className="hint">ms · 0 = instant</span>
-      </div>
+      <span className="panel-title">Blend into {active?.name}</span>
       <div className="relative flex items-center gap-2">
         <span className="prop-label" style={{ width: 62 }}>Easing</span>
         <button className="btn sm" onClick={() => setCurveOpen((v) => !v)}>{easingLabel(easing)} ⌃</button>
-        {curveOpen && (
+        {curveOpen && active && (
           <div style={{ position: 'absolute', top: '100%', left: 62, marginTop: 6, zIndex: 20 }}>
-            <CurveEditor value={easing} onChange={setEasing} />
+            <CurveEditor value={easing} onChange={(c) => setStateTransition(active.id, blendOf(active), c)} />
           </div>
         )}
       </div>
@@ -96,7 +98,7 @@ export function StateMachine() {
       <div className="divider" />
       <div className="row">
         <button className="btn sm" disabled={!previous} title={previous ? `returnToPreviousState() → ${previous.name}` : 'No previous state yet'}
-          onClick={() => returnToPreviousState({ duration, easing })}>
+          onClick={() => returnToPreviousState()}>
           ↩ Return to previous{previous ? ` (${previous.name})` : ''}
         </button>
       </div>

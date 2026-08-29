@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useEditor } from '../core/store';
+import { parseSvg } from '../core/svg';
 import { INK, uid } from '../core/defaults';
 import { cssColor } from '../core/color';
 import { Panel } from './bits';
@@ -45,11 +46,9 @@ export function Layers() {
   };
 
   const importSvg = async (f: File) => {
-    const text = await f.text();
-    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
-    const svg = doc.querySelector('svg');
-    if (!svg) return;
-    const vb = svg.getAttribute('viewBox') ?? `0 0 ${svg.getAttribute('width') ?? 100} ${svg.getAttribute('height') ?? 100}`;
+    const parsed = parseSvg(await f.text());
+    if (!parsed) return;
+    const vb = parsed.viewBox;
     const [, , vw, vh] = vb.split(/[\s,]+/).map(Number);
     const top = Math.max(0, ...Object.values(project.rig.nodes).map((n) => n.zIndex));
     addNode({
@@ -58,7 +57,7 @@ export function Layers() {
       transform: { scale: { x: 1, y: 1 }, rotation: 0, length: 1 },
       size: { x: Math.min(vw || 80, 140), y: Math.min(vh || 80, 140) },
       color: INK, visible: true, zIndex: top + 1,
-      svg: { sourceMarkup: svg.innerHTML, viewBox: vb },
+      svg: { sourceMarkup: parsed.markup, viewBox: vb },
     });
   };
 
@@ -70,8 +69,8 @@ export function Layers() {
         <button className="btn ghost sm icon" title="Import SVG layer" onClick={() => file.current?.click()}>↥</button>
       </>
     }>
-      <input ref={file} type="file" accept=".svg,image/svg+xml" hidden
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) importSvg(f); e.target.value = ''; }} />
+      <input ref={file} type="file" accept=".svg,image/svg+xml" multiple hidden
+        onChange={(e) => { for (const f of [...(e.target.files ?? [])]) importSvg(f); e.target.value = ''; }} />
       <div>
         {rows.map(({ node, depth }) => (
           <div key={node.id} className="layer" data-depth={depth} aria-selected={selection.includes(node.id)}

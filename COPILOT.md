@@ -26,6 +26,7 @@ lists drifting apart, and both are now derived.
 | `PROPS` | `core/props.ts` | inspector labels + sliders, what the renderer bakes, what the copilot may keyframe, the property reference in the system prompt |
 | `MODIFIERS` | `core/types.ts` | the Effects panel's buttons and dial limits, the effect list in `TOOL_DOCS`, what `validate` accepts |
 | `TOOL_NAMES` | `copilot/tools.ts` | the JSON schema sent to Ollama, the parser's allow-list |
+| `EMITTER_PRESETS` | `ui/Effects.tsx` | the ready-made emitters in the panel |
 
 Nothing downstream of these should ever restate their contents. If you find yourself
 typing `'shake' \|\| 'float'` or a list of property paths, you are re-introducing the bug.
@@ -73,6 +74,53 @@ unique. `x` and `y` are deliberately absent — `size.x`, `flatOffset.x` and
 `transform.scale.x` all end in `x`, so a guess would be wrong more often than right. A
 model that writes a bare `x` gets a rejection naming every valid path, and the re-prompt
 fixes it. Keep it that way; do not add a favourite.
+
+## Emitters
+
+Everything that leaves the mascot — zzz, ♪, tears, a notification badge, confetti, objects
+orbiting overhead — is one `Emitter` record with a different `path` and different numbers.
+Resist adding a second system for the next one; if it does not fit, widen `path`.
+
+Three rules the engine depends on:
+
+- **No simulation.** `sceneAt(t)` must be answerable for any `t` in any order — the
+  timeline scrubs, the exporter jumps, a thumbnail asks for one instant — so a particle is
+  a pure function of its slot index and the time. Never carry state between frames.
+- **`emitterFrame` is the only mapping** between rig-unit offsets and the screen. The stage
+  handles and the evaluator both use it; two copies would drift the moment the body scaled
+  and the handle would sit next to the stream rather than on it.
+- **A particle at u=0 is invisible** (faded in over its first 12%) and dropped. Any check
+  comparing "the newest particle" against the start handle is measuring a different slot.
+
+Lottie cannot represent a glyph without an embedded font descriptor, so emitters join SVG
+layers in the exporter's `skipped` list — named, never silently dropped. GIF and MP4 go
+through the real renderer and keep them.
+
+## Shapes and morphing
+
+A layer can carry `shapePath`, an SVG outline in a **-0.5..0.5 box**, drawn instead of its
+ellipse/pill and scaled to its size. Authoring in a unit box is what makes a morph about
+outlines rather than dimensions.
+
+`core/path.ts` owns it. Two `d` strings almost never share a command structure, so it
+flattens both to the same number of points spaced evenly by arc length, rotates them into
+their best alignment (or a square morphing into a star twists on the way), and interpolates
+point by point. `lerpValue` calls it, so `shape.path` keyframes morph for free.
+
+It is all arithmetic on purpose: `SVGPathElement.getPointAtLength` only exists in a
+browser, and the selfcheck, the exporter and any headless render need identical results.
+
+An outline is also editable by hand: `pathAnchors` returns the points that define it (not
+resampled ones — dragging one of 64 even samples would fight the seven that actually shape
+it) and `movePathAnchor` moves one, carrying its control handles rigidly so curvature
+survives. Hand-editing clears the primitive's dials, because they no longer describe it.
+
+Two rules if you touch the parser:
+
+- **Every loop iteration must consume a token.** A malformed path left `cmd` on `Z`, which
+  reads nothing, and `M 1 zz 4` spun forever. There is a `step()` guard on every branch.
+- **Garbage degrades to nothing, never to NaN.** The shape editor takes pasted text, and
+  NaN coordinates go straight into the DOM. Non-finite segments are dropped.
 
 ## Adding an effect
 
@@ -194,6 +242,24 @@ Two rules when adding a check:
 
 The selfcheck covers each complaint firing on the shape that should trigger it, and — the
 one that matters most — a well-made clip drawing no complaints at all.
+
+## What the copilot can reach
+
+The rule at the top of this file — if the editor can do it, the copilot must be able to —
+is why every capability added to the editor arrives with a tool in the same commit:
+
+| editor feature | tool |
+| --- | --- |
+| shapes and morphing | `set_shape` (with `atMs`, two of them morph) |
+| what an emitter throws | `set_emitter_parts` |
+| emitters at all | `add_emitter` |
+| effect and emitter ranges | `set_effect_range` |
+| pendulum | `add_modifier` with `kind: "pendulum"` |
+| retiring a feature | `visible`, a plain 0–1 property |
+
+The tool docs list the shape library's ids inline, generated from `SHAPE_LIBRARY`, so a
+new shape is offerable the moment it exists. The selfcheck asserts that: every entry's id
+must appear in `TOOL_DOCS`.
 
 ## Rules the copilot code itself follows
 

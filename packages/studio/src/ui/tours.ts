@@ -51,7 +51,7 @@ const clips: DriveStep[] = [
   { element: '[data-tour="rail-left"]', popover: { title: 'The preset library', description: 'Built-in, official and community animations. Click one to append it, or drag it onto the strip to drop it at a position.' } },
   { element: '[data-tour="strip"]', popover: { title: 'The clip strip', description: 'Each block is one preset playing over a span of time. Drag to reorder, drag the right edge to stretch, and the keyframes inside retime with it.' } },
   { element: '[data-tour="save-preset"]', popover: { title: 'Make your own', description: 'Turns the current selection into a reusable preset. From there you can publish it to the community.' } },
-  { element: '[data-tour="tab-fx"]', popover: { title: 'Effects', description: 'Shake, float and stretch layer procedural motion on top of your keyframes — baked into literal frames at export, so they survive the trip to Lottie.' } },
+  { element: '[data-tour="tab-fx"]', popover: { title: 'Modifiers and effects', description: 'Procedural motion layered on top of your keyframes, and things thrown off the mascot. There is a tour of its own for these.' } },
 ];
 
 const states: DriveStep[] = [
@@ -62,12 +62,32 @@ const states: DriveStep[] = [
   { element: '[data-tour="export"]', popover: { title: 'Exporting', description: 'A .lottie bundles every timeline as its own state plus the machine that drives them. GIF and MP4 flatten the active timeline instead.' } },
 ];
 
+/** Modifiers, emitters and their ranges — the half of the app that is not keyframes. */
+const effects: DriveStep[] = [
+  { popover: { title: 'Modifiers and effects', description: 'Two different things. A modifier shakes, swings or pulses the rig itself. An effect throws something off it — zzz, tears, confetti, objects in orbit. Neither one touches your keyframes; they layer on top.' } },
+  { element: '[data-tour="tab-fx"]', popover: { title: 'Where they live', description: 'Both sections fold, so whichever you are working in gets the height. The add buttons stay reachable while folded.' } },
+  { element: '[data-tour="fx-target"]', popover: { title: 'Pick what it lands on', description: 'A new modifier or effect goes on the layer chosen here — the eyes rather than the whole mascot, say. Clicking the one already chosen clears it back to the body.' } },
+  { element: '[data-tour="strip"]', popover: { title: 'Scope', description: 'With a clip selected, new effects belong to that clip and travel with it. With nothing selected they are global, bounded to the clips already on the strip so a preset you add later does not land underneath one.' } },
+  { element: '[data-tour="fx-range"]', popover: { title: 'When it runs', description: 'Drag the handles to narrow an effect to part of its scope. The bar you are dragging is drawn on the strip too, so you can see it against the clips.' } },
+  { element: '[data-tour="stage"]', popover: { title: 'Aiming an effect', description: 'Select an emitter and its path appears on the stage: a start point, an end point, and a knob where the particles start to fade. Drag an end near a layer and it snaps to it — which parents it, so tears follow the eye wherever the head moves.' } },
+];
+
+/** Outlines, morphing, and retiring a feature. */
+const shapes: DriveStep[] = [
+  { popover: { title: 'Shapes and morphing', description: 'Any layer can carry an outline instead of its plain pill or ellipse — and two outline keyframes morph between them. This is how an eye becomes a star.' } },
+  { element: '[data-tour="tab-node"]', popover: { title: 'The shape editor', description: 'Pick a primitive and turn its dials — a star\u2019s points and waist, a rect\u2019s corners, how rounded the points are — or paste an SVG path straight in. It opens on the layer\u2019s own natural shape: a circle for the body, a pill for an eye.' } },
+  { element: '[data-tour="rail-right"]', popover: { title: 'Morphing', description: 'Keyframe the shape with the stopwatch, move the playhead, pick a different one. The in-between is a real shape, not a switch at the halfway mark.' } },
+  { element: '[data-tour="rail-right"]', popover: { title: 'Leaving the scene', description: 'The Visible row is a plain 0 to 1 and it fades AND shrinks. Keyframe it to 0 to retire a feature into the next clip rather than blinking it off.' } },
+];
+
 export const EDITOR_TOURS: TourEntry[] = [
   { key: 'editor', label: 'The basics', blurb: 'The four areas and what each is for', steps: intro },
   { key: 'editor-posing', label: 'Posing the mascot', blurb: 'Turning the head, yaw and pitch, eyes', steps: posing },
   { key: 'editor-animating', label: 'Animating', blurb: 'Stopwatch, keyframes, selection, easing', steps: animating },
   { key: 'editor-graph', label: 'The graph editor', blurb: 'Reading and shaping motion curves', steps: graph },
   { key: 'editor-clips', label: 'Clips and presets', blurb: 'Reusable animation blocks and effects', steps: clips },
+  { key: 'editor-effects', label: 'Modifiers and effects', blurb: 'Shake, swing, and things thrown off the mascot', steps: effects },
+  { key: 'editor-shapes', label: 'Shapes and morphing', blurb: 'Outlines, stars, and fading a feature out', steps: shapes },
   { key: 'editor-states', label: 'States and export', blurb: 'Multiple timelines, Lottie states', steps: states },
 ];
 
