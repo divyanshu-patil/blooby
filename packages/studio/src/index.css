@@ -922,3 +922,21 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .svglib-item:hover .svglib-x, .svglib-x:focus-visible { opacity: 1; }
 .svglib-paste { font: 11px/1.4 ui-monospace, monospace; resize: vertical; }
 .hint.err { color: var(--hot); }
+
+/* --- the preset rail shows three rows, then admits there are more ---------------- */
+/* The fourth row is deliberately cut mid-chip: a clean edge at a row boundary reads as
+   "that is all of them", which is exactly the wrong thing to say. */
+.chips-peek {
+  /* on the peek itself, not on .chips inside it: custom properties inherit downward, so
+     declaring them on the child left this calc() invalid and clipped nothing */
+  --chip-h: 75px;
+  --chip-gap: 6px;
+  overflow: hidden;
+  max-height: calc(var(--chip-h) * 3 + var(--chip-gap) * 3 + var(--chip-h) * 0.45);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0 74%, rgba(0, 0, 0, .12) 100%);
+  mask-image: linear-gradient(to bottom, #000 0 74%, rgba(0, 0, 0, .12) 100%);
+}
+.chips-more { width: 100%; margin-top: 6px; }
+/* the library is worth two more columns than the rail can give it */
+.drawer.wide { width: min(560px, 96vw); }
+.drawer.wide .chips { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
