@@ -99,6 +99,22 @@ zip writer, the GIF worker, MediaRecorder support — and reports in the tab tit
 
 The exported files were checked against `lottie-web` and `unzip`.
 
+## Deploying
+
+`apps/web` and `apps/admin` are single-page apps on Vercel: the built output is one
+`index.html` plus hashed assets, and every route exists only in the browser's router.
+Without a rewrite, refreshing anywhere but `/` asks Vercel for a file that was never
+built and gets its `404: NOT_FOUND` page instead of the app.
+
+Each app's `vercel.json` therefore rewrites unmatched paths to `/index.html`. Vercel
+checks the filesystem *before* rewrites, so real assets are still served directly. The
+`(?!assets/)` exclusion covers the one case that ordering does not: a request for an
+asset that no longer exists — a stale hashed URL held by an open tab across a redeploy —
+should 404 honestly rather than be handed HTML the browser then fails to parse as
+JavaScript.
+
+Deleting that rewrite brings the refresh 404 straight back.
+
 ## Shortcuts
 
 | | |
