@@ -77,10 +77,11 @@ canvas, the block thumbnails and the exporter all render through the same
 
 ## Verification
 
-`pnpm test` runs the whole suite with Vitest — 711 tests across the editor engine and
-the API. Each file sits beside the module it covers (`core/curvature.test.ts`,
-`export/lottie.test.ts`, `services/copilot.service.test.ts`), so a change and its checks
-are in the same directory.
+`pnpm test` runs the whole suite with Vitest — 817 tests across the editor engine, the
+API, and both front ends. Each file sits beside the module it covers (`core/curvature.test.ts`,
+`export/lottie.test.ts`, `services/copilot.service.test.ts`, `features/Moderation.test.tsx`),
+so a change and its checks are in the same directory. The apps render through
+Testing Library in jsdom; the editor engine and the API are plain node.
 
 `pnpm run ci` is what the PR workflow runs: lint, typecheck and test across every
 package. `pnpm run test:coverage` prints a per-file table in the terminal.

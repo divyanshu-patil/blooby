@@ -4,7 +4,9 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    // jest-dom augments Vitest's Assertion type; without it every
+    // toBeInTheDocument() is a type error even though the tests pass
+    "types": ["vite/client", "@testing-library/jest-dom"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 

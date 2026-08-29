@@ -14,7 +14,17 @@ export function Splashscreens() {
   const [editing, setEditing] = useState<SplashscreenRow | 'new' | null>(null);
   const { data, error, loading, reload } = useAsync(() => adminApi.splashscreens(), []);
 
-  const act = async (fn: () => Promise<unknown>) => { await fn(); reload(); };
+  /**
+   * Publish, unpublish and delete all close the dialog before they run, so a rejection
+   * here has nowhere to appear — it used to reject into the void and the admin saw
+   * nothing: no error, no reload, and a list still showing the old state.
+   */
+  const [problem, setProblem] = useState<string | null>(null);
+  const act = async (fn: () => Promise<unknown>) => {
+    setProblem(null);
+    try { await fn(); reload(); }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'That did not work.'); }
+  };
   const live = data?.find((s) => s.status === 'published');
 
   return (
@@ -26,6 +36,7 @@ export function Splashscreens() {
       <div className="page-body">
         {loading && <div className="skeleton" style={{ height: 220 }} />}
         {error && <ErrorState message={error} onRetry={reload} />}
+        {problem && <p className="setting-alert">{problem}</p>}
 
         {data && !loading && (
           <>
