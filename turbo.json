@@ -1,20 +1,60 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
-  "globalDependencies": ["**/.env", "**/.env.*"],
-  "globalEnv": ["NODE_ENV", "VITE_*"],
+  "globalDependencies": [
+    "**/.env",
+    "**/.env.*"
+  ],
+  "globalEnv": [
+    "NODE_ENV",
+    "VITE_*"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
-    "lint": {},
-    "check": {
-      "inputs": ["src/**"]
+    "lint": {
+      "inputs": [
+        "src/**",
+        "*.json",
+        ".oxlintrc.json"
+      ]
     },
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "test": {
+      "inputs": [
+        "src/**",
+        "*.json",
+        ".env.test"
+      ],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "src/**",
+        "*.json",
+        "tsconfig*.json"
+      ],
+      "outputs": []
+    },
+    "test:coverage": {
+      "inputs": [
+        "src/**",
+        "*.json",
+        ".env.test"
+      ],
+      "outputs": []
     }
   }
 }

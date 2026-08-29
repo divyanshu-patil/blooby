@@ -12,3 +12,6 @@ dist-ssr
 
 # turborepo
 .turbo
+
+# vitest coverage is reported in the terminal; nothing should be written to disk
+coverage/

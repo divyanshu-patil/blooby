@@ -10,13 +10,19 @@
     "dev:api": "turbo run dev --filter=@blooby/api",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "check": "turbo run check",
-    "seed:presets": "pnpm --filter @blooby/api seed:presets"
+    "seed:presets": "pnpm --filter @blooby/api seed:presets",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "ci": "turbo run lint typecheck test",
+    "test:coverage": "turbo run test:coverage"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.11",
     "oxlint": "^1.75.0",
+    "tsx": "^4.23.12",
     "turbo": "^2.10.12",
-    "typescript": "~6.0.2"
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@10.34.5"
 }

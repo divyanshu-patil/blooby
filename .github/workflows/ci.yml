@@ -1,0 +1,46 @@
+name: CI
+
+# Every pull request, and every push to main so the default branch is never left red.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# a new push to the same PR cancels the run it supersedes
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: lint · typecheck · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # `prisma generate` runs on postinstall and needs no database — the API's types
+      # come from the schema file, not from a live connection.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # One turbo invocation so a failure in any package fails the job, and so the task
+      # graph builds packages/studio before the apps that typecheck against it.
+      - name: Lint, typecheck and test
+        run: pnpm run ci
+
+      # Advisory: prints the per-file table in the log without gating the PR on a number.
+      - name: Coverage
+        if: always()
+        run: pnpm run test:coverage
