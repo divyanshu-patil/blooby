@@ -28,7 +28,7 @@ export function AssetPreview({ kind, data, loop = true, className }: {
   // the editor's own preview, not a second implementation of it: same loop, same
   // presetPreviewProject, so a preset's emitters and modifiers reach the review queue
   // exactly as they reach the person who submitted it
-  const presetScene = usePresetScene(base, loop ? preset : null);
+  const { scene: presetScene, box: presetBox } = usePresetScene(base, loop ? preset : null);
 
   const poseScene = useMemo(() => {
     if (kind === 'preset') return null;
@@ -56,9 +56,11 @@ export function AssetPreview({ kind, data, loop = true, className }: {
   }, [kind, loop, preset, base]);
 
   const scene = kind === 'preset' ? (presetScene ?? stillScene) : poseScene;
+  // pinned for a playing preset; a still or a pose has nothing to reframe against
+  const box = kind === 'preset' && presetScene ? presetBox : null;
 
   if (!scene) {
     return <p className="empty-note">This {kind} can’t be previewed — its data looks malformed.</p>;
   }
-  return <MascotThumb className={className} scene={scene} view={COMP} />;
+  return <MascotThumb className={className} scene={scene} view={COMP} box={box} />;
 }

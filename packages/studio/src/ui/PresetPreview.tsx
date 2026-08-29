@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { COMP, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 
-import { MascotThumb } from './Mascot';
+import { MascotThumb, sceneBounds, unionBounds, type Bounds } from './Mascot';
 import type { SceneItem } from '../core/scene';
 import type { Preset, Project } from '../core/types';
 
@@ -30,7 +30,11 @@ import type { Preset, Project } from '../core/types';
  * agreement, and `presetPreviewProject` below it is what carries the preset's own
  * emitters and modifiers in.
  */
-export function usePresetScene(project: Project, preset: Preset | null): SceneItem[] | null {
+export function usePresetScene(project: Project, preset: Preset | null): {
+  scene: SceneItem[] | null;
+  /** the whole loop's frame, so playback does not reframe itself as particles fly */
+  box: Bounds | null;
+} {
   const span = Math.max(200, preset?.durationMs || 1000);
   const [t, setT] = useState(0);
   const raf = useRef(0);
@@ -47,13 +51,35 @@ export function usePresetScene(project: Project, preset: Preset | null): SceneIt
     return () => cancelAnimationFrame(raf.current);
   }, [span, preset]);
 
+  /**
+   * One frame for the whole loop, sampled once when the preset changes.
+   *
+   * Clamped to the composition because that is what the stage and the exporter show: a
+   * particle that has drifted off-stage must not be allowed to shrink the mascot to fit it.
+   */
+  const box = useMemo(() => {
+    if (!preset) return null;
+    const temp = presetPreviewProject(project, preset);
+    let b: Bounds | null = null;
+    for (let i = 0; i < SAMPLES; i++) {
+      try { b = unionBounds(b, sceneBounds(sceneAt(temp, (i / SAMPLES) * span, COMP))); } catch { /* skip */ }
+    }
+    return b && {
+      x0: Math.max(0, b.x0), y0: Math.max(0, b.y0),
+      x1: Math.min(COMP.width, b.x1), y1: Math.min(COMP.height, b.y1),
+    };
+  }, [project, preset, span]);
+
   // no `tracks.length` guard: a preset can be nothing but a confetti burst or a shake,
   // and refusing to preview those was how an effects-only submission looked broken
-  if (!preset) return null;
+  if (!preset) return { scene: null, box: null };
   try {
-    return sceneAt(presetPreviewProject(project, preset), t, COMP);
-  } catch { return null; }
+    return { scene: sceneAt(presetPreviewProject(project, preset), t, COMP), box };
+  } catch { return { scene: null, box }; }
 }
+
+/** Enough of the loop to catch the widest moment without making a preview stutter open. */
+const SAMPLES = 24;
 
 export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDelete, onClose }: {
   project: Project;
@@ -67,7 +93,7 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
 }) {
   const [confirming, setConfirming] = useState(false);
   const span = Math.max(200, preset.durationMs || 1000);
-  const scene = usePresetScene(project, preset);
+  const { scene, box } = usePresetScene(project, preset);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -84,7 +110,7 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
         onClick={(e) => e.stopPropagation()}>
         <div className="preview-stage">
           {scene
-            ? <MascotThumb scene={scene} view={COMP} />
+            ? <MascotThumb scene={scene} view={COMP} box={box} />
             : <p className="empty-note">This preset can’t be previewed.</p>}
         </div>
 

@@ -14,6 +14,7 @@ import { activeTransitionAt, blocksEnd, blockStarts, characteristicTime, DEFAULT
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { parseSvg } from './svg';
+import { sceneBounds, unionBounds } from '../ui/Mascot';
 import { useEditor, writeKeyframe } from './store';
 import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readEffectProp, readProp, resolveProp, writeEffectProp, writeProp } from './props';
 import { MODIFIER_KINDS, MODIFIERS } from './types';
@@ -2896,6 +2897,33 @@ ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as U
     `${(edited.emitters ?? []).length} emitters`);
 
   ed5().loadProject(defaultProject());
+}
+
+// --- a playing preview keeps ONE frame, instead of refitting every tick ----------
+{
+  const base3 = defaultProject();
+  const moved: string[] = [];
+  const escaped: string[] = [];
+  for (const preset of builtinPresets()) {
+    const temp = presetPreviewProject(base3, preset);
+    const frames: (ReturnType<typeof sceneBounds>)[] = [];
+    let union: ReturnType<typeof sceneBounds> = null;
+    for (let i = 0; i < 24; i++) {
+      const b = sceneBounds(sceneAt(temp, (i / 24) * preset.durationMs, { width: 720, height: 720 }));
+      if (!b) continue;
+      frames.push(b);
+      union = unionBounds(union, b);
+    }
+    if (!frames.length || !union) continue;
+    const widths = frames.map((b) => b!.x1 - b!.x0);
+    // the thing that made the mascot creep: fitting each frame gives a different frame
+    if (Math.max(...widths) - Math.min(...widths) > 2) moved.push(preset.name);
+    // and the union has to actually contain every one of them, or the fix clips
+    if (frames.some((b) => b!.x0 < union!.x0 - 1e-6 || b!.x1 > union!.x1 + 1e-6
+      || b!.y0 < union!.y0 - 1e-6 || b!.y1 > union!.y1 + 1e-6)) escaped.push(preset.name);
+  }
+  ok('fitting a frame at a time really does move the frame', moved.length > 8, `${moved.length} presets`);
+  ok('and the loop-wide box contains every frame of every preset', escaped.length === 0, escaped.join());
 }
 
 console.log(failures === 0 ? `selfcheck: all checks passed` : `selfcheck: ${failures} FAILED`);

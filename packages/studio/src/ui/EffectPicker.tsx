@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { COMP, effectPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { MODIFIER_KINDS, MODIFIERS, type Emitter, type Modifier, type ModifierKind, type Project } from '../core/types';
-import { MascotThumb } from './Mascot';
+import { MascotThumb, sceneBounds, unionBounds, type Bounds } from './Mascot';
 
 export interface EffectChoice {
   key: string;
@@ -95,20 +95,35 @@ function EffectPreview({ project, choice }: { project: Project; choice: EffectCh
     return () => cancelAnimationFrame(raf.current);
   }, [choice.key]);
 
-  const scene = (() => {
+  const temp = useMemo(() => {
     try {
-      const temp = effectPreviewProject(project, {
+      return effectPreviewProject(project, {
         modifier: choice.modifier ? { ...choice.modifier, nodeId: project.rig.rootId } : undefined,
         emitter: choice.emitter?.(project.rig.rootId),
       });
-      return sceneAt(temp, t, COMP);
     } catch { return null; }
+  }, [project, choice]);
+
+  // the whole loop's frame, once — a big pad only dampened the reframing, it did not stop
+  // it, and the mascot still crept as particles came and went
+  const box = useMemo(() => {
+    if (!temp) return null;
+    let b: Bounds | null = null;
+    for (let i = 0; i < 24; i++) {
+      try { b = unionBounds(b, sceneBounds(sceneAt(temp, (i / 24) * 2000, COMP))); } catch { /* skip */ }
+    }
+    return b && {
+      x0: Math.max(0, b.x0), y0: Math.max(0, b.y0),
+      x1: Math.min(COMP.width, b.x1), y1: Math.min(COMP.height, b.y1),
+    };
+  }, [temp]);
+
+  const scene = (() => {
+    try { return temp ? sceneAt(temp, t, COMP) : null; } catch { return null; }
   })();
 
   if (!scene) return <p className="empty-note">No preview.</p>;
-  // a fixed box rather than MascotThumb's fit-to-bounds: a preview that reframes itself as
-  // particles fly off looks like the mascot is shrinking, not like confetti is rising
-  return <MascotThumb scene={scene} view={COMP} pad={90} />;
+  return <MascotThumb scene={scene} view={COMP} box={box} pad={24} />;
 }
 
 /** The built-in modifiers, described so the list is readable without hovering. */
