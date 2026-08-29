@@ -10,10 +10,26 @@
  */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Editor } from '@blooby/studio';
+import { AssetPreview, Editor } from '@blooby/studio';
 import '@blooby/studio/index.css';
 import '@blooby/studio/kit.css';
 import '@blooby/studio/tour.css';
 import './app.css';
 
-createRoot(document.getElementById('root')!).render(<StrictMode><Editor /></StrictMode>);
+/**
+ * `?asset=<json>` mounts the admin review queue's own preview instead of the editor, so
+ * the thing moderators actually look at can be driven from a test without a database row
+ * and an admin account behind it.
+ */
+function Harness() {
+  const raw = new URLSearchParams(location.search).get('asset');
+  if (!raw) return <Editor />;
+  const asset = JSON.parse(raw) as { kind: 'preset' | 'expression'; data: unknown };
+  return (
+    <div className="review-stage" style={{ width: 480, height: 480 }}>
+      <AssetPreview kind={asset.kind} data={asset.data} />
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(<StrictMode><Harness /></StrictMode>);

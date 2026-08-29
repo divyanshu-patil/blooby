@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { COMP, defaultProject, presetPreviewProject } from '../core/defaults';
 import { buildScene, evaluateRig, sceneAt } from '../core/scene';
+import { usePresetScene } from '../ui/PresetPreview';
 import { splitKey } from '../core/store';
 import { CAMERA_ID } from '../core/types';
 import { writeProp } from '../core/props';
@@ -23,29 +24,15 @@ export function AssetPreview({ kind, data, loop = true, className }: {
 }) {
   const base = useMemo(() => defaultProject(), []);
   const preset = kind === 'preset' ? (data as Preset | null) : null;
-  const span = Math.max(200, preset?.durationMs || 1000);
 
-  const [t, setT] = useState(0);
-  const raf = useRef(0);
+  // the editor's own preview, not a second implementation of it: same loop, same
+  // presetPreviewProject, so a preset's emitters and modifiers reach the review queue
+  // exactly as they reach the person who submitted it
+  const presetScene = usePresetScene(base, loop ? preset : null);
 
-  useEffect(() => {
-    if (kind !== 'preset' || !loop) return;
-    const started = performance.now();
-    const tick = () => {
-      setT((performance.now() - started) % span);
-      raf.current = requestAnimationFrame(tick);
-    };
-    raf.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf.current);
-  }, [kind, loop, span, data]);
-
-  const scene = useMemo(() => {
+  const poseScene = useMemo(() => {
+    if (kind === 'preset') return null;
     try {
-      if (kind === 'preset') {
-        if (!preset?.tracks?.length) return null;
-        return sceneAt(presetPreviewProject(base, preset as Preset), t, COMP);
-      }
-
       // An expression is a pose, not a motion: apply its snapshot straight onto the
       // rig rather than routing it through a timeline that would only hold one frame.
       const snapshot = (data as Expression | null)?.snapshot;
@@ -60,7 +47,15 @@ export function AssetPreview({ kind, data, loop = true, className }: {
     } catch {
       return null;
     }
-  }, [kind, preset, data, base, t]);
+  }, [kind, data, base]);
+
+  // a still frame when the caller asked for no motion — the same scene, sampled once
+  const stillScene = useMemo(() => {
+    if (kind !== 'preset' || loop || !preset) return null;
+    try { return sceneAt(presetPreviewProject(base, preset), 0, COMP); } catch { return null; }
+  }, [kind, loop, preset, base]);
+
+  const scene = kind === 'preset' ? (presetScene ?? stillScene) : poseScene;
 
   if (!scene) {
     return <p className="empty-note">This {kind} can’t be previewed — its data looks malformed.</p>;

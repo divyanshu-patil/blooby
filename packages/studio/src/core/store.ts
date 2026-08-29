@@ -229,6 +229,45 @@ const write = (p: Project, nodeId: string, path: string, v: KeyValue): void => {
   else writeProp(p.rig, nodeId, path, v);
 };
 
+
+/**
+ * The effects that belong with a stretch of a timeline, as a preset carries them.
+ *
+ * A preset is "the animation", not "the keyframes": Sleepy without its zzz is a mascot
+ * with its eyes shut. savePreset only ever copied tracks, so every preset a user made
+ * lost its emitters and modifiers — and since publishing sends that object as-is, the
+ * community queue was full of presets with nothing to preview.
+ *
+ * `startMs`/`endMs` are relative to the effect's own scope, so a clip-scoped one already
+ * uses the origin the preset wants and a global one has to be rebased off the span.
+ */
+function effectsFor<T extends { blockId?: string; startMs?: number; endMs?: number }>(
+  all: T[], blockIds: Set<string>, start: number, durationMs: number,
+): Omit<T, 'id' | 'blockId'>[] {
+  const out: Omit<T, 'id' | 'blockId'>[] = [];
+  for (const fx of all) {
+    if (fx.blockId) {
+      if (!blockIds.has(fx.blockId)) continue;
+      const { id, blockId, ...rest } = fx as T & { id?: string };
+      void id; void blockId;
+      out.push(rest as Omit<T, 'id' | 'blockId'>);
+      continue;
+    }
+    // global: keep it only if it actually overlaps the span being saved, then rebase
+    const from = fx.startMs ?? 0;
+    const to = fx.endMs ?? Infinity;
+    if (to <= start || from >= start + durationMs) continue;
+    const { id, blockId, ...rest } = fx as T & { id?: string };
+    void id; void blockId;
+    out.push({
+      ...(rest as Omit<T, 'id' | 'blockId'>),
+      startMs: Math.max(0, from - start),
+      ...(fx.endMs === undefined ? {} : { endMs: Math.min(durationMs, to - start) }),
+    });
+  }
+  return out;
+}
+
 export const useEditor = create<Editor>((set, get) => ({
   project: load(),
   catalog: [],
@@ -886,9 +925,13 @@ export const useEditor = create<Editor>((set, get) => ({
       const picked = at(p).tracks.filter((t) => trackIds.includes(t.id));
       if (!picked.length) return;
       const start = Math.min(...picked.flatMap((t) => t.keyframes.map((k) => k.time)));
+      const tl = at(p);
+      const blockIds = new Set(picked.map((t) => t.blockId).filter((x): x is string => !!x));
       const preset: Preset = {
         id: uid('p'), name: uniqueName(name, p.presets.map((x) => x.name)), source: 'custom', durationMs,
         tracks: picked.map((t) => ({ id: uid('t'), nodeId: t.nodeId, property: t.property, keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })) })),
+        modifiers: effectsFor(tl.modifiers, blockIds, start, durationMs),
+        emitters: effectsFor(tl.emitters ?? [], blockIds, start, durationMs),
       };
       p.presets.push(preset);
     });
@@ -914,6 +957,9 @@ export const useEditor = create<Editor>((set, get) => ({
         id: uid('t'), nodeId: t.nodeId, property: t.property,
         keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })),
       }));
+      const only = new Set([blockId]);
+      preset.modifiers = effectsFor(tl.modifiers, only, start, block.durationMs);
+      preset.emitters = effectsFor(tl.emitters ?? [], only, start, block.durationMs);
     });
   },
 

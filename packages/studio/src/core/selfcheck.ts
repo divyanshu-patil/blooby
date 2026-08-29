@@ -25,7 +25,7 @@ import { baseUrl, CLOUD_CATALOGUE, LOCAL_URL, needsKey, resolveModel, usesBacken
 import { listModels } from '../copilot/client';
 import { crc32 } from '../export/zip';
 import { activeTimeline } from './types';
-import type { Project, Rig, RigNode } from './types';
+import type { Preset, Project, Rig, RigNode } from './types';
 
 let failures = 0;
 function ok(label: string, cond: boolean, detail = '') {
@@ -2853,6 +2853,49 @@ ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as U
 
   ok('a viewBox-less SVG still gets one', parseSvg('<svg width="40" height="20"><path d="M0 0h1v1H0Z"/></svg>')?.viewBox === '0 0 40 20');
   ok('and something that is not an SVG is refused', parseSvg('hello') === null);
+}
+
+// --- a preset carries its effects, so a published one has something to preview ----
+{
+  const ed5 = () => useEditor.getState();
+  ed5().loadProject(defaultProject());
+  ed5().commit((p) => { p.presets = builtinPresets(); });
+  ed5().commit((p) => {
+    const tl = activeTimeline(p);
+    tl.blocks = []; tl.tracks = []; tl.emitters = []; tl.modifiers = [];
+  });
+  ed5().addBlock('p_sleepy');
+  const tl0 = activeTimeline(ed5().project);
+  ok('the built-in placed its emitter on the strip', (tl0.emitters ?? []).length === 1);
+
+  // what someone does before publishing: save the clip back out as their own preset
+  ed5().savePreset('Mine', tl0.tracks.map((t) => t.id), 4600);
+  const mine = ed5().project.presets.find((x) => x.name === 'Mine')!;
+  ok('saving a preset keeps its emitters, not just its keyframes',
+    (mine.emitters ?? []).length === 1,
+    `${mine.tracks.length} tracks, ${(mine.emitters ?? []).length} emitters`);
+
+  /**
+   * And the preview — the editor's and the admin review queue's, which are now the same
+   * call — draws them. This is what "the community preview renders nothing" actually
+   * was: not a broken preview, a preset that had lost half of itself on the way in.
+   */
+  const base2 = defaultProject();
+  const drawn = (pr: Preset) => sceneAt(presetPreviewProject(base2, pr), 1500, { width: 720, height: 720 }).length;
+  const builtin = builtinPresets().find((x) => x.id === 'p_sleepy')!;
+  ok('so the preview of a saved copy shows what the built-in shows',
+    drawn(mine) === drawn(builtin) && drawn(mine) > 3,
+    `${drawn(mine)} items vs ${drawn(builtin)}`);
+
+  // editing a preset through the strip must not throw them away again
+  ed5().addBlock(mine.id);
+  const tl1 = activeTimeline(ed5().project);
+  ed5().updatePresetFromBlock(tl1.blocks[tl1.blocks.length - 1].id);
+  const edited = ed5().project.presets.find((x) => x.id === mine.id)!;
+  ok('and editing it on the strip keeps them too', (edited.emitters ?? []).length === 1,
+    `${(edited.emitters ?? []).length} emitters`);
+
+  ed5().loadProject(defaultProject());
 }
 
 console.log(failures === 0 ? `selfcheck: all checks passed` : `selfcheck: ${failures} FAILED`);

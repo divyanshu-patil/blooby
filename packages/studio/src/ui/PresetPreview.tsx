@@ -3,6 +3,7 @@ import { COMP, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 
 import { MascotThumb } from './Mascot';
+import type { SceneItem } from '../core/scene';
 import type { Preset, Project } from '../core/types';
 
 /**
@@ -20,6 +21,40 @@ import type { Preset, Project } from '../core/types';
  * a thumbnail, a name and a publish button, and hanging rename/edit/delete off it too
  * would need a menu nobody would find. You are already looking at the thing here.
  */
+/**
+ * A preset playing on a loop, as a scene — the one place that decides what previewing a
+ * preset means.
+ *
+ * The editor's preview card and the admin's review queue both show the same thing to the
+ * same person at different moments, so they cannot be allowed to drift: this is that
+ * agreement, and `presetPreviewProject` below it is what carries the preset's own
+ * emitters and modifiers in.
+ */
+export function usePresetScene(project: Project, preset: Preset | null): SceneItem[] | null {
+  const span = Math.max(200, preset?.durationMs || 1000);
+  const [t, setT] = useState(0);
+  const raf = useRef(0);
+
+  useEffect(() => {
+    if (!preset) return;
+    const started = performance.now();
+    const tick = () => {
+      // loop, so a short preset is judged over several passes rather than one glimpse
+      setT((performance.now() - started) % span);
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [span, preset]);
+
+  // no `tracks.length` guard: a preset can be nothing but a confetti burst or a shake,
+  // and refusing to preview those was how an effects-only submission looked broken
+  if (!preset) return null;
+  try {
+    return sceneAt(presetPreviewProject(project, preset), t, COMP);
+  } catch { return null; }
+}
+
 export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDelete, onClose }: {
   project: Project;
   preset: Preset;
@@ -31,20 +66,8 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
   onClose: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [t, setT] = useState(0);
-  const raf = useRef(0);
   const span = Math.max(200, preset.durationMs || 1000);
-
-  useEffect(() => {
-    const started = performance.now();
-    const tick = () => {
-      // loop, so a short preset is judged over several passes rather than one glimpse
-      setT(((performance.now() - started) % span));
-      raf.current = requestAnimationFrame(tick);
-    };
-    raf.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf.current);
-  }, [span, preset.id]);
+  const scene = usePresetScene(project, preset);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -54,13 +77,6 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [onClose, onAdd, confirming]);
-
-  const scene = (() => {
-    try {
-      const temp = presetPreviewProject(project, preset);
-      return sceneAt(temp, t, COMP);
-    } catch { return null; }
-  })();
 
   return (
     <div className="scrim" onClick={onClose} role="presentation">
