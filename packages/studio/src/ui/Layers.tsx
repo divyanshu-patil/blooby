@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useEditor } from '../core/store';
-import { parseSvg } from './SvgLibrary';
+import { parseSvg } from '../core/svg';
 import { INK, uid } from '../core/defaults';
 import { cssColor } from '../core/color';
 import { Panel } from './bits';

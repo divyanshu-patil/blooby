@@ -1,27 +1,7 @@
 import { useRef, useState } from 'react';
 import { useEditor } from '../core/store';
+import { parseSvg } from '../core/svg';
 import type { SvgAsset } from '../core/types';
-
-/**
- * One SVG parser for the whole app.
- *
- * Only the inside of the <svg> is kept, plus its viewBox — the outer element is re-created
- * by the renderer at whatever size the thing drawing it is, so a file authored at 512px
- * and one authored at 24px come out the same size. Anything that can execute is stripped:
- * this markup goes through dangerouslySetInnerHTML, and pasted artwork is untrusted.
- */
-export function parseSvg(text: string): { markup: string; viewBox: string } | null {
-  const open = /<svg\b[^>]*>/i.exec(text);
-  const inner = /<svg\b[^>]*>([\s\S]*)<\/svg\s*>/i.exec(text)?.[1];
-  if (!open || inner === undefined) return null;
-  const attr = (n: string) => new RegExp(`\\b${n}\\s*=\\s*["']([^"']+)["']`, 'i').exec(open[0])?.[1];
-  const viewBox = attr('viewBox') ?? `0 0 ${parseFloat(attr('width') ?? '') || 100} ${parseFloat(attr('height') ?? '') || 100}`;
-  const markup = inner
-    .replace(/<script[\s\S]*?<\/script\s*>/gi, '')
-    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .trim();
-  return markup ? { markup, viewBox } : null;
-}
 
 /**
  * The project's imported artwork: add by paste or by file, several at a time, and see

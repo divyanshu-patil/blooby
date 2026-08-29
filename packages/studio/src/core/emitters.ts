@@ -20,6 +20,15 @@ export interface ShapeLibraryEntry {
   markup: string;
   /** false when the artwork carries colours worth keeping */
   tint: boolean;
+  /**
+   * The characters this shape IS the drawn version of.
+   *
+   * An emitter can still be given plain text to throw, and a typed "!" was rendered with
+   * whatever font the page happened to have — which no Lottie player has, so those
+   * particles could not be exported at all and were dropped. When a glyph matches one of
+   * these the vector is drawn instead, in the preview AND in the export, so the two agree.
+   */
+  glyphs?: string[];
 }
 
 /** Every entry is one filled path, so it can be baked to a Lottie bezier as well as drawn. */
@@ -32,11 +41,22 @@ const filled = (d: string) => `<path d="${d}" fill="currentColor"/>`;
  * it, but an imported SVG carries its own colours, and the export has to honour them the
  * same way the stage does.
  */
-export const outlinesOf = (markup: string): { d: string; fill?: string }[] =>
-  [...markup.matchAll(/<[^>]*\sd="([^"]+)"[^>]*>/g)].map((m) => ({
-    d: m[1],
-    fill: /\sfill="([^"]+)"/.exec(m[0])?.[1],
-  }));
+export function outlinesOf(markup: string): { d: string; fill?: string }[] {
+  const out: { d: string; fill?: string }[] = [];
+  // a fill on an enclosing <g> is inherited, which is how icon sets are written — the
+  // paths carry no paint of their own and the group (or the <svg> root, which the importer
+  // folds into a group) supplies it
+  const inherited: (string | undefined)[] = [undefined];
+  for (const m of markup.matchAll(/<\/?[a-zA-Z][^>]*>/g)) {
+    const tag = m[0];
+    if (/^<\/g/i.test(tag)) { if (inherited.length > 1) inherited.pop(); continue; }
+    const own = /\sfill\s*=\s*"([^"]+)"/i.exec(tag)?.[1];
+    if (/^<g\b/i.test(tag)) { inherited.push(own ?? inherited[inherited.length - 1]); continue; }
+    const d = /\sd\s*=\s*"([^"]+)"/i.exec(tag)?.[1];
+    if (d) out.push({ d, fill: own ?? inherited[inherited.length - 1] });
+  }
+  return out;
+}
 
 export const SHAPE_LIBRARY: ShapeLibraryEntry[] = [
   // --- drops: a real teardrop, heavy at the bottom, not a circle -----------------
@@ -73,40 +93,40 @@ export const SHAPE_LIBRARY: ShapeLibraryEntry[] = [
 
   // --- notes: proper glyphs as paths, so weight is ours to choose ---------------
   {
-    id: 'quaver', name: 'Quaver', group: 'notes', viewBox: '0 0 20 26', tint: true,
+    id: 'quaver', name: 'Quaver', group: 'notes', viewBox: '0 0 20 26', tint: true, glyphs: ['\u266a', '\u2669'],
     markup: filled('M8 0v17.2a4.6 4.6 0 1 0 3 4.3V6.6c3.6.9 6 2.9 6 5.4h3C20 6.4 15.6 1.6 8 0Z'),
   },
   {
-    id: 'beamed', name: 'Beamed notes', group: 'notes', viewBox: '0 0 28 26', tint: true,
+    id: 'beamed', name: 'Beamed notes', group: 'notes', viewBox: '0 0 28 26', tint: true, glyphs: ['\u266b', '\u266c'],
     markup: filled('M8 3.4v13.8a4.4 4.4 0 1 0 3 4.1V8.2l11-2.4v9.6a4.4 4.4 0 1 0 3 4.1V0L8 3.4Z'),
   },
 
   // --- symbols ------------------------------------------------------------------
   {
-    id: 'zed', name: 'Z', group: 'symbols', viewBox: '0 0 22 22', tint: true,
+    id: 'zed', name: 'Z', group: 'symbols', viewBox: '0 0 22 22', tint: true, glyphs: ['z', 'Z', '\u1d22'],
     markup: filled('M3 2h16v3.4L8.6 18.4H19V22H3v-3.4L13.4 5.6H3V2Z'),
   },
   {
-    id: 'bang', name: 'Exclamation', group: 'symbols', viewBox: '0 0 12 30', tint: true,
+    id: 'bang', name: 'Exclamation', group: 'symbols', viewBox: '0 0 12 30', tint: true, glyphs: ['!', '\uff01', '\u2757', '\u2755'],
     // deliberately heavy: a notification badge has to read at a glance
     markup: filled('M6 0a4.5 4.5 0 0 1 4.5 4.5v10A4.5 4.5 0 0 1 1.5 14.5v-10A4.5 4.5 0 0 1 6 0Z'
       + ' M6 21a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z'),
   },
   {
-    id: 'query', name: 'Question', group: 'symbols', viewBox: '0 0 20 30', tint: true,
+    id: 'query', name: 'Question', group: 'symbols', viewBox: '0 0 20 30', tint: true, glyphs: ['?', '\uff1f', '\u2753'],
     markup: filled('M10 0C4.9 0 1.4 2.9.6 7.5l5 1C6 6.2 7.5 5 9.8 5c2.2 0 3.7 1.2 3.7 3 0 1.6-.8 2.5-2.9 3.9-2.6 1.7-3.6 3.2-3.4 6.2l.1 1.4h5l-.1-1c-.1-1.6.4-2.4 2.4-3.7 3-1.9 4.4-3.8 4.4-6.9C19 3.3 15.4 0 10 0Z'
       + ' M9.8 22.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Z'),
   },
   {
-    id: 'star', name: 'Star', group: 'symbols', viewBox: '-0.6 -0.6 1.2 1.2', tint: true,
+    id: 'star', name: 'Star', group: 'symbols', viewBox: '-0.6 -0.6 1.2 1.2', tint: true, glyphs: ['\u2605', '\u2606', '\u2b50'],
     markup: filled(primitivePath('star', { points: 5, innerRatio: 0.45, vertexRadius: 0.25 })),
   },
   {
-    id: 'spark', name: 'Sparkle', group: 'symbols', viewBox: '0 0 24 24', tint: true,
+    id: 'spark', name: 'Sparkle', group: 'symbols', viewBox: '0 0 24 24', tint: true, glyphs: ['\u2726', '\u2727', '\u2728', '\u2734'],
     markup: filled('M12 0c1.1 6.6 5.3 10.8 12 12-6.7 1.2-10.9 5.4-12 12-1.1-6.6-5.3-10.8-12-12C6.7 10.8 10.9 6.6 12 0Z'),
   },
   {
-    id: 'heart', name: 'Heart', group: 'symbols', viewBox: '0 0 24 22', tint: true,
+    id: 'heart', name: 'Heart', group: 'symbols', viewBox: '0 0 24 22', tint: true, glyphs: ['\u2665', '\u2764', '\u2661'],
     markup: filled('M12 21.4 2.7 12.5A6.1 6.1 0 0 1 12 4.9a6.1 6.1 0 0 1 9.3 7.6L12 21.4Z'),
   },
   {
@@ -145,7 +165,7 @@ export const part = (p: Partial<EmitterPart> & { shapeId?: string; glyph?: strin
  * render every particle as a blank.
  */
 export function shapeResolver(svgAssets?: { id: string; markup: string; viewBox: string }[]) {
-  return (shapeId?: string, svgAssetId?: string) => {
+  return (shapeId?: string, svgAssetId?: string, glyph?: string) => {
     if (shapeId) {
       const s = shapeById(shapeId);
       return s ? { sourceMarkup: s.markup, viewBox: s.viewBox } : undefined;
@@ -154,6 +174,13 @@ export function shapeResolver(svgAssets?: { id: string; markup: string; viewBox:
       const a = svgAssets?.find((x) => x.id === svgAssetId);
       return a ? { sourceMarkup: a.markup, viewBox: a.viewBox } : undefined;
     }
-    return undefined;
+    const drawn = glyph ? shapeForGlyph(glyph) : undefined;
+    return drawn ? { sourceMarkup: drawn.markup, viewBox: drawn.viewBox } : undefined;
   };
+}
+
+/** The drawn version of a typed character, if the library has one. */
+export function shapeForGlyph(glyph: string): ShapeLibraryEntry | undefined {
+  const g = glyph.trim();
+  return g ? SHAPE_LIBRARY.find((s) => s.glyphs?.includes(g)) : undefined;
 }

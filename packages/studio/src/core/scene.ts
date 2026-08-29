@@ -574,7 +574,7 @@ export function emitterFrame(rig: Rig, base: SceneItem[], view: Viewport) {
 export function emitterItems(
   tl: Timeline, rig: Rig, base: SceneItem[], timeMs: number, view: Viewport,
   /** turns a shape id into markup. Injected so core/scene need not know the library. */
-  resolveShape?: (shapeId?: string, svgAssetId?: string) => { sourceMarkup: string; viewBox: string } | undefined,
+  resolveShape?: (shapeId?: string, svgAssetId?: string, glyph?: string) => { sourceMarkup: string; viewBox: string } | undefined,
 ): SceneItem[] {
   const emitters = tl.emitters ?? [];
   if (!emitters.length) return [];
@@ -644,6 +644,18 @@ export function emitterItems(
       const age = e.path === 'orbit'
         ? ((t * rateOf + (i / slots) * life) % life)
         : ((t * rateOf - i * rate) % cycle + cycle) % cycle;
+
+      /**
+       * Spin runs on an UNWRAPPED clock, unlike everything else driven by `u`.
+       *
+       * On an orbit `u` restarts at every lap, so an object spinning 90° over a life
+       * snapped back to 0° the instant it crossed the seam — visible as a rotation that
+       * resets partway round the ring. A particle that is born and dies has no seam to
+       * cross, so for those the two clocks are identical.
+       */
+      const spinPhase = e.path === 'orbit'
+        ? (t * rateOf + (i / slots) * life) / life
+        : age / life;
       if (age >= life) continue;                       // this slot is between spawns
       // when this particle started, in the emitter's OWN clock. `age` is measured on the
       // slot's speed-scaled clock, so subtracting it from unscaled `t` compared two
@@ -651,9 +663,18 @@ export function emitterItems(
       const born = (t * rateOf - age) / rateOf;
       // nothing new is born once the exit has begun — an orbit has no births to stop
       if (e.path !== 'orbit' && born > stopsAt - tail) continue;
-      // easing shapes the journey itself: an ease-out drop falls fast and settles, where
-      // linear travel is the same speed the whole way down
-      const u = e.easing ? applyEasing(e.easing, age / life) : age / life;
+      /**
+       * Two clocks, deliberately: `life` is how far through its life the particle is, and
+       * `travel` is how far along its path.
+       *
+       * They used to be one, which meant an overshooting travel curve corrupted the fade,
+       * the growth and the cull along with the movement. Notify's elastic badge swung
+       * outside 0..1 several times per life and so it blinked on and off at full size,
+       * half size, nothing — the erratic behaviour was the easing leaking into every
+       * other thing `u` drove. Easing shapes the journey; life is always linear.
+       */
+      const u = age / life;
+      const travel = e.easing ? applyEasing(e.easing, u) : u;
 
       let x: number, y: number;
       if (e.path === 'orbit') {
@@ -674,15 +695,15 @@ export function emitterItems(
         y = from.y + ox * st + oy * ct;
       } else if (e.path === 'fall') {
         // horizontal at a constant rate, vertical accelerating — gravity, cheaply
-        x = from.x + (to.x - from.x) * u + (i / slots - 0.5) * 2 * e.bow * unit;
-        y = from.y + (to.y - from.y) * u * u;
+        x = from.x + (to.x - from.x) * travel + (i / slots - 0.5) * 2 * e.bow * unit;
+        y = from.y + (to.y - from.y) * travel * travel;
       } else {
-        x = from.x + (to.x - from.x) * u;
-        y = from.y + (to.y - from.y) * u;
+        x = from.x + (to.x - from.x) * travel;
+        y = from.y + (to.y - from.y) * travel;
         // a quadratic bump perpendicular to travel: 0 at both ends, widest in the middle
         const dx = to.x - from.x, dy = to.y - from.y;
         const len = Math.hypot(dx, dy) || 1;
-        const bow = e.bow * unit * 4 * u * (1 - u);
+        const bow = e.bow * unit * 4 * travel * (1 - travel);
         x += (-dy / len) * bow;
         y += (dx / len) * bow;
       }
@@ -729,15 +750,20 @@ export function emitterItems(
 
       // what this particle IS: a library/project shape, or a character. `resolveShape` is
       // passed in rather than looked up here, so core/scene stays free of the library.
-      const art = pt?.shapeId || pt?.svgAssetId ? resolveShape?.(pt.shapeId, pt.svgAssetId) : (e.svg ?? undefined);
+      const glyph = pt?.glyph ?? e.glyphs[i % Math.max(1, e.glyphs.length)] ?? '';
+      // a typed character that the library has a vector for is DRAWN, not typed: the font
+      // it used is not in any Lottie player, so those particles could not be exported
+      const art = pt?.shapeId || pt?.svgAssetId
+        ? resolveShape?.(pt.shapeId, pt.svgAssetId)
+        : (e.svg ?? resolveShape?.(undefined, undefined, glyph) ?? undefined);
 
       out.push({
         id: `${e.id}#${i}`, name: e.name, shape: 'pill',
         cx: x, cy: y, w: size, h: size, r: size / 2,
-        rotation: (e.spin + (pt?.spin ?? 0)) * u,
+        rotation: (e.spin + (pt?.spin ?? 0)) * spinPhase,
         color: { ...tint, a: (tint.a ?? 1) * (alpha / Math.max(1e-6, e.color.a)) },
         depth: 3, zIndex: 900,
-        ...(art ? { svg: art } : { text: pt?.glyph ?? e.glyphs[i % Math.max(1, e.glyphs.length)] ?? '' }),
+        ...(art ? { svg: art } : { text: glyph }),
       });
     }
   }

@@ -203,12 +203,15 @@ export function builtinPresets(): Preset[] {
         ...bothEyes('transform.length', [kf(0, 1.55), kf(340, 1.85, 'easeOut'), kf(1000, 1.85), kf(1600, 1.55)]),
       ],
       emitters: [emit({
-        // a drawn exclamation, so its weight is ours rather than the system font's, and
-        // it pops in big rather than drifting up as a thin character
-        name: 'badge', parts: [shape('bang')], color: { r: 226, g: 88, b: 62, a: 1 }, size: 46,
-        from: { nodeId: 'body', x: 42, y: -52 }, to: { nodeId: 'body', x: 54, y: -78 },
-        rateMs: 800, lifeMs: 1300, count: 2, fadeStart: 0.68,
-        scaleFrom: 0.15, scaleTo: 1.35, wobble: 2, startMs: 260,
+        // ONE exclamation, big. A stream of them read as a swarm of little marks rather
+        // than a notification — the whole point of a badge is that there is one of it and
+        // it is impossible to miss. count: 1 with a life as long as the clip means it
+        // pops in, hangs there, and leaves; it never respawns.
+        name: 'badge', parts: [shape('bang')], color: { r: 226, g: 88, b: 62, a: 1 }, size: 132,
+        from: { nodeId: 'body', x: 96, y: -104 }, to: { nodeId: 'body', x: 104, y: -128 },
+        // rate longer than the life so the one that pops in is the only one there ever is
+        rateMs: 4000, lifeMs: 1380, count: 1, fadeStart: 0.82,
+        scaleFrom: 0.35, scaleTo: 1, wobble: 1.5, startMs: 200,
         easing: { type: 'preset', name: 'elastic' }, speedJitter: 0,
       })],
     },
@@ -243,13 +246,17 @@ export function builtinPresets(): Preset[] {
       tracks: [
         track('body', 'color', [kf(0, BONE), kf(420, ANGRY_RED, 'easeOut'), kf(1400, ANGRY_RED), kf(1800, BONE)]),
         // eyes narrowed and angled inward — this rig has no brows, so the tilt IS the scowl
-        ...bothEyes('transform.length', [kf(0, 1.55), kf(300, 0.82, 'easeOut'), kf(1400, 0.82), kf(1800, 1.55)]),
-        ...bothEyes('transform.scale.x', [kf(0, 1), kf(300, 1.2, 'easeOut'), kf(1400, 1.2), kf(1800, 1)]),
-        // SVG rotates clockwise for a positive angle, so an angry scowl — INNER ends down —
-        // is +ve on the left eye and -ve on the right. These were the wrong way round,
-        // which read as surprise rather than anger.
-        track('eyeL', 'transform.rotation', [kf(0, 0), kf(300, 20, 'easeOut'), kf(1400, 20), kf(1800, 0)]),
-        track('eyeR', 'transform.rotation', [kf(0, 0), kf(300, -20, 'easeOut'), kf(1400, -20), kf(1800, 0)]),
+        // narrow SLITS, not narrowed ovals: at 51x35 the eye is nearly round and a 20°
+        // tilt is invisible on it, which is why the scowl did not read as one at all.
+        // Long and thin is what makes the angle legible.
+        ...bothEyes('transform.length', [kf(0, 1.55), kf(300, 0.5, 'easeOut'), kf(1400, 0.5), kf(1800, 1.55)]),
+        ...bothEyes('transform.scale.x', [kf(0, 1), kf(300, 1.5, 'easeOut'), kf(1400, 1.5), kf(1800, 1)]),
+        // A scowl is the two eyes tilting in OPPOSITE screen directions with their inner
+        // ends DOWN. eyeL is the mascot's own left, which is screen RIGHT, so the signs
+        // read backwards from the names — checked against a render rather than reasoned
+        // about, because that is what got them the wrong way round twice.
+        track('eyeL', 'transform.rotation', [kf(0, 0), kf(300, 26, 'easeOut'), kf(1400, 26), kf(1800, 0)]),
+        track('eyeR', 'transform.rotation', [kf(0, 0), kf(300, -26, 'easeOut'), kf(1400, -26), kf(1800, 0)]),
         // swelling up, then a hard forward lunge
         track('body', 'transform.scale.x', [kf(0, 1), kf(300, 1.1, 'easeOut'), kf(1400, 1.1), kf(1800, 1)]),
         track('body', 'transform.scale.y', [kf(0, 1), kf(300, 1.08, 'easeOut'), kf(900, 1.14), kf(1400, 1.08), kf(1800, 1)]),
@@ -420,8 +427,11 @@ export function builtinPresets(): Preset[] {
       tracks: [
         ...bothEyes('shape.path', [kf(0, PILL), kf(340, STAR, 'easeOut'), kf(1500, STAR), kf(2000, PILL, 'easeInOut')]),
         ...bothEyes('color', [kf(0, INK), kf(340, STAR_YELLOW, 'easeOut'), kf(1500, STAR_YELLOW), kf(2000, INK)]),
-        ...bothEyes('transform.scale.x', [kf(0, 1), kf(340, 1.35, 'easeOut'), kf(1500, 1.35), kf(2000, 1)]),
-        ...bothEyes('transform.length', [kf(0, 1.55), kf(340, 1.05, 'easeOut'), kf(1500, 1.05), kf(2000, 1.55)]),
+        // BIG stars. At 1.35x they were the same size as the pills they replaced, so the
+        // morph read as a recolour; a star has to be the biggest thing on the face for
+        // "starry-eyed" to land. Length matches the width so it stays a star, not a squat one.
+        ...bothEyes('transform.scale.x', [kf(0, 1), kf(340, 1.9, 'easeOut'), kf(1500, 1.9), kf(2000, 1)]),
+        ...bothEyes('transform.length', [kf(0, 1.55), kf(340, 1.9, 'easeOut'), kf(1500, 1.9), kf(2000, 1.55)]),
         ...bothEyes('eye.openness', [kf(0, 1), kf(2000, 1, 'linear')]),
         // a jolt of delight: crouch, pop, settle — the body offset from the eyes
         track('body', 'flatOffset.y', [kf(0, 0), kf(200, 8, 'easeInOut'), kf(420, -26, 'easeOut'), kf(700, 0, 'easeIn'), kf(860, -9, 'easeOut'), kf(1060, 0, 'easeIn'), kf(2000, 0)]),

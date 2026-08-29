@@ -111,6 +111,8 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
   });
 
   const skipped: string[] = [];
+  /** set when any layer is text, so the font descriptor is only written when it is used */
+  let usesFont = false;
   /** layers whose outline had to be written as vertices — what "baked" means in the note */
   const baked = new Set<string>();
   const layers: Record<string, unknown>[] = [];
@@ -118,13 +120,15 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
 
   order.forEach((id, n) => {
     const first = seen.get(id)!;
-    // Lottie has no shape for either of these: an SVG layer is arbitrary markup, and an
-    // emitter's particles are glyphs, which would need a text layer with an embedded font
-    // descriptor. Both are named in `skipped` rather than silently dropped — GIF and MP4
-    // go through the real renderer and keep them.
-    // A glyph is the one thing with no bezier to bake: it would need an embedded font
-    // descriptor. Named in `skipped` rather than silently dropped.
-    if (first.text !== undefined) { skipped.push(first.name); return; }
+    // A glyph with no vector in the shape library — an emoji, an arbitrary character —
+    // becomes a real Lottie text layer rather than being dropped. Anything the library
+    // DOES have a drawing for never reaches here: emitterItems resolves it to that
+    // artwork, in the preview and the export alike.
+    if (first.text !== undefined) {
+      layers.push(textLayer(id, first, frames, total, (n2) => { keyframeCount += n2; }));
+      usesFont = true;
+      return;
+    }
 
     // Everything with an outline — a morphing shape, an emitter's artwork, an imported
     // SVG whose paths we can read — becomes real Lottie bezier shapes. Constant outlines
@@ -222,6 +226,9 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     json: {
       v: '5.9.0', fr: fps, ip: 0, op: total, w: COMP.width, h: COMP.height,
       nm: opts.name, ddd: 0, assets: [], layers,
+      // no embedded font: the descriptor names a family and the player falls back to it.
+      // Only written when something actually uses it, so a file with no glyphs is unchanged.
+      ...(usesFont ? { fonts: { list: [{ fName: FONT, fFamily: 'sans-serif', fStyle: 'Regular', ascent: 72 }] } } : {}),
       meta: { g: 'blooby' },
     },
     frames: total,
@@ -266,6 +273,68 @@ function groupByFill(
     ty: 'gr', nm: buckets.size > 1 ? `${name} ${i + 1}` : name, np: 2, cix: 2, bm: 0, hd: false,
     it: [...b.shapes, { ty: 'fl', c: b.fill, o: { a: 0, k: 100 }, r: 1, bm: 0, nm: 'fill', hd: false }, tr],
   }));
+}
+
+
+/* ---- text ------------------------------------------------------------------- */
+
+const FONT = 'blooby-sans';
+
+/**
+ * A glyph particle as a Lottie text layer.
+ *
+ * These used to be dropped from the export with a note, which meant a "zzz" or a "♪"
+ * emitter simply did not exist in the .lottie. A text layer needs no embedded font — the
+ * player falls back to the family named here — so the only thing that is not guaranteed
+ * is which face draws it, and a missing face beats a missing particle.
+ *
+ * Written as one text document per frame (deduplicated), because size and colour animate.
+ * `j: 2` centres horizontally; Lottie sits text on its baseline where the preview centres
+ * it on the middle, so the position carries an offset of a bit over a third of the size.
+ */
+const BASELINE = 0.36;
+
+function textLayer(
+  id: string, first: SceneItem, frames: SceneItem[][], total: number, countKeys: (n: number) => void,
+): Record<string, unknown> {
+  const docs: { t: number; s: Record<string, unknown> }[] = [];
+  const pos: Vec[] = [];
+  const op: Vec[] = [];
+  const rot: Vec[] = [];
+  let last: SceneItem = first;
+  frames.forEach((scene, f) => {
+    const it = scene.find((s) => s.id === id);
+    const cur = it ?? last;
+    if (it) last = it;
+    const size = Math.max(0.01, cur.h);
+    pos.push([round(cur.cx, 2), round(cur.cy + size * BASELINE, 2)]);
+    op.push([it ? round(cur.color.a * 100, 2) : 0]);
+    rot.push([round(cur.rotation, 3)]);
+    const doc = {
+      s: round(size, 2), f: FONT, t: cur.text ?? '', j: 2, tr: 0,
+      lh: round(size * 1.2, 2), ls: 0,
+      fc: [round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4)],
+    };
+    const prev = docs[docs.length - 1];
+    if (!prev || JSON.stringify(prev.s) !== JSON.stringify(doc)) docs.push({ t: f, s: doc });
+  });
+  countKeys(docs.length);
+
+  const ks = {
+    o: prop(op, EPS.o, 0),
+    r: prop(rot, EPS.r, 0),
+    p: prop(pos, EPS.p, 0),
+    a: { a: 0, k: [0, 0] },
+    s: { a: 0, k: [100, 100] },
+  };
+  for (const v of Object.values(ks)) if (v.a === 1) countKeys((v.k as unknown[]).length);
+
+  return {
+    ddd: 0, ind: 0, ty: 5, nm: first.name, sr: 1, ao: 0, bm: 0,
+    ks,
+    t: { d: { k: docs }, p: {}, m: { g: 1, a: { a: 0, k: [0, 0] } }, a: [] },
+    ip: 0, op: total + 1, st: 0,
+  };
 }
 
 /* ---- outlines -------------------------------------------------------------- */

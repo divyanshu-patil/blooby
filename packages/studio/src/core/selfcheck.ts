@@ -8,11 +8,12 @@ import { applyEasing, cubicBezier } from './easing';
 import { lerpColor, oklchToRgb, rgbToOklch } from './color';
 import { activeTrackFor, buildScene, composeScene, emitterFrame, emitterItems, evaluateRig, lerpAngle, resolveTracks, sampleTrack, sceneAt, scopeSpan, scopeTime, valueAt } from './scene';
 import { builtinPresets, confetti, defaultProject, makeTimeline, presetPreviewProject } from './defaults';
-import { CONFETTI_COLORS, shapeById, shapeResolver, SHAPE_LIBRARY } from './emitters';
+import { CONFETTI_COLORS, outlinesOf, shapeById, shapeResolver, SHAPE_LIBRARY } from './emitters';
 import { flattenPath, morphPath, movePathAnchor, naturalShape, pathAnchors, primitivePath, PRIMITIVE_SHAPES } from './path';
 import { activeTransitionAt, blocksEnd, blockStarts, characteristicTime, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
+import { parseSvg } from './svg';
 import { useEditor, writeKeyframe } from './store';
 import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readEffectProp, readProp, resolveProp, writeEffectProp, writeProp } from './props';
 import { MODIFIER_KINDS, MODIFIERS } from './types';
@@ -1820,10 +1821,12 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
   // emitters must reach the exporter, not just the stage
   ed().updateEmitter(eid, (e) => { e.path = 'arc'; });
   const composed = composeScene(P(), evaluateRig(P(), 900), 900, VIEW);
+  // 'z' is drawn as the library's Z rather than typed, so the particle carries artwork
+  const particle = (i: { text?: string; svg?: unknown; id: string }) => i.id.startsWith(eid);
   ok('composeScene carries them alongside the rig',
-    composed.some((i) => i.text === 'z') && composed.some((i) => i.id === 'body'));
+    composed.some(particle) && composed.some((i) => i.id === 'body'));
   ok('and draws them in front of the mascot',
-    composed.findIndex((i) => i.text === 'z') > composed.findIndex((i) => i.id === 'body'));
+    composed.findIndex(particle) > composed.findIndex((i) => i.id === 'body'));
 
   // scoped like a modifier
   ed().updateEmitter(eid, (e) => { e.startMs = 1000; e.endMs = 1600; });
@@ -2547,12 +2550,32 @@ ok('eyes are mirrored', near(scene[1].cx + scene[2].cx, 600, 1e-6), `${scene[1].
     withArt.baked.includes('drops') && withArt.skipped.length === 0,
     `baked ${withArt.baked.join()} / skipped ${withArt.skipped.join()}`);
 
-  // a plain character has no bezier, and must still be named rather than vanish
-  ed().updateEmitter(activeTimeline(P()).emitters!.at(-1)!.id, (e) => {
+  /**
+   * A typed character exports too — that was the whole complaint.
+   *
+   * One the library draws ('z' is the Z shape) bakes to beziers like any artwork; one it
+   * does not becomes a real Lottie text layer. Neither is skipped, because a particle
+   * that silently does not exist in the file is the bug, not the note about it.
+   */
+  const lastEm = activeTimeline(P()).emitters!.at(-1)!.id;
+  ed().updateEmitter(lastEm, (e) => {
     e.parts = [{ id: 'g', glyph: 'z', weight: 1, speed: 1, sizeScale: 1, spin: 0 }];
   });
-  ok('a glyph is reported as having no Lottie equivalent',
-    bakeLottie(P(), { from: 0, to: 600, background: '', name: 'probe' }).skipped.includes('drops'));
+  const drawnGlyph = bakeLottie(P(), { from: 0, to: 600, background: '', name: 'probe' });
+  ok('a glyph the library draws is baked, not skipped',
+    drawnGlyph.skipped.length === 0 && drawnGlyph.baked.includes('drops'),
+    `skipped ${drawnGlyph.skipped.join()} / baked ${drawnGlyph.baked.join()}`);
+
+  ed().updateEmitter(lastEm, (e) => {
+    e.parts = [{ id: 'g', glyph: '\u{1f389}', weight: 1, speed: 1, sizeScale: 1, spin: 0 }];
+  });
+  const typed = bakeLottie(P(), { from: 0, to: 600, background: '', name: 'probe' });
+  const textLayers = (typed.json as any).layers.filter((l: any) => l.ty === 5);
+  ok('and one it does not becomes a text layer rather than vanishing',
+    typed.skipped.length === 0 && textLayers.length > 0
+    && textLayers[0].t.d.k[0].s.t === '\u{1f389}'
+    && !!(typed.json as any).fonts,
+    `skipped ${typed.skipped.join()} / ${textLayers.length} text layers`);
 
   ed().loadProject(defaultProject());
 }
@@ -2763,6 +2786,73 @@ ok('crc32 of the check vector', crc32(new TextEncoder().encode('123456789') as U
   ok('the .lottie names every state it bundles', bundle.animations.length === 2, bundle.animations.join(','));
 
   ed3().loadProject(defaultProject());
+}
+
+// --- an overshooting travel easing must not corrupt the life of a particle -------
+{
+  const ed4 = () => useEditor.getState();
+  ed4().loadProject(defaultProject());
+  ed4().commit((p) => {
+    const tl = activeTimeline(p);
+    tl.blocks = []; tl.tracks = []; tl.modifiers = []; tl.timelineDurationMs = 2000;
+    tl.emitters = [{
+      ...confetti('body'), id: 'ez', name: 'ez', startMs: undefined, endMs: undefined,
+      parts: [{ id: 'p1', shapeId: 'bang', weight: 1, speed: 1, sizeScale: 1, spin: 0 }],
+      rateMs: 4000, lifeMs: 1400, count: 1, size: 60,
+      scaleFrom: 0.35, scaleTo: 1, fadeStart: 0.8, wobble: 0, speedJitter: 0,
+      easing: { type: 'preset', name: 'elastic' },
+    } as never];
+  });
+  const widths: number[] = [];
+  for (let t = 120; t <= 1100; t += 60) {
+    const it = sceneAt(ed4().project, t, { width: 720, height: 720 }).find((s) => s.name === 'ez');
+    widths.push(it ? it.w : 0);
+  }
+  // elastic swings outside 0..1, and `u` used to drive size, alpha AND the cull, so the
+  // badge blinked between full size, a third of it, and nothing
+  ok('an elastic travel curve never blinks the particle out', widths.every((w) => w > 0),
+    widths.map((w) => w.toFixed(0)).join(','));
+  ok('and its growth stays monotonic while it is young',
+    widths.every((w, i) => i === 0 || w >= widths[i - 1] - 0.5),
+    widths.map((w) => w.toFixed(0)).join(','));
+
+  // the easing must still bend the PATH, which is the thing it is for
+  const yOf = (t: number) => sceneAt(ed4().project, t, { width: 720, height: 720 }).find((s) => s.name === 'ez')?.cy ?? 0;
+  ed4().updateEmitter('ez', (e) => { e.easing = undefined; });
+  const linear = yOf(700);
+  ed4().updateEmitter('ez', (e) => { e.easing = { type: 'preset', name: 'easeOut' }; });
+  ok('while still shaping the journey', Math.abs(yOf(700) - linear) > 2,
+    `${linear.toFixed(1)} vs ${yOf(700).toFixed(1)}`);
+
+  ed4().loadProject(defaultProject());
+}
+
+// --- pasted artwork keeps its paint, and can be recoloured ----------------------
+{
+  // the exact shape of an icon-set export: paint on the <svg> root, none on the paths.
+  // Keeping only the inside threw the fill away, the paths fell back to SVG's default
+  // black, and changing the emitter colour then did nothing at all.
+  const icon = '<svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 512 512">'
+    + '<path d="M312 155h91c2.8 0 5-2.2 5-5 0-8.9-3.9-17.3-10.7-22.9Z"></path>'
+    + '<path d="M267 136V56H136c-17.6 0-32 14.4-32 32v336Z"></path></svg>';
+  const parsed = parseSvg(icon);
+  ok('a pasted SVG parses', !!parsed && parsed.viewBox === '0 0 512 512');
+  ok('and its root paint comes with it', !!parsed && /fill="currentColor"/.test(parsed.markup),
+    parsed?.markup.slice(0, 60));
+
+  // the exporter has to see the same colour the renderer inherits
+  const paths = outlinesOf(parsed!.markup);
+  ok('the exporter reads that inherited fill too',
+    paths.length === 2 && paths.every((x) => x.fill === 'currentColor'),
+    paths.map((x) => x.fill).join());
+
+  // anything that could execute is dropped: this markup goes through innerHTML
+  const nasty = parseSvg('<svg viewBox="0 0 10 10"><script>alert(1)</script><path d="M0 0h10v10H0Z" onclick="alert(2)"/></svg>');
+  ok('and nothing executable survives the import',
+    !!nasty && !/script/i.test(nasty.markup) && !/onclick/i.test(nasty.markup), nasty?.markup);
+
+  ok('a viewBox-less SVG still gets one', parseSvg('<svg width="40" height="20"><path d="M0 0h1v1H0Z"/></svg>')?.viewBox === '0 0 40 20');
+  ok('and something that is not an SVG is refused', parseSvg('hello') === null);
 }
 
 console.log(failures === 0 ? `selfcheck: all checks passed` : `selfcheck: ${failures} FAILED`);
