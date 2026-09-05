@@ -7,6 +7,7 @@ import { ShapeHandles } from './ShapeHandles';
 import { bodyTurnScale, screenToSurface } from '../core/curvature';
 import { Shapes } from './Mascot';
 import { activeTimeline } from '../core/types';
+import { DEFAULT_BG, useStageBg } from './stageBg';
 import type { Project, Rig } from '../core/types';
 
 type Mode = 'idle' | 'move' | 'scale' | 'rotate' | 'turn' | 'pan';
@@ -71,8 +72,7 @@ export function Stage() {
     if (document.fullscreenElement) document.exitFullscreen();
     else frameRef.current?.requestFullscreen();
   };
-  const [bg, setBg] = useState(() => { try { return localStorage.getItem('blooby.stageBg') || '#17161b'; } catch { return '#17161b'; } });
-  const setBgPersist = (v: string) => { setBg(v); try { localStorage.setItem('blooby.stageBg', v); } catch { /* private mode */ } };
+  const [bg, setBgPersist] = useStageBg();
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
 
@@ -277,15 +277,15 @@ export function Stage() {
         <button className="btn icon sm" title="Recentre" onClick={reset}>⌂</button>
         <button className="btn icon sm" aria-pressed={fullscreen} title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen preview'}
           onClick={toggleFullscreen}>⛶</button>
-        <div className="stage-bg" title="Preview background only — exports stay transparent">
+        <div className="stage-bg" title="Backdrop for the preview and for every export">
           {BG_SWATCHES.map((c) => (
             <button key={c} className={`sw${c === 'transparent' ? ' checker' : ''}`} aria-pressed={bg === c}
-              title={c === 'transparent' ? 'Transparent (as exported)' : c}
+              title={c === 'transparent' ? 'Transparent (no backdrop in exports)' : c}
               style={c === 'transparent' ? undefined : { background: c }}
               onClick={() => setBgPersist(c)} />
           ))}
           <input type="color" aria-label="Custom preview background"
-            value={transparent ? '#17161b' : bg} onChange={(e) => setBgPersist(e.target.value)} />
+            value={transparent ? DEFAULT_BG : bg} onChange={(e) => setBgPersist(e.target.value)} />
         </div>
       </div>
       <div className="stage-meta">

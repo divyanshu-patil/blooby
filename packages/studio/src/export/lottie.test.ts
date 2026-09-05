@@ -33,6 +33,12 @@ import { activeTimeline } from '../core/types';
   it('the default file opens on a real timeline', check(stl.blocks.length === 6 && stl.tracks.length > 12, `${stl.blocks.length} blocks, ${stl.tracks.length} tracks`));
   it('lottie layer indices are 1..n', check(j.layers.every((l: any, i: number) => l.ind === i + 1)));
 
+  // the backdrop is whatever colour the caller asked for — the stage's own, not a constant
+  const tinted = bakeLottie(store, { background: '#ff8800', name: 'test' }).json as Record<string, any>;
+  const backdrop = (x: Record<string, any>) => x.layers.find((l: any) => l.ty === 1);
+  it('the backdrop takes the requested colour', check(backdrop(tinted)?.sc === '#ff8800', backdrop(tinted)?.sc));
+  it('and is absent when there is none', check(!backdrop(bakeLottie(store, { background: null, name: 'test' }).json as Record<string, any>)));
+
   const shapeLayers = j.layers.filter((l: any) => l.ty === 4);
   for (const l of shapeLayers) {
     const geo = l.shapes[0].it[0];

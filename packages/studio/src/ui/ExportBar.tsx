@@ -3,20 +3,21 @@ import { useEditor } from '../core/store';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
 import { download, exportGif, exportPng, exportVideo, videoMime } from '../export/raster';
-
-const INK_BG = '#17161b';
+import { useStageBg } from './stageBg';
 
 export function ExportBar() {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const [busy, setBusy] = useState<{ what: string; p: number } | null>(null);
   const [scale, setScale] = useState(1);
+  const [stageBg] = useStageBg();
   const [bg, setBg] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const mime = videoMime();
 
   const base = project.name.replace(/\s+/g, '-').toLowerCase() || 'mascot';
-  const background = bg ? INK_BG : null;
+  // the stage's own backdrop, so the file matches the preview; 'transparent' has none
+  const background = bg && stageBg !== 'transparent' ? stageBg : null;
 
   const run = async (what: string, fn: (p: (n: number) => void) => Promise<void>) => {
     setBusy({ what, p: 0 });
@@ -59,7 +60,11 @@ export function ExportBar() {
           <div className="panel-body">
             <div className="row">
               <span className="prop-label" style={{ flex: 1 }}>Backdrop</span>
-              <button className="btn sm" aria-pressed={bg} onClick={() => setBg(!bg)}>{bg ? 'Ink' : 'Transparent'}</button>
+              <button className="btn sm" aria-pressed={!!background} disabled={stageBg === 'transparent'}
+                title={stageBg === 'transparent' ? 'The preview backdrop is transparent' : `Preview backdrop ${stageBg}`}
+                onClick={() => setBg(!bg)}>
+                {background ?? 'Transparent'}
+              </button>
             </div>
             <div className="row">
               <span className="prop-label" style={{ flex: 1 }}>Size</span>
