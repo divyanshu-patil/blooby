@@ -369,6 +369,13 @@ export interface Timeline {
   /** optional, so every project saved before emitters existed loads with no migration */
   emitters?: Emitter[];
   blocks: Block[];
+  /**
+   * The marker naming this state's frames inside its animation, when that animation holds
+   * several poses. Set on import so a `.lottie` whose states are markers of one strip
+   * round-trips instead of every state claiming the whole composition. Blooby's own
+   * exports compute it from the strip layout rather than reading it back from here.
+   */
+  segment?: string;
   /** one per transitioned seam, keyed by the clip it follows — absent entries just mean
    * no transition there yet. Optional (not defaulted to []) so every project saved before
    * transitions existed keeps loading with zero migration needed. */

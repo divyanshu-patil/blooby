@@ -580,6 +580,17 @@ export function defaultProject(): Project {
     // stamped at birth so a fresh project never looks like a pre-versioning one and gets
     // needlessly walked through every migration step on its first load
     schemaVersion: SCHEMA_VERSION,
+    /**
+     * Written down rather than derived from the project name.
+     *
+     * This is the id the app passes to `stateMachineLoad()`, and a wrong one fails in
+     * silence — the call returns a bool the native bindings discard, so a machine that
+     * never loaded raises nothing and the animation simply autoplays, looking roughly
+     * right. Deriving it from the title meant renaming a project quietly broke every app
+     * already shipping against it. The State panel's "Machine" field is now the only
+     * thing that changes it.
+     */
+    stateMachine: { id: 'mascot', initialStateId: idle.id, inputs: [], transitions: [] },
   };
   for (const id of ['p_idle', 'p_blink', 'p_talk', 'p_happy']) appendPreset(p, id, idle);
   return p;

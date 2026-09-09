@@ -27,6 +27,12 @@ export interface LottieOptions {
   /** ms window to export; defaults to the whole timeline */
   from?: number;
   to?: number;
+  /**
+   * What to draw at a given ms, when it is not simply the active timeline. `strip.ts`
+   * uses this to bake every pose plus the morphs between them into one composition —
+   * the union of layers and the opacity-0 handling below then apply across the lot.
+   */
+  sampleAt?: (ms: number) => SceneItem[];
 }
 
 type Vec = number[];
@@ -93,7 +99,8 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
 
   // sample once, keep everything
   const frames: SceneItem[][] = [];
-  for (let f = 0; f <= total; f++) frames.push(sceneAt(project, from + (f / fps) * 1000, COMP));
+  const sample = opts.sampleAt ?? ((ms: number) => sceneAt(project, ms, COMP));
+  for (let f = 0; f <= total; f++) frames.push(sample(from + (f / fps) * 1000));
 
   const order: string[] = [];
   const seen = new Map<string, SceneItem>();

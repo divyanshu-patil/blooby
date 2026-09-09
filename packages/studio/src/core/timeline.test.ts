@@ -56,7 +56,7 @@ import { activeTimeline } from './types';
   // and it survives the round trip into the .lottie a host page reads back
   ed3().clearStateTransition();
   const bundle = buildDotLottie(ed3().project, { background: null });
-  it('the .lottie names every state it bundles', check(bundle.animations.length === 2, bundle.animations.join(',')));
+  it('the .lottie bundles its states as one composition', check(bundle.animations.length === 1, bundle.animations.join(',')));
 
   ed3().loadProject(defaultProject());
 }

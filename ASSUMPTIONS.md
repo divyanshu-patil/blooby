@@ -162,6 +162,34 @@ Flattening them into independent animations would be the one thing the spec expl
 forbids. Re-importing a file is idempotent: a state whose name already exists reuses that
 timeline instead of creating a second one.
 
+**A `Tweened` transition cannot morph between two compositions.** It interpolates the
+playhead within the one that is loaded — `Tweening` exists only as a player status
+alongside Playing/Paused/Stopped, and there is no cross-composition morph API in the wasm
+build, the CJS build, or the iOS `DotLottiePlayer` core. Two states naming two different
+animations hard-swap, and the `duration`/`easing` they declare have nothing to act on.
+Verified by another agent reading the shipped binaries, after a file that looked correct
+kept cutting.
+
+So every baked timeline exports as a frame range of a single composition (`export/strip.ts`),
+with real morph frames between the ranges for the playhead to scrub through.
+
+**`segment` on a `PlaybackState` is a marker NAME, not a frame pair.** Read from the
+dotlottie-rs source rather than guessed: `states.rs` declares `segment: Option<String>`,
+parses it with `opt_str_field`, and applies it with `player.set_marker()`. The engine also
+uses it to find a `Tweened` transition's target — it looks the name up in the animation's
+markers and tweens to `marker.segment.start`. So the name must match a marker in the
+animation, and both states must name the *same* animation or the engine skips the tween
+and falls through to an instant cut.
+
+Shipping it as `[start, end]` did not merely disable the segment — **it discarded the
+entire machine.** `opt()` in `json.rs` returns `Some(None)` for an absent field but `None`
+for one that is present with the wrong type; `state_from_json` forwards that with `?`; and
+`array_of` collects into `Option<Vec<_>>`, which short-circuits. One mistyped field on one
+state and `stateMachineLoad` returns false — a bool the native bindings discard. Nothing
+raises, and the animation autoplays every pose end to end, which looks close enough to
+working to cost hours. `export/engineContract.test.ts` is that parser, written out, so the
+next wrong type fails at build time.
+
 **Old projects are migrated, not reinterpreted.** `core/migrate.ts` holds one numbered
 step per document shape, applied on every load path (localStorage, a downloaded
 `.blooby.json`, the IndexedDB gallery, a cloud row) because all of them funnel through
