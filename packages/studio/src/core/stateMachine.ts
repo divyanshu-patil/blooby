@@ -78,7 +78,16 @@ export function initialState(p: Project): Timeline {
   return p.timelines.find((t) => t.id === m.initialStateId) ?? p.timelines[0];
 }
 
-export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+/**
+ * Total on purpose — the argument is optional and a missing one yields ''.
+ *
+ * Its callers run at the document boundary, where "the field is there" is not a given:
+ * a brand-new cloud project is seeded server-side as a bare `{}` (see the API's
+ * `dto.project ?? {}`), and migrations run BEFORE defaults are merged over the top, so a
+ * step reading `p.name` gets undefined and the whole editor fails to open. Guarding here
+ * rather than at each call site is one line instead of four, and covers the next caller.
+ */
+export const slug = (s?: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 /**
  * timeline id → the animation id it plays, deduplicated.

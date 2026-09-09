@@ -15,6 +15,11 @@ import type { Block, Modifier, Project, Track } from './types';
  * A step only ever runs on documents older than itself, so an edit to an existing step
  * changes history for files already migrated past it — which is how a migration chain
  * usually breaks. See ADDING A MIGRATION at the bottom.
+ *
+ * A step may assume NOTHING about the document it is handed. `defaultProject()` is merged
+ * over the result afterwards, not before, so the fields it would have supplied are not
+ * there yet — and the cloud path seeds a brand new project as a bare `{}`. Optional-chain
+ * every read.
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
@@ -81,12 +86,19 @@ const MIGRATIONS: Migration[] = [
      * The id and initial state are PINNED here rather than left to `machineOf()`'s
      * fallback. That fallback derives the id from the project name, so renaming a project
      * after shipping would silently change the id the app calls `stateMachineLoad()` with.
+     * Deriving it from the name HERE preserves whatever id that project was already
+     * exporting under, which is the point — a new project gets a fixed one instead
+     * (`defaultProject()`), because it has nothing to preserve.
+     *
+     * `p.name` may be absent. Steps run before `defaultProject()` is merged over the
+     * document, so nothing here may assume a field exists — the cloud path seeds a brand
+     * new project as a bare `{}`.
      */
     run(p) {
       if (p.stateMachine) return;
       p.stateMachine = {
         id: slug(p.name) || 'blooby',
-        initialStateId: p.timelines[0]?.id,
+        initialStateId: p.timelines?.[0]?.id,
         inputs: [],
         transitions: [],
       };
@@ -142,9 +154,10 @@ export function migrateProject(raw: Project): MigrationResult {
  *      edit an existing entry — documents already past it will never run it again, so an
  *      edit only changes what happens to files that have not been opened yet.
  *   3. Bump `SCHEMA_VERSION`.
- *   4. `run` must be idempotent and must not assume anything a previous step added is
- *      present in a shape older than that step — the only guarantee is that steps run in
- *      order.
+ *   4. `run` must be idempotent, must not assume anything a previous step added is present
+ *      in a shape older than that step, and must not assume ANY field exists — `{}` is a
+ *      real input on the cloud-create path, and defaults are merged after, not before.
+ *      Optional-chain every read; `migrate.test.ts` runs every partial shape through.
  *   5. Add a case to `migrate.test.ts` with a literal old document. Not one built by
  *      `defaultProject()` and then broken: the point of the fixture is to be a shape this
  *      build can no longer produce.

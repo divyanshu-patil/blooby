@@ -139,3 +139,40 @@ const v1Timelines = () => JSON.parse(JSON.stringify({
   it('and no leftover OnComplete interactions from the old exporter', check(
     !JSON.stringify(machine).includes('OnComplete')));
 }
+
+// --- a partial document, which is what the cloud path actually hands us ----------
+/**
+ * A brand-new cloud project is seeded server-side as a bare `{}` — the API's
+ * `create()` does `dto.project ?? {}` — and migrations run BEFORE `defaultProject()` is
+ * merged over the top. So a step reading `p.name` gets undefined, and the editor threw
+ * "Cannot read properties of undefined (reading 'toLowerCase')" on every new project.
+ *
+ * Every field is fair game to be missing, so every field gets tried.
+ */
+{
+  const survives = (seed: object) => {
+    const p = { ...defaultProject(), ...migrateProject(structuredClone(seed) as Project).project };
+    validateMachine(p);
+    buildDotLottie(p, { background: null });
+    return p;
+  };
+
+  it('an empty object migrates, opens and exports', check(!!survives({})));
+  it('and comes out with the default name and a state to be in', check(
+    survives({}).timelines.length === 1 && !!survives({}).name));
+  it('a machine id falls back rather than throwing on a nameless project', check(
+    machineOf(survives({})).id === 'blooby', machineOf(survives({})).id));
+  it('a name with no timelines is fine', check(survives({ name: 'Mine' }).timelines.length === 1));
+  it('an empty timelines array is fine', check(survives({ timelines: [] }).timelines.length === 1));
+  it('and the name still drives the id when there IS one', check(
+    machineOf(survives({ name: 'Mine' })).id === 'mine'));
+
+  // whichever field goes missing, nothing on the open path may throw
+  const full = defaultProject() as unknown as Record<string, unknown>;
+  const broke = Object.keys(full).filter((key) => {
+    const seed = structuredClone(full);
+    delete seed[key];
+    try { survives(seed); return false; } catch { return true; }
+  });
+  it('no single missing top-level field breaks opening a project', check(!broke.length, broke.join(', ')));
+}
