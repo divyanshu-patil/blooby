@@ -44,10 +44,10 @@ function project(): Project {
   it('states carry their animation and loop flag', check(
     cfg.states[0].name === 'watching' && typeof cfg.states[0].animation === 'string'));
   // the sidecar has to agree with the .lottie: one composition, states separated by range
-  it('and all name the one composition, with a segment each', check(
+  it('and all name the one composition, with a marker each', check(
     new Set(cfg.states.map((s) => s.animation)).size === 1
-    && cfg.states.every((s) => Array.isArray((s as { segment?: number[] }).segment)),
-    JSON.stringify(cfg.states.map((s) => [s.animation, (s as { segment?: number[] }).segment]))));
+    && cfg.states.every((s) => typeof (s as { segment?: string }).segment === 'string'),
+    JSON.stringify(cfg.states.map((s) => [s.animation, (s as { segment?: string }).segment]))));
   it('transitions are by state name, in seconds, with a readable easing', check(
     cfg.transitions[0].from === 'watching' && cfg.transitions[0].duration === 0.3 && cfg.transitions[0].easing === 'easeOut',
     JSON.stringify(cfg.transitions[0])));

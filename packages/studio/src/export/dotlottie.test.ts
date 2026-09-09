@@ -61,9 +61,11 @@ function twoStateProject(): Project {
 
   const anim = json('a/mascot.json');
   it('an authored state still bakes real Lottie layers', check(Array.isArray(anim.layers) && anim.layers.length > 0));
-  it('and each state gets a distinct, non-overlapping frame range', check(
-    machine.states[0].segment[1] < machine.states[1].segment[0],
-    JSON.stringify(machine.states.map((s: { segment: number[] }) => s.segment))));
+  it('and each state names a distinct marker', check(
+    machine.states[0].segment !== machine.states[1].segment
+    && anim.markers.length === 2
+    && anim.markers[0].tm + anim.markers[0].dr < anim.markers[1].tm,
+    JSON.stringify([machine.states.map((s: { segment: string }) => s.segment), anim.markers])));
 }
 
 // --- import: what goes out comes back (§12/§13) --------------------------------
@@ -87,8 +89,8 @@ function twoStateProject(): Project {
   // states sharing one composition must come back knowing WHICH part of it they play,
   // or every one of them claims the whole strip
   const imported = ['watching', 'observing'].map((n) => back.timelines.find((t) => t.name === n)!);
-  it('and each imported state keeps its own frame range', check(
-    imported.every((t) => Array.isArray(t.segment)) && imported[0].segment![1] < imported[1].segment![0],
+  it('and each imported state keeps the marker naming its frames', check(
+    imported.every((t) => typeof t.segment === 'string') && imported[0].segment !== imported[1].segment,
     JSON.stringify(imported.map((t) => [t.name, t.segment]))));
   it('the animation itself travels with it', check(!!back.importedAnimations?.mascot, Object.keys(back.importedAnimations ?? {}).join()));
   it('both transitions arrive with their conditions', check(m.transitions.length === 2, String(m.transitions.length)));

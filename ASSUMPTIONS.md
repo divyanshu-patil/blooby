@@ -171,12 +171,24 @@ Verified by another agent reading the shipped binaries, after a file that looked
 kept cutting.
 
 So every baked timeline exports as a frame range of a single composition (`export/strip.ts`),
-with real morph frames between the ranges for the playhead to scrub through. **Unverified:**
-that `segment` is accepted on a `PlaybackState`. It appears in the core's field-name table
-next to `entryActions`/`exitActions` and `[start, end]` matches the player's own segment
-config, but the full schema could not be extracted from the stripped binary. Lottie markers
-naming each range are emitted alongside it, so if `segment` turns out to be rejected the
-fallback is a `marker` field on each state rather than a re-export.
+with real morph frames between the ranges for the playhead to scrub through.
+
+**`segment` on a `PlaybackState` is a marker NAME, not a frame pair.** Read from the
+dotlottie-rs source rather than guessed: `states.rs` declares `segment: Option<String>`,
+parses it with `opt_str_field`, and applies it with `player.set_marker()`. The engine also
+uses it to find a `Tweened` transition's target — it looks the name up in the animation's
+markers and tweens to `marker.segment.start`. So the name must match a marker in the
+animation, and both states must name the *same* animation or the engine skips the tween
+and falls through to an instant cut.
+
+Shipping it as `[start, end]` did not merely disable the segment — **it discarded the
+entire machine.** `opt()` in `json.rs` returns `Some(None)` for an absent field but `None`
+for one that is present with the wrong type; `state_from_json` forwards that with `?`; and
+`array_of` collects into `Option<Vec<_>>`, which short-circuits. One mistyped field on one
+state and `stateMachineLoad` returns false — a bool the native bindings discard. Nothing
+raises, and the animation autoplays every pose end to end, which looks close enough to
+working to cost hours. `export/engineContract.test.ts` is that parser, written out, so the
+next wrong type fails at build time.
 
 **Old projects are migrated, not reinterpreted.** `core/migrate.ts` holds one numbered
 step per document shape, applied on every load path (localStorage, a downloaded

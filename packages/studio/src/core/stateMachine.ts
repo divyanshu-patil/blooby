@@ -90,8 +90,8 @@ export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').r
 export interface DotLottieLayout {
   /** timeline id → the animation it plays; every baked state shares one */
   animationOf: Map<string, string>;
-  /** timeline id → [startFrame, endFrame] inside that shared composition */
-  segments: Map<string, [number, number]>;
+  /** timeline id → the marker naming its frames inside that shared composition */
+  segments: Map<string, { marker: string; range: [number, number] }>;
 }
 
 export function animationIds(p: Project): Map<string, string> {
@@ -224,12 +224,16 @@ export function toDotLottie(p: Project, layout?: DotLottieLayout) {
       else outgoing.push(transitionJson(to, guards, t));
     }
     /**
-     * `segment` is what makes a Tweened transition mean anything. Every baked state names
-     * the SAME composition and differs only by its frame range, so the tween scrubs the
-     * playhead across real morph frames instead of hard-swapping compositions — see
-     * export/strip.ts. An imported animation is its own composition and gets no segment.
+     * `segment` is a MARKER NAME, not a frame pair.
+     *
+     * dotlottie-rs reads it with `opt_str_field` and hands it to `set_marker()`; anything
+     * that is not a string reads as absent, and an absent segment leaves playback
+     * unconstrained — which is the whole strip, every pose in sequence, no matter what the
+     * states say. It is also how a Tweened transition finds its target: the engine looks
+     * the name up in the animation's markers and tweens the playhead to `segment.start`.
+     * Both halves fail silently, so this must stay a string that names a real marker.
      */
-    const segment = layout?.segments.get(tl.id) ?? tl.segment;
+    const segment = layout?.segments.get(tl.id)?.marker ?? tl.segment;
     return {
       type: 'PlaybackState',
       name: tl.name,
@@ -265,7 +269,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
  * `timelineIdFor` lets the caller reuse a timeline that already exists under that name
  * instead of duplicating it.
  */
-export function fromDotLottie(machineJson: unknown, timelineIdFor: (stateName: string, animation: string, loop: boolean, segment?: [number, number]) => string) {
+export function fromDotLottie(machineJson: unknown, timelineIdFor: (stateName: string, animation: string, loop: boolean, segment?: string) => string) {
   const root = obj(machineJson);
   if (!root) return null;
 
@@ -286,9 +290,7 @@ export function fromDotLottie(machineJson: unknown, timelineIdFor: (stateName: s
   for (const s of states) {
     const name = str(s.name);
     if (!name) continue;
-    const seg = Array.isArray(s.segment) && s.segment.length === 2 && s.segment.every((n) => typeof n === 'number')
-      ? ([s.segment[0], s.segment[1]] as [number, number]) : undefined;
-    stateIds.set(name, timelineIdFor(name, str(s.animation), s.loop === true, seg));
+    stateIds.set(name, timelineIdFor(name, str(s.animation), s.loop === true, str(s.segment) || undefined));
   }
 
   const transitions: SmTransition[] = [];

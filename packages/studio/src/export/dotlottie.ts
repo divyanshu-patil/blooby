@@ -44,13 +44,13 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
       ...opts, name: stripId, from: 0, to: strip.totalMs, sampleAt: strip.sampleAt,
     });
     /**
-     * Markers name each segment as well. They are plain Lottie, cost a line, and are the
-     * documented fallback if a player ignores `segment` — the state can point at a marker
-     * instead without re-exporting.
+     * The markers each state's `segment` names. Not decoration: the engine resolves a
+     * state's segment by looking the name up here, both to bound playback and to find a
+     * Tweened transition's target frame. No marker, no morph, and no error either.
      */
     (built.json as Record<string, unknown>).markers = bakedTls.map((tl) => {
-      const [s0, e0] = strip.segments.get(tl.id)!;
-      return { cm: anim.get(tl.id)!, tm: s0, dr: e0 - s0 };
+      const { marker, range: [s0, e0] } = strip.segments.get(tl.id)!;
+      return { cm: marker, tm: s0, dr: e0 - s0 };
     });
     entries.push({ name: `a/${stripId}.json`, data: bytes(built.json) });
   }
@@ -69,7 +69,12 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
   const manifest: Record<string, unknown> = {
     version: '2',
     generator: 'blooby',
-    initial: { animation: animationOf.get(initial) ?? animationOf.get(project.timelines[0].id) },
+    // naming the machine here too means a player can start it without the host page
+    // knowing its id — `stateMachineLoad` with the wrong id fails silently
+    initial: {
+      animation: animationOf.get(initial) ?? animationOf.get(project.timelines[0].id),
+      stateMachine: machine.id,
+    },
     animations: [...new Set(project.timelines.map((tl) => animationOf.get(tl.id)!))].map((id) => ({ id })),
     stateMachines: [{ id: machine.id, name: `${project.name} states` }],
     /**
@@ -177,7 +182,7 @@ export async function importDotLottie(file: Blob, into: Project): Promise<{ proj
 }
 
 /** Same state name → same timeline. Re-importing a file must not double its states. */
-function reuseOrCreate(p: Project, stateName: string, animation: string, loop: boolean, segment?: [number, number]): string {
+function reuseOrCreate(p: Project, stateName: string, animation: string, loop: boolean, segment?: string): string {
   const found = p.timelines.find((t) => t.name.toLowerCase() === stateName.toLowerCase());
   const tl: Timeline = found ?? makeTimeline(stateName);
   tl.name = stateName;

@@ -126,9 +126,10 @@ const v1Timelines = () => JSON.parse(JSON.stringify({
   // both old timelines become segments of ONE composition, which is what lets a Tweened
   // transition morph between them at all — see export/strip.ts
   it('with its timelines merged into one composition', check(animations.length === 1, animations.join()));
-  it('and both states pointing into it', check(
-    machine.states.every((s: { animation: string; segment: number[] }) => s.animation === animations[0] && Array.isArray(s.segment)),
-    JSON.stringify(machine.states.map((s: { segment: number[] }) => s.segment))));
+  it('and both states pointing into it by marker name', check(
+    machine.states.every((s: { animation: string; segment: unknown }) =>
+      s.animation === animations[0] && typeof s.segment === 'string'),
+    JSON.stringify(machine.states.map((s: { segment: unknown }) => s.segment))));
   it('and a real state machine file', check(!!machine.states, [...files.keys()].join()));
   it('whose states are the old timelines', check(
     machine.states.map((s: { name: string }) => s.name).join() === 'watching,observing'));

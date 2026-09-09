@@ -51,14 +51,32 @@ const files = await unzip(new Uint8Array(await buildDotLottie(project, { backgro
 const read = (n: string) => JSON.parse(new TextDecoder().decode(files.get(n)!));
 const anim = read('a/mascot.json');
 const sm = read('s/mascot.json');
-const segs = sm.states.map((s: { segment: [number, number] }) => s.segment);
+/**
+ * A state's `segment` names a marker; the marker carries the frames. Reading the range
+ * back THROUGH the marker is the point — it is the same lookup the engine does, so a
+ * segment naming a marker that does not exist fails here rather than in silence.
+ */
+const marker = (name: string) => anim.markers.find((m: { cm: string }) => m.cm === name);
+const rangeOf = (st: { segment: string }): [number, number] => {
+  const m = marker(st.segment);
+  return [m.tm, m.tm + m.dr];
+};
+const segs = sm.states.map(rangeOf);
 
 it('every pose ships in ONE composition', check(
   [...files.keys()].filter((k) => k.startsWith('a/')).length === 1, [...files.keys()].join()));
 it('and the manifest advertises just that one', check(read('manifest.json').animations.length === 1));
 it('both states name the same animation', check(
   new Set(sm.states.map((s: { animation: string }) => s.animation)).size === 1));
-it('and differ only by segment', check(segs.every((s: unknown) => Array.isArray(s)), JSON.stringify(segs)));
+// dotlottie-rs reads `segment` with opt_str_field and passes it to set_marker(). A frame
+// pair is read as absent, which leaves playback unconstrained — the whole strip plays,
+// every pose in sequence, which is exactly what a numeric segment shipped.
+it('every state names its segment as a STRING, never a frame pair', check(
+  sm.states.every((s: { segment: unknown }) => typeof s.segment === 'string'),
+  JSON.stringify(sm.states.map((s: { segment: unknown }) => s.segment))));
+it('and that string names a marker that really exists', check(
+  sm.states.every((s: { segment: string }) => !!marker(s.segment)),
+  `${JSON.stringify(sm.states.map((s: { segment: string }) => s.segment))} vs ${JSON.stringify(anim.markers.map((m: { cm: string }) => m.cm))}`));
 it('the segments do not overlap', check(segs[0][1] < segs[1][0], JSON.stringify(segs)));
 it('with morph frames between them, sized to the declared blend', check(
   segs[1][0] - segs[0][1] === Math.round((300 / 1000) * project.fps),
@@ -115,6 +133,9 @@ it('each segment is also named as a marker', check(
 const cfg = machineConfig(project);
 it('the sidecar reports the same animation for every state', check(
   new Set(cfg.stateMachine.states.map((s) => s.animation)).size === 1));
-it('and the same segments', check(
-  JSON.stringify(cfg.stateMachine.states.map((s) => (s as { segment?: number[] }).segment)) === JSON.stringify(segs)));
+it('and the same markers, with the frames spelled out beside them', check(
+  JSON.stringify(cfg.stateMachine.states.map((s) => (s as { segment?: string }).segment))
+    === JSON.stringify(sm.states.map((st: { segment: string }) => st.segment))
+  && JSON.stringify(cfg.stateMachine.states.map((s) => (s as { frames?: number[] }).frames)) === JSON.stringify(segs),
+  JSON.stringify(cfg.stateMachine.states)));
 it('and the machine id the app loads', check(cfg.stateMachine.id === 'mascot', cfg.stateMachine.id));

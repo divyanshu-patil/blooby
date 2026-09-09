@@ -28,11 +28,25 @@ import type { Project, Timeline } from '../core/types';
  * down to its two endpoint keyframes in the output.
  */
 
+/**
+ * One pose's place in the strip.
+ *
+ * `marker` is the operative half. A PlaybackState's `segment` field is parsed by
+ * `opt_str_field` in dotlottie-rs — it is a MARKER NAME, not a frame pair — and applied
+ * with `set_marker()`. A numeric `[start, end]` is silently read as absent, which leaves
+ * playback unconstrained and the whole strip plays. `range` is carried only so the
+ * markers and the human-readable sidecar can be written from the same source.
+ */
+export interface Segment {
+  marker: string;
+  range: [number, number];
+}
+
 export interface Strip {
   /** the whole strip's length, for bakeLottie's `to` */
   totalMs: number;
-  /** timeline id → [startFrame, endFrame] for that state's `segment` */
-  segments: Map<string, [number, number]>;
+  /** timeline id → the marker naming that state's frames */
+  segments: Map<string, Segment>;
   /** what bakeLottie should draw at a given ms along the strip */
   sampleAt: (ms: number) => SceneItem[];
 }
@@ -81,19 +95,19 @@ function blendScene(a: SceneItem[], b: SceneItem[], u: number): SceneItem[] {
  * animation is someone else's composition, written out byte for byte, and cannot be
  * merged into ours.
  */
-export function layoutStrip(project: Project, timelines: Timeline[]): Strip {
+export function layoutStrip(project: Project, timelines: Timeline[], markerOf: (tl: Timeline) => string): Strip {
   const fps = project.fps;
   const frames = (ms: number) => Math.max(1, Math.round((ms / 1000) * fps));
   const poseAt = (tl: Timeline, ms: number) =>
     sceneAt({ ...project, activeTimelineId: tl.id }, ms, COMP);
 
-  const segments = new Map<string, [number, number]>();
+  const segments = new Map<string, Segment>();
   const morphs: { start: number; len: number; from: Timeline; to: Timeline }[] = [];
 
   let cursor = 0;
   timelines.forEach((tl, i) => {
     const len = frames(tl.timelineDurationMs);
-    segments.set(tl.id, [cursor, cursor + len]);
+    segments.set(tl.id, { marker: markerOf(tl), range: [cursor, cursor + len] });
     cursor += len;
     const next = timelines[i + 1];
     if (!next) return;
@@ -113,7 +127,7 @@ export function layoutStrip(project: Project, timelines: Timeline[]): Strip {
       }
     }
     for (const tl of timelines) {
-      const [s, e] = segments.get(tl.id)!;
+      const [s, e] = segments.get(tl.id)!.range;
       if (f <= e) return poseAt(tl, ((Math.max(f, s) - s) / fps) * 1000);
     }
     const last = timelines[timelines.length - 1];
@@ -150,7 +164,7 @@ export function dotLottieLayout(project: Project) {
     stripId = `mascot-${n}`;
   }
   if (!baked.length) stripId = '';
-  const strip = baked.length ? layoutStrip(project, baked) : undefined;
+  const strip = baked.length ? layoutStrip(project, baked, (tl) => perTimeline.get(tl.id)!) : undefined;
 
   const animationOf = new Map(perTimeline);
   for (const tl of baked) animationOf.set(tl.id, stripId);

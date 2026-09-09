@@ -137,11 +137,16 @@ Two asymmetries to know about.
 one transition per condition at export.
 
 **There is no cross-composition morph.** A `Tweened` transition interpolates the playhead
-*inside the loaded composition*; `Tweening` is only a player status next to
-Playing/Paused/Stopped. Two states naming two different animations therefore hard-swap no
-matter what duration they declare. So every baked timeline is exported as a frame range of
-one composition — `export/strip.ts` lays them out with real morph frames between, and each
-state carries `segment: [start, end]`. The constraint that falls out of it: **every frame
-of the strip must be a valid pose**, same layers throughout, because the tween scrubs
-through them. Never drop a layer between poses; fade it. (`bakeLottie` already does this
-for you — it takes the union of layers it sees and writes opacity 0 where one is absent.)
+*inside the loaded composition*, and the engine skips the tween outright unless both states
+name the same animation. So every baked timeline is exported as part of one composition —
+`export/strip.ts` lays them out with real morph frames between — and each state carries
+`segment`, **a marker NAME, not a frame pair** (`Option<String>` → `set_marker()`; it is
+also how the tween finds its target frame). The constraint that falls out: **every frame of
+the strip must be a valid pose**, same layers throughout, because the tween scrubs through
+them. Never drop a layer between poses; fade it. (`bakeLottie` already does this — it takes
+the union of layers it sees and writes opacity 0 where one is absent.)
+
+**The engine's parser is all-or-nothing and silent.** A field present with the wrong type
+discards the entire machine, `stateMachineLoad` returns a false the bindings drop, and the
+animation autoplays looking roughly right. Before changing anything the machine emits, read
+`export/engineContract.test.ts` — it is dotlottie-rs's parser written out field by field.
