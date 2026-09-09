@@ -32,7 +32,7 @@ export function Users() {
                 <tr key={u.id} tabIndex={0} onClick={() => setOpen(u)}
                   onKeyDown={(e) => { if (e.key === 'Enter') setOpen(u); }}>
                   <td>{u.username ?? u.email ?? u.id.slice(0, 8)}</td>
-                  <td className="num">{new Date(u.createdAt).toLocaleDateString()}</td>
+                  <td className="num">{relativeTime(Date.parse(u.createdAt))}</td>
                   <td className="num">{u.lastSignInAt ? relativeTime(Date.parse(u.lastSignInAt)) : '—'}</td>
                   <td className="num">{u.projectCount}</td>
                   <td>{u.role === 'admin' ? <span className="tag" data-tone="live">Admin</span> : 'User'}</td>

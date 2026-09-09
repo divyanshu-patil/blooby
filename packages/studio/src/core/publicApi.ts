@@ -1,5 +1,6 @@
 import { useEditor } from './store';
-import type { EasingCurve } from './types';
+import { defaultValues, machineOf } from './stateMachine';
+import type { EasingCurve, InputValue, SmInput } from './types';
 
 /**
  * The application-level integration surface spec §14 asks for — a host page (or the
@@ -20,7 +21,21 @@ export interface BloobyStateMachine {
   getActiveState(): { id: string; name: string } | null;
   /** fires with the new active state whenever it changes — from this API, the editor's
    * own State panel, or a keyboard shortcut; all routes end up at the same store action. */
-  onStateChange(cb: (state: { id: string; name: string }) => void): () => void;
+  onStateChange(cb: (state: { id: string; name: string; previousState: string | null; transitionMs: number }) => void): () => void;
+
+  /**
+   * State-machine inputs — the same surface the generated React Native `<Mascot>` drives,
+   * so a behaviour tested in the browser is the behaviour the app gets. Setting one
+   * evaluates the transition conditions and lets the MACHINE pick the state; nothing here
+   * names an animation.
+   */
+  setInput(name: string, value: InputValue): void;
+  setInputs(values: Record<string, InputValue>): void;
+  /** an Event input: true for one evaluation, then cleared */
+  fireInput(name: string): void;
+  getInputs(): Record<string, InputValue>;
+  getInputDefinitions(): SmInput[];
+  resetInputs(): void;
 }
 
 declare global {
@@ -51,10 +66,22 @@ export function installPublicApi(): void {
       let last = useEditor.getState().project.activeTimelineId;
       return useEditor.subscribe((s) => {
         if (s.project.activeTimelineId === last) return;
+        const previous = s.project.timelines.find((t) => t.id === last)?.name ?? null;
         last = s.project.activeTimelineId;
         const state = activeOf();
-        if (state) cb(state);
+        const tl = s.project.timelines.find((t) => t.id === last);
+        if (state) cb({ ...state, previousState: previous, transitionMs: tl?.transitionMs ?? 300 });
       });
     },
+
+    setInput: (n, v) => useEditor.getState().setInput(n, v),
+    setInputs: (v) => useEditor.getState().setInputs(v),
+    fireInput: (n) => useEditor.getState().fireInput(n),
+    getInputs: () => {
+      const { project, inputs } = useEditor.getState();
+      return { ...defaultValues(project), ...inputs };
+    },
+    getInputDefinitions: () => machineOf(useEditor.getState().project).inputs,
+    resetInputs: () => useEditor.getState().resetInputs(),
   };
 }

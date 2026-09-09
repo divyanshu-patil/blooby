@@ -2,6 +2,7 @@ import type { EasingCurve, Emitter, EmitterPart, Expression, Keyframe, Modifier,
 import { derivedDuration } from './timeline';
 import { primitivePath } from './path';
 import { CONFETTI_COLORS } from './emitters';
+import { SCHEMA_VERSION } from './migrate';
 
 export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -576,6 +577,9 @@ export function defaultProject(): Project {
     timelines: [idle],
     activeTimelineId: idle.id,
     fps: 30,
+    // stamped at birth so a fresh project never looks like a pre-versioning one and gets
+    // needlessly walked through every migration step on its first load
+    schemaVersion: SCHEMA_VERSION,
   };
   for (const id of ['p_idle', 'p_blink', 'p_talk', 'p_happy']) appendPreset(p, id, idle);
   return p;

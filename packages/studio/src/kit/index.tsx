@@ -241,13 +241,34 @@ export function SaveIndicator({ state, savedAt, onRetry }: { state: SaveState; s
   );
 }
 
+/**
+ * How long ago something happened, in the largest unit that still says something.
+ *
+ * It used to stop at hours, so a project touched last spring read "3,412 hours ago" —
+ * technically true and completely unreadable. Days, weeks, months and years continue the
+ * ladder, and the units stay short (`5m`, `3h`, `2d`, `1w`, `4mon`, `2y`) because these
+ * land in table cells and card footers where a full sentence wraps.
+ *
+ * A timestamp in the future — a server clock a little ahead of the browser's, which is
+ * ordinary — reads "just now" rather than "-2m ago"; so does an unparseable one, since a
+ * missing date is not worth rendering as NaN.
+ */
 function ago(ts: number) {
+  if (!Number.isFinite(ts)) return 'just now';
   const s = Math.round((Date.now() - ts) / 1000);
   if (s < 45) return 'just now';
   const m = Math.round(s / 60);
-  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`;
+  if (m < 60) return `${m}m ago`;
   const h = Math.round(m / 60);
-  return `${h} hour${h === 1 ? '' : 's'} ago`;
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 7) return `${d}d ago`;
+  // weeks up to a month, then months — 30.44 and 365.25 are the average lengths, so
+  // "12mon" never appears just before "1y" the way a flat 30/360 makes it
+  if (d < 30) return `${Math.round(d / 7)}w ago`;
+  const mon = Math.round(d / 30.44);
+  if (mon < 12) return `${mon}mon ago`;
+  return `${Math.round(d / 365.25)}y ago`;
 }
 
 export const relativeTime = ago;

@@ -125,17 +125,63 @@ both return `true`, and the player fires real `stateMachineTransition`/
 `stateMachineStateEntered` events entering the first state. That's the part that was
 reported broken, and it's now confirmed working end to end.
 
-*Residual uncertainty, narrower than before*: the auto-advance-to-the-next-state-on-
-completion wiring (`OnComplete` interaction → `Fire` action → `Event`-type guard) is
-built from the best pattern available — no verbatim spec example was findable, only a
-plausible one from community docs — and in the same live test the state machine started
-and entered its first state correctly but did not visibly advance to the next state
-within a full playthrough. The states, their animations, and manual switching all work;
-whether this *particular* auto-chaining syntax is exactly what current players expect is
-still open. *If auto-advance matters, drive it explicitly instead* — call
-`stateMachineFireEvent`/`stateMachineSetBooleanInput` from host code per state, which
-every version of the spec supports unambiguously, rather than relying on the file to
-self-advance.
+**The auto-advance wiring is gone, replaced by real transitions.** The old exporter
+chained each state to the next with an `OnComplete` interaction firing an `Event` guard.
+That was the one part built from a community-docs pattern rather than a spec example, and
+in a live test it never actually advanced. It is now removed: states are connected by the
+transitions authored in the State Editor, with real `Boolean`/`Numeric`/`String` guards.
+A machine with no authored transitions stays in its initial state, and validation says so
+in the editor rather than shipping a file that quietly does nothing.
+
+**The state-machine schema is read off the engine, not off docs.** `core/stateMachine.ts`
+uses dotLottie's own vocabulary verbatim — input `type` (`Boolean`/`Numeric`/`String`/
+`Event`), guard `conditionType` (`GreaterThan`, `GreaterThanOrEqual`, `LessThan`,
+`LessThanOrEqual`, `Equal`, `NotEqual`), `compareTo`, `Tweened` transitions whose
+`duration` is in **seconds** with a 4-number cubic-bezier `easing` — all checked against
+`dotlottie-rs/src/state_machine/{inputs,states,transitions/{mod,guard}}.rs`, which is what
+actually parses the file. So `toDotLottie` is close to an identity mapping and
+`fromDotLottie` round-trips it (there is a test asserting exactly that).
+
+*The one thing Blooby carries that the format cannot express is `OR` across conditions.*
+The engine ANDs a guard list (`guards.iter().all(...)`) and has no OR, so an OR transition
+fans out into one transition per condition, tried in order — identical behaviour, and no
+invented key a player would ignore. The editor says so on the transition itself.
+
+*Residual uncertainty*: the guards, inputs and tween shapes are verified against the
+parser source, not against a running React Native player — this repo has no RN app to run
+one in. The exact method names in the generated `Mascot.tsx` come from
+`@lottiefiles/dotlottie-react-native@0.12.1`'s own typings (note `stateMachineFire`, not
+the web player's `stateMachineFireEvent`), so they are right for that version.
+
+**Importing a `.lottie` preserves its animations rather than re-drawing them.** Blooby
+cannot map someone else's Lottie onto its own rig, so an imported state keeps its
+`animationId` and the original animation JSON travels with the project
+(`Project.importedAnimations`) and is written back out byte for byte. Those states are
+editable *as states* — name, loop, transitions, blend, conditions; their artwork is not.
+Flattening them into independent animations would be the one thing the spec explicitly
+forbids. Re-importing a file is idempotent: a state whose name already exists reuses that
+timeline instead of creating a second one.
+
+**Old projects are migrated, not reinterpreted.** `core/migrate.ts` holds one numbered
+step per document shape, applied on every load path (localStorage, a downloaded
+`.blooby.json`, the IndexedDB gallery, a cloud row) because all of them funnel through
+`loadProject`. A project saved before state machines existed gets one written down on
+open — its timelines become states, the id is pinned from the project name and the
+initial state from the first timeline.
+
+*It is deliberately given no transitions.* The old exporter chained state to state with an
+`OnComplete` interaction, and that chain was never observed to advance in a real player
+(see above). Reconstructing it would carry a bug forward and dress it as intent, so an
+upgraded project gets an inert machine plus the editor's own validation warning saying
+exactly that — visible and fixable, rather than shipped and mysterious.
+
+A document from a *newer* build is detected and left alone rather than run through older
+steps, with a console warning; the parts this build understands still open.
+
+**`unzip` uses `DecompressionStream('deflate-raw')`**, so reading a deflated `.lottie`
+(everything not written by us) still needs no zip dependency. Entries are read from the
+central directory rather than by scanning local headers, so a streamed archive with data
+descriptors reads correctly.
 
 **MP4 via `MediaRecorder`, not `ffmpeg.wasm`.** Chrome and Safari both advertise
 `video/mp4;codecs=avc1`; where they do not, the exporter falls back to WebM and the

@@ -3,6 +3,7 @@ import { TOOL_DOCS } from './tools';
 import { ANIMATION_CRAFT } from './craft';
 import { activeTimeline } from '../core/types';
 import { NUMERIC_PROPS, PROPS } from '../core/props';
+import { conditionText, machineOf } from '../core/stateMachine';
 import type { Project } from '../core/types';
 
 /**
@@ -142,6 +143,16 @@ a shake die away — things no keyframe on the rig can do:
 ${EFFECT_PROPERTY_DOCS}
 Active timeline: "${tl.name}" — ${fmtSec(tl.timelineDurationMs)} at ${p.fps} fps, ${tl.blocks.length} blocks${tl.loop ? ', loops' : ''}.
 ${p.timelines.length > 1 ? `Other timelines (separate states, not shown here): ${p.timelines.filter((t) => t.id !== tl.id).map((t) => t.name).join(', ')}.` : ''}
+
+State machine — states are the timelines above. REUSE these, never redeclare them:
+  Inputs: ${machineOf(p).inputs.map((i) => `${i.name} (${i.type}, default ${JSON.stringify(i.value)})`).join(', ') || 'none yet'}
+  Transitions: ${machineOf(p).transitions.map((t) => {
+    const name = (id: string) => p.timelines.find((x) => x.id === id)?.name ?? '?';
+    return `${name(t.from)} -> ${name(t.to)} when ${t.conditions.map((c) => conditionText(c, machineOf(p).inputs)).join(t.logic === 'OR' ? ' or ' : ' and ')}`;
+  }).join('; ') || 'none yet'}
+When the user describes BEHAVIOUR ("look at me when I'm typing", "get excited above 80
+energy"), author it as inputs plus transitions — not as keyframes and not by playing an
+animation. The state machine decides which state is active at runtime.
 
 ${timelineDump(p)}
 ${custom.length ? `\nPresets you or the user authored, in full — edit_preset replaces these tracks wholesale,

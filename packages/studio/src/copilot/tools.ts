@@ -5,10 +5,11 @@ import { blocksEnd, relayoutBlocks } from '../core/timeline';
 import { activeTrackFor } from '../core/scene';
 import { setProp } from '../core/props';
 import { activeTimeline, MODIFIER_KINDS, MODIFIERS } from '../core/types';
+import { defaultValueFor, machineOf, OPERATORS } from '../core/stateMachine';
 import { primitivePath, PRIMITIVE_SHAPES, type PrimitiveShape } from '../core/path';
 import { shapeById, SHAPE_LIBRARY } from '../core/emitters';
 import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
-import type { EasingCurve, ModifierKind, Project } from '../core/types';
+import type { ConditionOp, EasingCurve, InputType, InputValue, ModifierKind, Project, SmCondition } from '../core/types';
 
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
@@ -19,6 +20,7 @@ export const TOOL_NAMES = [
   'set_timeline', 'clear_animation', 'set_block_duration', 'remove_block', 'move_block',
   'add_timeline', 'set_camera', 'remove_keyframe', 'move_keyframe', 'edit_preset',
   'add_emitter', 'set_effect_range', 'set_shape', 'set_emitter_parts',
+  'add_input', 'add_transition',
 ] as const;
 
 /** The JSON the model must produce. Ollama enforces this shape server-side via `format`. */
@@ -97,7 +99,21 @@ set_emitter_parts     { emitter, parts: [{ shape, color?, speed?, size?, spin? }
                       // what an emitter throws. shape is one of:
                       // ${SHAPE_LIBRARY.map((s) => s.id).join(', ')}
                       // Several parts at different speeds, sizes and colours is what makes a
-                      // burst read \u2014 one shape repeated does not.`.trim()
+                      // burst read \u2014 one shape repeated does not.
+
+add_input             { name, type: "Boolean"|"Numeric"|"String"|"Event", default?, description? }
+                      // a STATE MACHINE input the app sets at runtime. A name that already exists
+                      // is REUSED, never duplicated \u2014 so always add_input before referring to one.
+add_transition        { from, to, conditions: [{ input, operator, value? }], logic?, durationMs?, easing? }
+                      // from/to are STATE names (timelines). operator is one of:
+                      //   Boolean: "is true" | "is false"
+                      //   Numeric: "==" "!=" ">" ">=" "<" "<="
+                      //   String:  "==" "!="
+                      //   Event:   "fired"
+                      // logic is "AND" (default) or "OR" across several conditions.
+                      // This is how behaviour is authored: "look at me when I'm typing" is an
+                      // isTyping Boolean plus watching -> observing when it is true, NEVER a call
+                      // that plays an animation. The machine decides which state is active.`.trim()
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A property the copilot may write: on a node, and a number. */
@@ -132,6 +148,54 @@ function findBlock(p: Project, ref: unknown) {
   const byName = tl.blocks.find((b) => b.name.toLowerCase() === lower);
   if (byName) return byName;
   return /^\d+$/.test(s) ? tl.blocks[Number(s)] : undefined;
+}
+
+/** A state by name (or id) — the machine's states are the project's timelines. */
+function findState(p: Project, ref: unknown) {
+  const s = str(ref)?.toLowerCase();
+  return p.timelines.find((t) => t.id === ref || t.name.toLowerCase() === s);
+}
+
+/**
+ * The operator vocabulary the model writes in — `>`, `is true` — mapped onto dotLottie's
+ * own `conditionType`. Models reach for the symbols the spec's own examples use, and a
+ * tool that only accepted "GreaterThanOrEqual" would be wrong most of the time.
+ */
+const OPERATOR_WORDS: Record<string, ConditionOp> = {
+  '==': 'Equal', '=': 'Equal', 'equal': 'Equal', 'equals': 'Equal',
+  '!=': 'NotEqual', '<>': 'NotEqual', 'notequal': 'NotEqual',
+  '>': 'GreaterThan', 'greaterthan': 'GreaterThan',
+  '>=': 'GreaterThanOrEqual', 'greaterthanorequal': 'GreaterThanOrEqual',
+  '<': 'LessThan', 'lessthan': 'LessThan',
+  '<=': 'LessThanOrEqual', 'lessthanorequal': 'LessThanOrEqual',
+  'is true': 'Equal', 'istrue': 'Equal', 'true': 'Equal',
+  'is false': 'Equal', 'isfalse': 'Equal', 'false': 'Equal',
+  'fired': 'Fired', 'fires': 'Fired',
+};
+const opWord = (v: unknown) => OPERATOR_WORDS[String(v ?? '').trim().toLowerCase()];
+/** "is false" carries its value in the operator, which is the only place it can live. */
+const opNegates = (v: unknown) => /^(is\s*)?false$/i.test(String(v ?? '').trim());
+
+const INPUT_TYPES = ['Boolean', 'Numeric', 'String', 'Event'] as const;
+
+/** One `{ input, operator, value }` from the model, checked against the input it names. */
+function conditionOf(p: Project, raw: unknown): SmCondition | string {
+  const c = raw as Record<string, unknown> | null;
+  if (!c || typeof c !== 'object') return 'a condition is not an object';
+  const name = str(c.input);
+  const input = machineOf(p).inputs.find((i) => i.name === name);
+  if (!input) return `no input "${String(c.input)}" — call add_input first`;
+  if (input.type === 'Event') return { input: input.name, operator: 'Fired' };
+  const op = opWord(c.operator);
+  if (!op || !OPERATORS[input.type].includes(op)) {
+    return `"${String(c.operator)}" cannot be used on the ${input.type} input "${input.name}"`;
+  }
+  const value: InputValue = input.type === 'Boolean'
+    ? (c.value !== undefined ? c.value === true : !opNegates(c.operator))
+    : input.type === 'Numeric'
+      ? (num(c.value) ?? 0)
+      : String(c.value ?? '');
+  return { input: input.name, operator: op, value };
 }
 
 /**
@@ -234,13 +298,26 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
  * will have made. Cheap because only the name lists matter here.
  */
 export function validateBatch(p: Project, calls: ToolCall[]): (string | null)[] {
-  const view: Project = { ...p, presets: [...p.presets], expressions: [...p.expressions] };
+  const view: Project = {
+    ...p,
+    presets: [...p.presets],
+    expressions: [...p.expressions],
+    timelines: [...p.timelines],
+    stateMachine: { ...machineOf(p), inputs: [...machineOf(p).inputs] },
+  };
   return calls.map((call) => {
     const problem = validate(view, call);
     if (problem) return problem;
     const a = call.args ?? {};
     if (call.name === 'create_preset') view.presets.push({ id: uid('p'), name: String(a.name), source: 'custom', durationMs: 0, tracks: [] });
     if (call.name === 'create_expression') view.expressions.push({ id: uid('x'), name: String(a.name), snapshot: {} });
+    // a batch that adds a state (or an input) and then references it is the normal shape
+    // of "make Blooby look at me when I'm typing" — the view has to see its own earlier calls
+    if (call.name === 'add_timeline') view.timelines.push(makeTimeline(String(a.name).trim()));
+    if (call.name === 'add_input' && !view.stateMachine!.inputs.some((i) => i.name === str(a.name))) {
+      const type = String(a.type) as InputType;
+      view.stateMachine!.inputs.push({ name: str(a.name)!, type, value: (a.default as InputValue | undefined) ?? defaultValueFor(type) });
+    }
     return null;
   });
 }
@@ -329,6 +406,21 @@ export function validate(p: Project, call: ToolCall): string | null {
     case 'move_block':
       return findBlock(p, a.block) ? null : `no clip "${String(a.block)}"`;
     case 'add_timeline': return str(a.name) ? null : 'add_timeline needs a name';
+    case 'add_input': {
+      if (!str(a.name)) return 'add_input needs a name';
+      if (!(INPUT_TYPES as readonly string[]).includes(String(a.type))) return `add_input type must be one of ${INPUT_TYPES.join(', ')}`;
+      return null;
+    }
+    case 'add_transition': {
+      if (!findState(p, a.from)) return `no state "${String(a.from)}" — add_timeline first`;
+      if (!findState(p, a.to)) return `no state "${String(a.to)}" — add_timeline first`;
+      if (!Array.isArray(a.conditions) || !a.conditions.length) return 'add_transition needs at least one condition';
+      for (const raw of a.conditions) {
+        const c = conditionOf(p, raw);
+        if (typeof c === 'string') return c;
+      }
+      return null;
+    }
     case 'add_emitter': {
       if (!str(a.name)) return 'add_emitter needs a name';
       if (!Array.isArray(a.glyphs) || !a.glyphs.length) return 'add_emitter needs a non-empty glyphs array, e.g. ["z","z","Z"]';
@@ -404,6 +496,13 @@ export function describe(p: Project, call: ToolCall): string {
     case 'remove_block': return `Remove clip "${named(findBlock(p, a.block), a.block)}"`;
     case 'move_block': return `Move clip "${named(findBlock(p, a.block), a.block)}" to slot ${a.index}`;
     case 'add_timeline': return `Add timeline "${a.name}" (a new exported state)`;
+    case 'add_input': return machineOf(p).inputs.some((i) => i.name === str(a.name))
+      ? `Reuse the existing ${a.type} input "${a.name}"`
+      : `Add a ${a.type} state-machine input "${a.name}"`;
+    case 'add_transition': {
+      const conds = (a.conditions as Record<string, unknown>[]).map((c) => `${c.input} ${c.operator ?? ''} ${c.value ?? ''}`.trim());
+      return `${a.from} → ${a.to} when ${conds.join(a.logic === 'OR' ? ' or ' : ' and ')}`;
+    }
     case 'set_camera': return `Set camera ${a.property} to ${a.value}`;
     case 'add_emitter': {
       const where = a.fromNode ? ` from ${name(a.fromNode)}` : '';
@@ -655,6 +754,40 @@ export function applyCalls(calls: ToolCall[]) {
           p.timelines.push(tl);
           // anything the model emits after this belongs to the state it just made
           p.activeTimelineId = tl.id;
+          break;
+        }
+        case 'add_input': {
+          const m = (p.stateMachine ??= machineOf(p));
+          const name = String(a.name).trim();
+          // §4/§17: the same name is the same input. Two declarations would export twice
+          // and leave half the transitions testing the one the engine dropped.
+          if (m.inputs.some((i) => i.name === name)) break;
+          const type = String(a.type) as InputType;
+          m.inputs.push({
+            name, type,
+            ...(type === 'Event' ? {} : { value: (a.default as InputValue | undefined) ?? defaultValueFor(type) }),
+            ...(str(a.description) ? { description: str(a.description) } : {}),
+          });
+          break;
+        }
+        case 'add_transition': {
+          const m = (p.stateMachine ??= machineOf(p));
+          const from = findState(p, a.from)!;
+          const to = findState(p, a.to)!;
+          const conditions = (a.conditions as unknown[])
+            .map((raw) => conditionOf(p, raw))
+            .filter((c): c is SmCondition => typeof c !== 'string');
+          const key = (t: { from: string; to: string; conditions: SmCondition[] }) =>
+            `${t.from}>${t.to}|${t.conditions.map((c) => `${c.input}${c.operator}${String(c.value)}`).join(',')}`;
+          const next = { id: uid('sm'), from: from.id, to: to.id, conditions };
+          // the same edge asked for twice is one edge — "reuse, don't duplicate" (§17)
+          if (m.transitions.some((t) => key(t) === key(next))) break;
+          m.transitions.push({
+            ...next,
+            logic: a.logic === 'OR' ? 'OR' : 'AND',
+            durationMs: num(a.durationMs) ?? to.transitionMs ?? 300,
+            easing: easingOf(a.easing),
+          });
           break;
         }
         case 'set_camera': {
