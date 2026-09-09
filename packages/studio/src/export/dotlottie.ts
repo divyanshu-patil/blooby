@@ -1,6 +1,7 @@
 import { bakeLottie, type LottieOptions } from './lottie';
 import { unzip, zipStore } from './zip';
 import { animationIds, fromDotLottie, machineOf, toDotLottie } from '../core/stateMachine';
+import { dotLottieLayout } from './strip';
 import { makeTimeline, uid } from '../core/defaults';
 import type { Project, SmTransition, Timeline } from '../core/types';
 
@@ -26,25 +27,50 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
   const bytes = (v: unknown) => enc.encode(JSON.stringify(v)) as Uint8Array<ArrayBuffer>;
   const anim = animationIds(project);
 
-  const entries: { name: string; data: Uint8Array<ArrayBuffer> }[] = project.timelines.map((tl) => {
-    const id = anim.get(tl.id)!;
-    // an imported state plays an animation Blooby never drew — write the original JSON
-    // back out byte for byte instead of baking an empty timeline over the top of it
-    const imported = tl.animationId ? project.importedAnimations?.[tl.animationId] : undefined;
-    if (imported) return { name: `a/${id}.json`, data: bytes(imported) };
-    const synthetic: Project = { ...project, activeTimelineId: tl.id };
-    const baked = bakeLottie(synthetic, { ...opts, name: id, from: 0, to: tl.timelineDurationMs });
-    return { name: `a/${id}.json`, data: bytes(baked.json) };
-  });
+  /**
+   * Baked timelines merge into ONE composition; imported ones cannot.
+   *
+   * A `Tweened` transition moves the playhead within the loaded composition, so two
+   * states can only morph into each other if they are frame ranges of the same animation
+   * (see strip.ts). An imported animation is a whole composition someone else authored,
+   * written out byte for byte — it stays its own file and its state gets no segment, so
+   * entering it is still a cut. That is the format, not a shortcut.
+   */
+  const { baked: bakedTls, stripId, strip, animationOf } = dotLottieLayout(project);
 
-  const machine = toDotLottie(project);
+  const entries: { name: string; data: Uint8Array<ArrayBuffer> }[] = [];
+  if (strip) {
+    const built = bakeLottie(project, {
+      ...opts, name: stripId, from: 0, to: strip.totalMs, sampleAt: strip.sampleAt,
+    });
+    /**
+     * Markers name each segment as well. They are plain Lottie, cost a line, and are the
+     * documented fallback if a player ignores `segment` — the state can point at a marker
+     * instead without re-exporting.
+     */
+    (built.json as Record<string, unknown>).markers = bakedTls.map((tl) => {
+      const [s0, e0] = strip.segments.get(tl.id)!;
+      return { cm: anim.get(tl.id)!, tm: s0, dr: e0 - s0 };
+    });
+    entries.push({ name: `a/${stripId}.json`, data: bytes(built.json) });
+  }
+  const writtenImports = new Set<string>();
+  for (const tl of project.timelines) {
+    const imported = tl.animationId ? project.importedAnimations?.[tl.animationId] : undefined;
+    // several imported states can share one composition — write it once, not once each
+    if (!imported || writtenImports.has(tl.animationId!)) continue;
+    writtenImports.add(tl.animationId!);
+    entries.push({ name: `a/${anim.get(tl.id)!}.json`, data: bytes(imported) });
+  }
+
+  const machine = toDotLottie(project, strip ? { animationOf, segments: strip.segments } : undefined);
   const initial = machineOf(project).initialStateId ?? project.timelines[0].id;
 
   const manifest: Record<string, unknown> = {
     version: '2',
     generator: 'blooby',
-    initial: { animation: anim.get(initial) ?? anim.get(project.timelines[0].id) },
-    animations: project.timelines.map((tl) => ({ id: anim.get(tl.id) })),
+    initial: { animation: animationOf.get(initial) ?? animationOf.get(project.timelines[0].id) },
+    animations: [...new Set(project.timelines.map((tl) => animationOf.get(tl.id)!))].map((id) => ({ id })),
     stateMachines: [{ id: machine.id, name: `${project.name} states` }],
     /**
      * The authored blend into each state, in ms.
@@ -56,7 +82,9 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
      * machines unreadable. A player ignores it; the generated Mascot runtime reads it.
      */
     blooby: {
-      transitions: Object.fromEntries(project.timelines.map((tl) => [anim.get(tl.id)!, {
+      // keyed by STATE name, not animation id — every baked state now shares one
+      // composition, so an animation id no longer identifies a state
+      transitions: Object.fromEntries(project.timelines.map((tl) => [tl.name, {
         durationMs: tl.transitionMs ?? 300,
         easing: tl.transitionEasing ?? { type: 'preset', name: 'easeInOut' },
       }])),
@@ -65,7 +93,7 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
 
   entries.push({ name: `s/${machine.id}.json`, data: bytes(machine.json) });
   entries.unshift({ name: 'manifest.json', data: bytes(manifest) });
-  return { blob: zipStore(entries), animations: [...anim.values()], machine };
+  return { blob: zipStore(entries), animations: [...new Set(animationOf.values())], machine };
 }
 
 /**
@@ -124,7 +152,7 @@ export async function importDotLottie(file: Blob, into: Project): Promise<{ proj
     return { project, states: ids.length, inputs: 0, warnings };
   }
 
-  const read = fromDotLottie(machineJson, (stateName, animation, loop) => reuseOrCreate(project, stateName, animation, loop));
+  const read = fromDotLottie(machineJson, (stateName, animation, loop, segment) => reuseOrCreate(project, stateName, animation, loop, segment));
   if (!read) throw new Error('That file’s state machine could not be read.');
 
   for (const name of read.danglingInputs) warnings.push(`A transition tests "${name}", which the file never declares as an input.`);
@@ -149,12 +177,15 @@ export async function importDotLottie(file: Blob, into: Project): Promise<{ proj
 }
 
 /** Same state name → same timeline. Re-importing a file must not double its states. */
-function reuseOrCreate(p: Project, stateName: string, animation: string, loop: boolean): string {
+function reuseOrCreate(p: Project, stateName: string, animation: string, loop: boolean, segment?: [number, number]): string {
   const found = p.timelines.find((t) => t.name.toLowerCase() === stateName.toLowerCase());
   const tl: Timeline = found ?? makeTimeline(stateName);
   tl.name = stateName;
   tl.loop = loop;
   if (animation) tl.animationId = animation;
+  // several states sharing one composition is the normal shape now, so without this each
+  // of them would come back claiming the whole strip
+  if (segment) tl.segment = segment;
   if (!found) { tl.id = uid('tl'); p.timelines.push(tl); }
   return tl.id;
 }

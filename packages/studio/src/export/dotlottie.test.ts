@@ -34,17 +34,19 @@ function twoStateProject(): Project {
 {
   const proj = twoStateProject();
   const { animations, blob } = buildDotLottie(proj, { background: null });
-  it('one animation per timeline', check(animations.length === proj.timelines.length, `${animations.length} vs ${proj.timelines.length}`));
+  // both timelines are ranges of ONE composition — the only shape a Tweened transition
+  // can actually morph across (export/strip.ts)
+  it('every timeline ships inside one composition', check(animations.length === 1, animations.join()));
 
   const files = await unzip(new Uint8Array(await blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
   const json = (name: string) => JSON.parse(new TextDecoder().decode(files.get(name)!));
 
-  it('animations live under a/, not animations/', check(files.has('a/watching.json') && files.has('a/observing.json'), [...files.keys()].join(', ')));
+  it('animations live under a/, not animations/', check(files.has('a/mascot.json') && ![...files.keys()].some((k) => k.startsWith('a/') && k !== 'a/mascot.json'), [...files.keys()].join(', ')));
   it('the state machine lives under s/, not states/', check(files.has('s/mascot.json'), [...files.keys()].join(', ')));
   it('no legacy animations/ or states/ path leaked back in', check(![...files.keys()].some((n) => n.startsWith('animations/') || n.startsWith('states/'))));
 
   const manifest = json('manifest.json');
-  it('the manifest is v2 with a top-level initial animation', check(manifest.version === '2' && manifest.initial.animation === 'watching'));
+  it('the manifest is v2 with a top-level initial animation', check(manifest.version === '2' && manifest.initial.animation === 'mascot'));
   it('the manifest names the state machine so a player can load it', check(manifest.stateMachines[0].id === 'mascot'));
 
   const machine = json('s/mascot.json');
@@ -57,8 +59,11 @@ function twoStateProject(): Project {
   it('the conditional edge is there with a real guard', check(
     machine.states[0].transitions[0].guards[0].inputName === 'isTyping', JSON.stringify(machine.states[0].transitions[0])));
 
-  const anim = json('a/observing.json');
-  it('an authored state still bakes its own Lottie', check(Array.isArray(anim.layers) && anim.layers.length > 0));
+  const anim = json('a/mascot.json');
+  it('an authored state still bakes real Lottie layers', check(Array.isArray(anim.layers) && anim.layers.length > 0));
+  it('and each state gets a distinct, non-overlapping frame range', check(
+    machine.states[0].segment[1] < machine.states[1].segment[0],
+    JSON.stringify(machine.states.map((s: { segment: number[] }) => s.segment))));
 }
 
 // --- import: what goes out comes back (§12/§13) --------------------------------
@@ -77,8 +82,15 @@ function twoStateProject(): Project {
   it('both states arrive', check(back.timelines.some((t) => t.name === 'watching') && back.timelines.some((t) => t.name === 'observing')));
   it('the state that loops still loops', check(back.timelines.find((t) => t.name === 'observing')!.loop === true));
   it('the animation reference is preserved, not flattened away', check(
-    back.timelines.find((t) => t.name === 'watching')!.animationId === 'watching'));
-  it('the animation itself travels with it', check(!!back.importedAnimations?.watching));
+    back.timelines.find((t) => t.name === 'watching')!.animationId === 'mascot'));
+  // states sharing one composition must come back knowing WHICH part of it they play
+  // states sharing one composition must come back knowing WHICH part of it they play,
+  // or every one of them claims the whole strip
+  const imported = ['watching', 'observing'].map((n) => back.timelines.find((t) => t.name === n)!);
+  it('and each imported state keeps its own frame range', check(
+    imported.every((t) => Array.isArray(t.segment)) && imported[0].segment![1] < imported[1].segment![0],
+    JSON.stringify(imported.map((t) => [t.name, t.segment]))));
+  it('the animation itself travels with it', check(!!back.importedAnimations?.mascot, Object.keys(back.importedAnimations ?? {}).join()));
   it('both transitions arrive with their conditions', check(m.transitions.length === 2, String(m.transitions.length)));
   it('the tween duration survives the trip', check(
     m.transitions.find((t) => t.durationMs === 300)?.conditions[0].value === true));

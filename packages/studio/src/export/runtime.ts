@@ -1,6 +1,7 @@
 import { buildDotLottie } from './dotlottie';
+import { dotLottieLayout } from './strip';
 import { zipStore } from './zip';
-import { animationIds, easingToBezier, initialState, machineOf, RUNTIME_SETTER } from '../core/stateMachine';
+import { easingToBezier, initialState, machineOf, RUNTIME_SETTER } from '../core/stateMachine';
 import { easingLabel } from '../core/easing';
 import type { LottieOptions } from './lottie';
 import type { InputType, Project, SmInput } from '../core/types';
@@ -39,7 +40,7 @@ const TS_TYPE: Record<InputType, string> = {
  */
 export function machineConfig(project: Project) {
   const m = machineOf(project);
-  const anim = animationIds(project);
+  const { animationOf, strip } = dotLottieLayout(project);
   const nameOf = (id: string) => project.timelines.find((t) => t.id === id)?.name ?? '';
 
   return {
@@ -55,7 +56,10 @@ export function machineConfig(project: Project) {
       })),
       states: project.timelines.map((tl) => ({
         name: tl.name,
-        animation: anim.get(tl.id),
+        animation: animationOf.get(tl.id),
+        /** frame range inside that animation — every baked state shares one composition
+         *  so a Tweened transition has real frames to scrub through (see strip.ts) */
+        ...(strip?.segments.get(tl.id) ? { segment: strip.segments.get(tl.id) } : {}),
         loop: tl.loop,
         /** the blend used when this state is entered any way other than a transition */
         enterMs: tl.transitionMs ?? 300,

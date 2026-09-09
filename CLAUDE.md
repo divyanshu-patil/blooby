@@ -62,6 +62,7 @@ Everything else reads a `Project`.
 |---|---|
 | `export/lottie.ts` | bakes a timeline to Lottie JSON |
 | `export/dotlottie.ts` | the `.lottie` container, **and imports one back** |
+| `export/strip.ts` | lays every pose into ONE composition with morph frames between — read this before touching the exporter |
 | `export/runtime.ts` | the React Native pack: generated `Mascot.tsx` + config |
 | `export/zip.ts` | hand-rolled zip read/write, no dependency |
 | `export/raster.ts` | GIF / MP4 / PNG |
@@ -130,5 +131,17 @@ Flow: `inputs → transition conditions → state → animation`. The app never 
 animation; it sets an input and the machine decides. The generated `Mascot.tsx` picks the
 setter from each input's declared type, so nothing hardcodes an input name.
 
-One asymmetry to know about: **dotLottie has no OR.** A guard list is always ANDed, so an
-`OR` transition fans out into one transition per condition at export.
+Two asymmetries to know about.
+
+**dotLottie has no OR.** A guard list is always ANDed, so an `OR` transition fans out into
+one transition per condition at export.
+
+**There is no cross-composition morph.** A `Tweened` transition interpolates the playhead
+*inside the loaded composition*; `Tweening` is only a player status next to
+Playing/Paused/Stopped. Two states naming two different animations therefore hard-swap no
+matter what duration they declare. So every baked timeline is exported as a frame range of
+one composition — `export/strip.ts` lays them out with real morph frames between, and each
+state carries `segment: [start, end]`. The constraint that falls out of it: **every frame
+of the strip must be a valid pose**, same layers throughout, because the tween scrubs
+through them. Never drop a layer between poses; fade it. (`bakeLottie` already does this
+for you — it takes the union of layers it sees and writes opacity 0 where one is absent.)

@@ -162,6 +162,22 @@ Flattening them into independent animations would be the one thing the spec expl
 forbids. Re-importing a file is idempotent: a state whose name already exists reuses that
 timeline instead of creating a second one.
 
+**A `Tweened` transition cannot morph between two compositions.** It interpolates the
+playhead within the one that is loaded — `Tweening` exists only as a player status
+alongside Playing/Paused/Stopped, and there is no cross-composition morph API in the wasm
+build, the CJS build, or the iOS `DotLottiePlayer` core. Two states naming two different
+animations hard-swap, and the `duration`/`easing` they declare have nothing to act on.
+Verified by another agent reading the shipped binaries, after a file that looked correct
+kept cutting.
+
+So every baked timeline exports as a frame range of a single composition (`export/strip.ts`),
+with real morph frames between the ranges for the playhead to scrub through. **Unverified:**
+that `segment` is accepted on a `PlaybackState`. It appears in the core's field-name table
+next to `entryActions`/`exitActions` and `[start, end]` matches the player's own segment
+config, but the full schema could not be extracted from the stripped binary. Lottie markers
+naming each range are emitted alongside it, so if `segment` turns out to be rejected the
+fallback is a `marker` field on each state rather than a re-export.
+
 **Old projects are migrated, not reinterpreted.** `core/migrate.ts` holds one numbered
 step per document shape, applied on every load path (localStorage, a downloaded
 `.blooby.json`, the IndexedDB gallery, a cloud row) because all of them funnel through

@@ -87,6 +87,13 @@ export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').r
  * a slug of its own name. Both the exporter (which writes `a/<id>.json`) and the machine
  * builder read this, so a state can never point at an animation the file does not carry.
  */
+export interface DotLottieLayout {
+  /** timeline id → the animation it plays; every baked state shares one */
+  animationOf: Map<string, string>;
+  /** timeline id → [startFrame, endFrame] inside that shared composition */
+  segments: Map<string, [number, number]>;
+}
+
 export function animationIds(p: Project): Map<string, string> {
   const out = new Map<string, string>();
   const used = new Set<string>();
@@ -198,9 +205,9 @@ function transitionJson(toState: string, guards: Guard[], t: SmTransition) {
  * The `s/<id>.json` payload: flat `{ initial, states, inputs, transitions… }`, exactly
  * what `state_machine_parse` reads.
  */
-export function toDotLottie(p: Project) {
+export function toDotLottie(p: Project, layout?: DotLottieLayout) {
   const m = machineOf(p);
-  const anim = animationIds(p);
+  const anim = layout?.animationOf ?? animationIds(p);
   const byId = new Map(p.timelines.map((t) => [t.id, t]));
   const nameOf = (id: string) => byId.get(id)?.name ?? '';
 
@@ -216,12 +223,20 @@ export function toDotLottie(p: Project) {
       if (t.logic === 'OR') for (const g of guards) outgoing.push(transitionJson(to, [g], t));
       else outgoing.push(transitionJson(to, guards, t));
     }
+    /**
+     * `segment` is what makes a Tweened transition mean anything. Every baked state names
+     * the SAME composition and differs only by its frame range, so the tween scrubs the
+     * playhead across real morph frames instead of hard-swapping compositions — see
+     * export/strip.ts. An imported animation is its own composition and gets no segment.
+     */
+    const segment = layout?.segments.get(tl.id) ?? tl.segment;
     return {
       type: 'PlaybackState',
       name: tl.name,
       animation: anim.get(tl.id)!,
       loop: tl.loop,
       autoplay: true,
+      ...(segment ? { segment } : {}),
       transitions: outgoing,
     };
   });
@@ -250,7 +265,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
  * `timelineIdFor` lets the caller reuse a timeline that already exists under that name
  * instead of duplicating it.
  */
-export function fromDotLottie(machineJson: unknown, timelineIdFor: (stateName: string, animation: string, loop: boolean) => string) {
+export function fromDotLottie(machineJson: unknown, timelineIdFor: (stateName: string, animation: string, loop: boolean, segment?: [number, number]) => string) {
   const root = obj(machineJson);
   if (!root) return null;
 
@@ -271,7 +286,9 @@ export function fromDotLottie(machineJson: unknown, timelineIdFor: (stateName: s
   for (const s of states) {
     const name = str(s.name);
     if (!name) continue;
-    stateIds.set(name, timelineIdFor(name, str(s.animation), s.loop === true));
+    const seg = Array.isArray(s.segment) && s.segment.length === 2 && s.segment.every((n) => typeof n === 'number')
+      ? ([s.segment[0], s.segment[1]] as [number, number]) : undefined;
+    stateIds.set(name, timelineIdFor(name, str(s.animation), s.loop === true, seg));
   }
 
   const transitions: SmTransition[] = [];
