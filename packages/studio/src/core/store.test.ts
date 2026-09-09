@@ -5,7 +5,8 @@ import { builtinPresets, defaultProject, makeTimeline, presetPreviewProject } fr
 import { blockStarts } from './timeline';
 import { useEditor, writeKeyframe } from './store';
 import { readProp } from './props';
-import { applyCalls, describe, validate, type ToolCall } from '../copilot/tools';
+import { applyCalls, describe, validate, validateBatch, type ToolCall } from '../copilot/tools';
+import { defaultValues, machineOf, validateMachine } from './stateMachine';
 import { activeTimeline } from './types';
 import type { Preset, Project } from './types';
 
@@ -361,6 +362,10 @@ import type { Preset, Project } from './types';
   flat.tracks = tl.tracks; flat.blocks = tl.blocks; flat.modifiers = tl.modifiers;
   flat.durationMode = tl.durationMode; flat.timelineDurationMs = tl.timelineDurationMs; flat.loop = true;
   delete flat.timelines; delete flat.activeTimelineId;
+  // a real pre-Stage-3 file predates versioning entirely. Leaving the stamp that
+  // defaultProject() now applies made this fixture claim to be current, so the migration
+  // was skipped and every assertion below passed against the DEFAULT project instead.
+  delete flat.schemaVersion;
 
   useEditor.getState().loadProject(legacy as unknown as Project);
   const p = useEditor.getState().project;
@@ -627,4 +632,181 @@ import type { Preset, Project } from './types';
   it('and editing it on the strip keeps them too', check((edited.emitters ?? []).length === 1, `${(edited.emitters ?? []).length} emitters`));
 
   ed5().loadProject(defaultProject());
+}
+
+// --- state machine: inputs drive the state, the app never names one -------------
+{
+  const p = defaultProject();
+  p.timelines[0].name = 'watching';
+  p.timelines.push(makeTimeline('observing'), makeTimeline('excited'));
+  useEditor.getState().loadProject(p);
+  const ed = () => useEditor.getState();
+  const idOf = (name: string) => ed().project.timelines.find((t) => t.name === name)!.id;
+  const activeName = () => ed().project.timelines.find((t) => t.id === ed().project.activeTimelineId)!.name;
+
+  const reused = ed().addInput({ name: 'isTyping', type: 'Boolean', value: false });
+  const again = ed().addInput({ name: 'isTyping', type: 'Numeric', value: 0 });
+  it('a duplicate input name reuses the existing input (§4)', check(
+    again === reused && machineOf(ed().project).inputs.length === 1));
+  it('and keeps the ORIGINAL type, not the second declaration', check(
+    machineOf(ed().project).inputs[0].type === 'Boolean'));
+
+  ed().addInput({ name: 'energy', type: 'Numeric', value: 50 });
+  ed().addStateTransition(idOf('watching'), idOf('observing'), [{ input: 'isTyping', operator: 'Equal', value: true }]);
+  ed().addStateTransition(idOf('observing'), idOf('watching'), [{ input: 'isTyping', operator: 'Equal', value: false }]);
+  ed().addStateTransition(idOf('watching'), idOf('excited'), [{ input: 'energy', operator: 'GreaterThan', value: 80 }]);
+
+  it('starts in the initial state', check(activeName() === 'watching'));
+  ed().setInput('isTyping', true);
+  it('setting an input moves the machine, with no setState call', check(activeName() === 'observing', activeName()));
+  ed().setInput('isTyping', false);
+  it('and back again on the reverse condition', check(activeName() === 'watching'));
+  ed().setInput('energy', 90);
+  it('a numeric threshold fires its own edge', check(activeName() === 'excited', activeName()));
+  ed().setInput('energy', 10);
+  it('excited has no outgoing edge, so it stays put', check(activeName() === 'excited'));
+
+  ed().setState(idOf('watching'), { duration: 0 });
+  ed().setInputs({ isTyping: true, energy: 90 });
+  it('several inputs at once take the FIRST matching edge, like the engine does', check(
+    activeName() === 'observing', activeName()));
+
+  // a rename must carry its conditions, or the machine silently stops transitioning
+  ed().setState(idOf('watching'), { duration: 0 });
+  ed().updateInput('isTyping', { name: 'keyboard' });
+  it('renaming an input rewrites the conditions that test it', check(
+    machineOf(ed().project).transitions[0].conditions[0].input === 'keyboard'));
+  ed().setInput('keyboard', true);
+  it('so the renamed input still drives the machine', check(activeName() === 'observing'));
+
+  // deleting a state must not leave an edge pointing into the void
+  ed().deleteTimeline(idOf('excited'));
+  it('deleting a state removes the edges that referenced it', check(
+    machineOf(ed().project).transitions.length === 2, String(machineOf(ed().project).transitions.length)));
+  it('and leaves no validation errors behind', check(
+    validateMachine(ed().project).filter((i) => i.level === 'error').length === 0,
+    JSON.stringify(validateMachine(ed().project))));
+
+  ed().removeInput('energy');
+  it('removing an input drops the conditions on it', check(
+    !machineOf(ed().project).transitions.some((t) => t.conditions.some((c) => c.input === 'energy'))));
+}
+
+// --- the copilot authors behaviour as inputs + transitions (§17) ----------------
+{
+  const p = defaultProject();
+  p.timelines[0].name = 'watching';
+  useEditor.getState().loadProject(p);
+
+  const calls: ToolCall[] = [
+    { name: 'add_timeline', args: { name: 'observing' } },
+    { name: 'add_timeline', args: { name: 'excited' } },
+    { name: 'add_input', args: { name: 'isTyping', type: 'Boolean' } },
+    { name: 'add_input', args: { name: 'energy', type: 'Numeric', default: 50 } },
+    { name: 'add_transition', args: { from: 'watching', to: 'observing', conditions: [{ input: 'isTyping', operator: 'is true' }] } },
+    { name: 'add_transition', args: { from: 'observing', to: 'excited', conditions: [{ input: 'energy', operator: '>', value: 80 }] } },
+  ];
+  const problems = validateBatch(useEditor.getState().project, calls);
+  it('a batch that creates a state then references it validates', check(
+    problems.every((x) => x === null), JSON.stringify(problems)));
+
+  applyCalls(calls);
+  const m = machineOf(useEditor.getState().project);
+  it('both inputs were created', check(m.inputs.length === 2, JSON.stringify(m.inputs)));
+  it('"is true" became a real Boolean guard', check(
+    m.transitions[0].conditions[0].operator === 'Equal' && m.transitions[0].conditions[0].value === true));
+  it('">" became GreaterThan with a numeric value', check(
+    m.transitions[1].conditions[0].operator === 'GreaterThan' && m.transitions[1].conditions[0].value === 80));
+
+  // §17: reuse, never duplicate
+  applyCalls([
+    { name: 'add_input', args: { name: 'isTyping', type: 'Boolean' } },
+    { name: 'add_transition', args: { from: 'watching', to: 'observing', conditions: [{ input: 'isTyping', operator: 'is true' }] } },
+  ]);
+  const after = machineOf(useEditor.getState().project);
+  it('re-adding the same input does not duplicate it', check(after.inputs.length === 2, String(after.inputs.length)));
+  it('re-adding the same edge does not duplicate it', check(after.transitions.length === 2, String(after.transitions.length)));
+
+  it('a wrong operator for the type is rejected before it is applied', check(
+    validate(useEditor.getState().project, { name: 'add_transition', args: {
+      from: 'watching', to: 'observing', conditions: [{ input: 'isTyping', operator: '>', value: 1 }],
+    } }) !== null));
+  it('a condition on an undeclared input is rejected', check(
+    validate(useEditor.getState().project, { name: 'add_transition', args: {
+      from: 'watching', to: 'observing', conditions: [{ input: 'nope', operator: 'is true' }],
+    } }) !== null));
+  it('a transition to a state that does not exist is rejected', check(
+    validate(useEditor.getState().project, { name: 'add_transition', args: {
+      from: 'watching', to: 'nowhere', conditions: [{ input: 'isTyping', operator: 'is true' }],
+    } }) !== null));
+}
+
+// --- resetting: one value, the machine, the project ----------------------------
+{
+  const p = defaultProject();
+  p.name = 'Reset Me';
+  p.timelines[0].name = 'watching';
+  p.timelines.push(makeTimeline('observing'));
+  useEditor.getState().loadProject(p);
+  const ed = () => useEditor.getState();
+  const idOf = (n: string) => ed().project.timelines.find((t) => t.name === n)!.id;
+
+  ed().addInput({ name: 'isTyping', type: 'Boolean', value: false });
+  ed().addInput({ name: 'energy', type: 'Numeric', value: 50 });
+  ed().addStateTransition(idOf('watching'), idOf('observing'), [{ input: 'isTyping', operator: 'Equal', value: true }]);
+
+  ed().setInput('isTyping', true);
+  ed().setInput('energy', 90);
+  it('two live overrides are held', check(Object.keys(ed().inputs).length === 2));
+
+  ed().resetInputs('energy');
+  it('resetting ONE value leaves the other alone', check(
+    ed().inputs.energy === undefined && ed().inputs.isTyping === true, JSON.stringify(ed().inputs)));
+  it('and the reset one falls back to its declared default, not to a stored copy of it', check(
+    defaultValues(ed().project).energy === 50 && !('energy' in ed().inputs)));
+
+  // the fallback has to be live: change the DEFAULT and the reset input follows it
+  ed().updateInput('energy', { value: 7 });
+  it('a reset input tracks a later change to its default', check(defaultValues(ed().project).energy === 7));
+
+  ed().resetInputs();
+  it('resetting all clears every override', check(Object.keys(ed().inputs).length === 0));
+
+  // a state's own blend
+  ed().setStateTransition(idOf('observing'), 900, { type: 'preset', name: 'bounce' });
+  it('a blend was set', check(ed().project.timelines.find((t) => t.name === 'observing')!.transitionMs === 900));
+  ed().resetStateTransition(idOf('observing'));
+  const observing = () => ed().project.timelines.find((t) => t.name === 'observing')!;
+  it('resetting a blend DELETES the fields rather than writing the defaults in', check(
+    observing().transitionMs === undefined && observing().transitionEasing === undefined,
+    JSON.stringify({ ms: observing().transitionMs, easing: observing().transitionEasing })));
+
+  // clearing the machine
+  ed().setInput('isTyping', true);
+  ed().resetMachine();
+  const m = machineOf(ed().project);
+  it('clearing the machine drops every input', check(m.inputs.length === 0));
+  it('and every transition', check(m.transitions.length === 0));
+  it('and the live overrides, which now name inputs that do not exist', check(
+    Object.keys(ed().inputs).length === 0));
+  it('but keeps the states themselves', check(ed().project.timelines.length === 2));
+  it('and points the initial state at one that exists', check(
+    ed().project.timelines.some((t) => t.id === m.initialStateId)));
+  it('a cleared machine still validates', check(
+    validateMachine(ed().project).filter((i) => i.level === 'error').length === 0));
+
+  // it is an ordinary edit, so undo brings it back — that is what makes it safe to offer
+  ed().undo();
+  it('undo restores the cleared machine', check(
+    machineOf(ed().project).inputs.length === 2 && machineOf(ed().project).transitions.length === 1,
+    JSON.stringify(machineOf(ed().project).inputs.length)));
+
+  // resetting the project
+  ed().setInput('isTyping', true);
+  ed().resetProject();
+  it('resetting the project returns the default mascot', check(
+    ed().project.timelines.length === 1 && ed().project.name !== 'Reset Me', ed().project.name));
+  it('with no state machine left over', check(machineOf(ed().project).inputs.length === 0));
+  it('no live values left over', check(Object.keys(ed().inputs).length === 0));
+  it('and no undo history pointing at the old document', check(ed().past.length === 0));
 }

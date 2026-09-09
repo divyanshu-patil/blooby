@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
-import { defaultProject } from '../core/defaults';
 import { Stage } from './Stage';
 import { Layers } from './Layers';
 import { Presets, Expressions, OtherTimelines } from './Presets';
@@ -14,6 +13,7 @@ import { ExportBar } from './ExportBar';
 import { Split } from './Resizable';
 import { TimelineTabs } from './TimelineTabs';
 import { Gallery, openGallery } from './Gallery';
+import { importDotLottie } from '../export/dotlottie';
 import { StateMachine } from './StateMachine';
 import { activeTimeline } from '../core/types';
 import { startTourWhenReady } from '../kit/tour';
@@ -47,6 +47,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
   const deleteNode = useEditor((s) => s.deleteNode);
   const commit = useEditor((s) => s.commit);
   const loadProject = useEditor((s) => s.loadProject);
+  const resetProject = useEditor((s) => s.resetProject);
   const [tab, setTab] = useState<Tab>('node');
   const file = useRef<HTMLInputElement>(null);
 
@@ -94,6 +95,16 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
   }, [undo, redo, setPlaying, setPlayhead, selection, deleteNode]);
 
   const importProject = async (f: File) => {
+    // §12: a .lottie brings its state machine in — inputs, states, transitions,
+    // conditions, timing and the initial state — rather than being treated as opaque.
+    if (f.name.toLowerCase().endsWith('.lottie')) {
+      try {
+        const { project: next, states, inputs, warnings } = await importDotLottie(f, useEditor.getState().project);
+        loadProject(next);
+        alert([`Imported ${states} state${states === 1 ? '' : 's'} and ${inputs} input${inputs === 1 ? '' : 's'}.`, ...warnings].join('\n'));
+      } catch (e) { alert(e instanceof Error ? e.message : 'That .lottie could not be read.'); }
+      return;
+    }
     try { loadProject(JSON.parse(await f.text()) as Project); }
     catch { alert('That file is not a blooby project.'); }
   };
@@ -121,16 +132,17 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
         <DurationField />
         {cloudBar}
         <span className="spacer" />
-        <input ref={file} type="file" accept=".json" hidden
+        <input ref={file} type="file" accept=".json,.lottie" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) importProject(f); e.target.value = ''; }} />
         <button className="btn ghost sm" onClick={undo} title="Undo (⌘Z)">Undo</button>
         <button className="btn ghost sm" onClick={redo} title="Redo (⇧⌘Z)">Redo</button>
-        <button className="btn sm" onClick={() => file.current?.click()}>Open</button>
+        <button className="btn sm" title="A .blooby.json project, or a .lottie to import its state machine"
+          onClick={() => file.current?.click()}>Open</button>
         <button className="btn sm" onClick={saveProject}>Save</button>
         {onSave && <button className="btn sm" onClick={() => onSave(project)}>{saveLabel ?? 'Save to cloud'}</button>}
         <button className="btn sm" onClick={openGallery}>Gallery</button>
-        <button className="btn sm" title="Start over from the default mascot"
-          onClick={() => confirm('Discard this project and start fresh?') && loadProject(defaultProject())}>New</button>
+        <button className="btn sm" title="Reset everything back to the default mascot — the rig, every timeline and the state machine"
+          onClick={() => confirm(`Reset "${project.name}"?\n\nThe rig, every timeline, the state machine and all keyframes go back to the default mascot. This cannot be undone — save or export first if you want to keep it.`) && resetProject()}>New</button>
         <span data-tour="export"><ExportBar /></span>
         <TourMenu tours={EDITOR_TOURS} label="Show me around" />
       </header>

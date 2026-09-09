@@ -7,6 +7,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
+/* Importing the sub-files rather than `tailwindcss` itself skips Tailwind's automatic
+ * source detection, so without this NOTHING is scanned and every utility in the package
+ * silently generates no CSS — `flex flex-col gap-2` laid its children out inline. The
+ * components using them are all in this directory. */
+@source './';
 
 /* Tailwind speaks the same tokens as the hand-rolled sheet, so new UI can use
  * `bg-panel border-line text-muted` instead of re-declaring the palette. */
@@ -629,6 +634,10 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .keypool { display: flex; flex-direction: column; gap: 5px; }
 .keyrow { display: flex; align-items: center; gap: 6px; font: 500 11px var(--mono); }
 .dot-status { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+/* the state-machine panel's "this state is on the stage" dot — same affordance, and it
+ * is a button there, so it needs a resting colour of its own */
+.dot-status[data-on] { background: var(--line); border: 0; }
+.dot-status[data-on='true'] { background: var(--ink); }
 .dot-status.ok { background: #2f9e57; }
 .dot-status.rate { background: #d99a1f; }
 .dot-status.error { background: var(--hot); }
@@ -643,6 +652,57 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 /* ---- misc --------------------------------------------------------------- */
 .tag { font: 500 9px var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--muted); border: 1px solid var(--line-soft); border-radius: 3px; padding: 1px 4px; }
 .empty-note { color: var(--muted); font-size: 11.5px; padding: 2px; }
+
+/* ---- state machine panel ------------------------------------------------- */
+/* One card per input / state / transition. The panel was Tailwind-only and Tailwind
+ * generated nothing (see @source at the top), but even working it read as utility soup
+ * for what is really three repetitions of the same card. A card is a labelled grid:
+ * the label column is fixed so every row's control starts on the same x, which is what
+ * stops eight controls of different widths reading as noise. */
+.sm-card {
+  display: flex; flex-direction: column; gap: 5px;
+  border: 1px solid var(--line-soft); border-radius: var(--r);
+  background: var(--field); padding: 7px 8px;
+}
+.sm-card[data-active='true'] { border-color: var(--ink); background: var(--signal-soft); }
+.sm-card[data-open='true'] { border-color: var(--line); background: var(--panel); }
+
+/* the card's own first line: an identity, then whatever acts on it */
+.sm-head { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.sm-head > .txt { flex: 1; min-width: 0; }
+.sm-name { flex: 1; min-width: 0; font: 600 12px var(--ui); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* label + control, with every label the same width so controls line up down the card */
+.sm-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sm-row > .sm-key { flex: 0 0 52px; font: 500 10.5px var(--ui); color: var(--muted); }
+.sm-row > .txt, .sm-row > .prop-num[type='text'] { flex: 1; min-width: 0; }
+.sm-spacer { margin-left: auto; }
+
+/* the runtime mapping / "exports as" line — present on every card, never the point of it */
+.sm-note { font: 400 10px var(--mono); color: var(--muted); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-note strong { font-weight: 500; color: var(--ink-2); }
+
+/* the in/out edge summary under a state */
+.sm-edges { display: flex; flex-direction: column; gap: 1px; margin: 0; }
+.sm-edge { font: 400 10.5px var(--ui); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-edge b { font-weight: 500; color: var(--ink-2); }
+
+/* revert: only rendered when a value differs from its default, so it must not take space */
+.sm-revert { flex: none; width: 20px; height: 22px; border-radius: 4px; color: var(--muted); font-size: 12px; line-height: 1; }
+.sm-revert:hover { background: var(--line-soft); color: var(--ink); }
+
+/* an icon-only destructive action sitting at the end of a head row */
+.sm-x { flex: none; width: 22px; height: 22px; border-radius: 4px; color: var(--muted); font-size: 14px; line-height: 1; }
+.sm-x:hover { background: color-mix(in srgb, var(--hot) 10%, transparent); color: var(--hot); }
+
+/* validation */
+.sm-issue { display: flex; gap: 6px; border-radius: var(--r); padding: 5px 7px; font: 400 11px var(--ui); color: var(--ink-2); border: 1px solid var(--line-soft); background: var(--field); }
+.sm-issue[data-level='error'] { border-color: color-mix(in srgb, var(--hot) 35%, transparent); background: color-mix(in srgb, var(--hot) 7%, transparent); }
+.sm-issue b { flex: none; font-weight: 600; color: var(--muted); }
+.sm-issue[data-level='error'] b { color: var(--hot); }
+
+.sm-danger { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 40%, transparent); }
+
 .toast {
   position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
   background: var(--ink); color: var(--paper); padding: 9px 14px; border-radius: 8px;

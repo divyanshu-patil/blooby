@@ -5,7 +5,9 @@ import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from '
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
-import type { Block, EasingCurve, Emitter, Expression, KeyValue, Modifier, Preset, Project, Rig, RigNode, Timeline, Track, Transition } from './types';
+import { defaultValues, machineOf, nextTransition, slug } from './stateMachine';
+import { migrateProject, SCHEMA_VERSION } from './migrate';
+import type { Block, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
@@ -129,6 +131,40 @@ export interface Editor {
   cancelScheduledState: () => void;
   clearStateTransition: () => void;
 
+  /**
+   * Live state-machine input values — the editor's own copy of what
+   * `stateMachineSetBooleanInput` and friends hold at runtime. Writing one here runs the
+   * same transition rules the player runs, so the States panel is a simulator rather
+   * than a diagram: flip `isTyping` and the mascot actually changes state.
+   */
+  inputs: Record<string, InputValue>;
+  setInput: (name: string, value: InputValue) => void;
+  /** several at once, evaluated once — what <Mascot inputs={{...}} /> does per render */
+  setInputs: (values: Record<string, InputValue>) => void;
+  /** an Event input: true for exactly one evaluation, then gone */
+  fireInput: (name: string) => void;
+  /** Drop the live override for one input, or all of them, so the DECLARED default is
+   *  what the machine reads again. Deletes the key rather than writing the default into
+   *  it — otherwise editing the default later would silently not take effect. */
+  resetInputs: (name?: string) => void;
+
+  /** Reuses an input already declared under that name rather than duplicating it (§4) —
+   *  returns the name that ended up in the machine either way. */
+  addInput: (input: SmInput) => string;
+  updateInput: (name: string, patch: Partial<SmInput>) => void;
+  removeInput: (name: string) => void;
+
+  addStateTransition: (from: string, to: string, conditions?: SmCondition[]) => void;
+  updateStateTransition: (id: string, patch: Partial<Omit<SmTransition, 'id'>>) => void;
+  removeStateTransition: (id: string) => void;
+  setInitialState: (timelineId: string) => void;
+  setMachineId: (id: string) => void;
+  /** Clear the machine — every input and every transition — leaving the states and their
+   *  animation work untouched. Undoable, like any other document edit. */
+  resetMachine: () => void;
+  /** Put a state's own blend (the one `setState` uses) back to the defaults. */
+  resetStateTransition: (timelineId: string) => void;
+
   addModifier: (m: Omit<Modifier, 'id'>) => void;
   updateModifier: (id: string, fn: (m: Modifier) => void) => void;
   removeModifier: (id: string) => void;
@@ -169,19 +205,20 @@ function load(): Project {
   return defaultProject();
 }
 
-/** A project saved before Stage 3 (a single flat timeline) still has `tracks`/`blocks`
- * at the top level instead of `timelines[]` — lift it into one timeline on load. */
-function migrate(p: Project): Project {
-  const legacy = p as unknown as { tracks?: Track[]; blocks?: Block[]; modifiers?: Modifier[]; durationMode?: 'custom' | 'even'; timelineDurationMs?: number; loop?: boolean };
-  if (Array.isArray(p.timelines) && p.timelines.length) return p;
-  const tl = makeTimeline('Idle');
-  if (legacy.tracks) tl.tracks = legacy.tracks;
-  if (legacy.blocks) tl.blocks = legacy.blocks;
-  if (legacy.modifiers) tl.modifiers = legacy.modifiers;
-  if (legacy.durationMode) tl.durationMode = legacy.durationMode;
-  if (legacy.timelineDurationMs) tl.timelineDurationMs = legacy.timelineDurationMs;
-  if (legacy.loop) tl.loop = legacy.loop;
-  return { ...p, timelines: [tl], activeTimelineId: tl.id };
+/**
+ * Every project arriving from anywhere — localStorage, a file, the gallery, the cloud —
+ * comes through here, so `core/migrate.ts` is the single place that knows about older
+ * shapes. Merging over `defaultProject()` afterwards backfills fields a migration does
+ * not need to reason about (a preset list, an fps), which is why steps can stay small.
+ */
+function migrate(raw: Project): Project {
+  const { project, from, applied, fromFuture } = migrateProject(raw);
+  if (fromFuture) {
+    console.warn(`[blooby] This project was saved by a newer version (schema ${from}, this build reads ${SCHEMA_VERSION}). Opening it read as far as this build understands; saving may drop what it does not.`);
+  } else if (applied.length) {
+    console.info(`[blooby] Upgraded project from schema ${from}: ${applied.join(', ')}.`);
+  }
+  return project;
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -288,6 +325,7 @@ export const useEditor = create<Editor>((set, get) => ({
   previousTimelineId: null,
   pendingStateChange: null,
   stateTransition: null,
+  inputs: {},
 
   commit(fn, label = '') {
     const { project, past, lastLabel, lastAt } = get();
@@ -750,6 +788,13 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => {
       p.timelines = p.timelines.filter((t) => t.id !== id);
       if (p.activeTimelineId === id) p.activeTimelineId = p.timelines[0].id;
+      // an edge into or out of a state that no longer exists is a broken transition —
+      // dropped here rather than left for validation to complain about forever
+      const m = p.stateMachine;
+      if (m) {
+        m.transitions = m.transitions.filter((t) => t.from !== id && t.to !== id);
+        if (m.initialStateId === id) m.initialStateId = p.timelines[0].id;
+      }
     });
     set({ selection: [], playhead: 0, selectedBlockId: null });
   },
@@ -813,6 +858,157 @@ export const useEditor = create<Editor>((set, get) => ({
 
   cancelScheduledState() { set({ pendingStateChange: null }); },
   clearStateTransition() { set({ stateTransition: null }); },
+
+  /**
+   * Set inputs, then let the machine decide the state — never the other way around.
+   *
+   * This is the whole §10 contract in one function: the app writes an input, the
+   * transition conditions are evaluated exactly as the player evaluates them, and
+   * whatever state that lands on becomes active with its own authored blend. Nothing
+   * calls `setState` for an animation that a transition already covers.
+   *
+   * Chained edges settle in one pass (A→B→C where both hold), capped so a cycle whose
+   * conditions are all permanently true cannot spin the editor.
+   */
+  setInputs(values) {
+    const merged = { ...get().inputs, ...values };
+    set({ inputs: merged });
+    const { project } = get();
+    const live = { ...defaultValues(project), ...merged };
+    for (let hop = 0; hop < project.timelines.length + 1; hop++) {
+      const from = get().project.activeTimelineId;
+      const t = nextTransition(get().project, from, live);
+      if (!t || t.to === from) break;
+      get().setState(t.to, { duration: t.durationMs, easing: t.easing });
+    }
+  },
+  setInput(name, value) { get().setInputs({ [name]: value }); },
+
+  // an Event is true for exactly one evaluation — a standing `true` would re-fire its
+  // guard on every later input write, which is not what "fired" means anywhere.
+  fireInput(name) {
+    get().setInputs({ [name]: true });
+    get().resetInputs(name);
+  },
+
+  resetInputs(name) {
+    if (name === undefined) { set({ inputs: {} }); return; }
+    const { [name]: gone, ...rest } = get().inputs;
+    void gone;
+    set({ inputs: rest });
+  },
+
+  addInput(input) {
+    const name = input.name.trim();
+    if (!name) return '';
+    // §4: the same input name is one input. Creating "isTyping" when it exists reuses it
+    // rather than shadowing it with a second declaration the export would emit twice.
+    const existing = machineOf(get().project).inputs.find((i) => i.name === name);
+    if (existing) return existing.name;
+    get().commit((p) => {
+      const m = (p.stateMachine ??= machineOf(p));
+      m.inputs.push({ ...input, name });
+    });
+    return name;
+  },
+
+  updateInput(name, patch) {
+    get().commit((p) => {
+      const m = (p.stateMachine ??= machineOf(p));
+      const i = m.inputs.find((x) => x.name === name);
+      if (!i) return;
+      const renamed = patch.name?.trim();
+      // a rename has to carry every condition with it, or the machine silently stops
+      // transitioning — the exact failure mode validation exists to prevent
+      if (renamed && renamed !== name && !m.inputs.some((x) => x.name === renamed)) {
+        for (const t of m.transitions) for (const c of t.conditions) if (c.input === name) c.input = renamed;
+        i.name = renamed;
+      }
+      if (patch.type && patch.type !== i.type) {
+        i.type = patch.type;
+        i.value = patch.value ?? (patch.type === 'Boolean' ? false : patch.type === 'Numeric' ? 0 : patch.type === 'String' ? '' : undefined);
+        // conditions written against the old type are now invalid operators/values;
+        // reset them to the new type's first legal shape instead of leaving a broken file
+        for (const t of m.transitions) {
+          for (const c of t.conditions) {
+            if (c.input !== i.name) continue;
+            c.operator = patch.type === 'Event' ? 'Fired' : 'Equal';
+            c.value = i.value;
+          }
+        }
+      } else if (patch.value !== undefined) i.value = patch.value;
+      if (patch.description !== undefined) i.description = patch.description;
+    }, `input.${name}`);
+  },
+
+  removeInput(name) {
+    get().commit((p) => {
+      const m = (p.stateMachine ??= machineOf(p));
+      m.inputs = m.inputs.filter((i) => i.name !== name);
+      // conditions on a deleted input would export as guards the engine can never satisfy
+      for (const t of m.transitions) t.conditions = t.conditions.filter((c) => c.input !== name);
+      m.transitions = m.transitions.filter((t) => t.conditions.length > 0);
+    });
+    get().resetInputs(name);
+  },
+
+  addStateTransition(from, to, conditions) {
+    get().commit((p) => {
+      const m = (p.stateMachine ??= machineOf(p));
+      const first = m.inputs[0];
+      m.transitions.push({
+        id: uid('sm'),
+        from, to,
+        conditions: conditions ?? (first
+          ? [{ input: first.name, operator: first.type === 'Event' ? 'Fired' : 'Equal', value: first.value }]
+          : []),
+        logic: 'AND',
+        durationMs: p.timelines.find((t) => t.id === to)?.transitionMs ?? 300,
+      });
+    });
+  },
+
+  updateStateTransition(id, patch) {
+    get().commit((p) => {
+      const m = (p.stateMachine ??= machineOf(p));
+      const t = m.transitions.find((x) => x.id === id);
+      if (t) Object.assign(t, patch);
+    }, `smtr.${id}`);
+  },
+
+  removeStateTransition(id) {
+    get().commit((p) => {
+      const m = (p.stateMachine ??= machineOf(p));
+      m.transitions = m.transitions.filter((t) => t.id !== id);
+    });
+  },
+
+  setInitialState(timelineId) {
+    get().commit((p) => { (p.stateMachine ??= machineOf(p)).initialStateId = timelineId; });
+  },
+
+  setMachineId(id) {
+    get().commit((p) => { (p.stateMachine ??= machineOf(p)).id = slug(id) || 'blooby'; }, 'smid');
+  },
+
+  resetMachine() {
+    get().commit((p) => {
+      p.stateMachine = { id: slug(p.name) || 'blooby', initialStateId: p.timelines[0].id, inputs: [], transitions: [] };
+    });
+    // live overrides describe inputs that no longer exist
+    set({ inputs: {} });
+  },
+
+  resetStateTransition(timelineId) {
+    get().commit((p) => {
+      const tl = p.timelines.find((t) => t.id === timelineId);
+      if (!tl) return;
+      // deleted, not written back as 300/easeInOut — an absent field is what "default"
+      // means everywhere else that reads it, and it keeps the saved file smaller
+      delete tl.transitionMs;
+      delete tl.transitionEasing;
+    });
+  },
 
   /**
    * A global effect is bounded to the strip as it stands when you add it.
@@ -987,7 +1183,7 @@ export const useEditor = create<Editor>((set, get) => ({
     const next = { ...defaultProject(), ...migrate(p) };
     setActiveId(galleryId ?? uidGallery());
     autosave(next);
-    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null });
+    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null, inputs: {}, previousTimelineId: null, pendingStateChange: null, stateTransition: null });
   },
   resetProject() { get().loadProject(defaultProject()); },
 }));

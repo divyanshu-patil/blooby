@@ -41,6 +41,37 @@ lanes with draggable diamonds and snapping, prev/next chevrons, and an After Eff
 style value graph where the bezier handles between two keys *are* the easing. Every
 track is normalised to its own range, so 0–1 openness reads as clearly as 90° of yaw.
 
+**State machine.** Not a mock layered on top of animations — a real dotLottie state
+machine you author visually. Declare `Boolean` / `Numeric` / `String` / `Event` inputs
+with defaults, connect states with conditional transitions (`isTyping == true`,
+`energy > 80`, `mood == "happy"`, ANDed or ORed), and give each edge its own duration and
+easing. The graph draws every edge with its condition on it and lights up the one that
+currently holds; setting an input in the panel runs the same first-match-wins evaluation
+the player runs, so the mascot changes state in the editor for the reason it will change
+state in the app. Validation blocks export on a broken machine — a mistyped condition or
+a dangling state loads fine and then silently never transitions, which is the worst time
+to find out.
+
+Import a `.lottie` and its machine comes in whole (inputs, types, defaults, states,
+transitions, conditions, timing, initial state); its animations travel with the project
+and are written back out untouched.
+
+**Export → React Native.** "React Native pack" produces the `.lottie`, a readable
+`blooby.machine.json`, and a generated `Mascot.tsx` for
+`@lottiefiles/dotlottie-react-native`:
+
+```tsx
+<Mascot
+  inputs={{ isTyping: true, energy: 80, mood: 'happy' }}
+  onStateChange={({ previousState, currentState, transition }) => …}
+/>
+```
+
+The component reads the input definitions out of the config and picks the setter from each
+input's declared type, so a new input added in the editor needs no code change. No input
+name is hardcoded in the runtime, and there is no `play('watching')` — the app sets an
+input and the machine decides the state.
+
 **Procedural effects.** Shake (seeded noise) and float (sine), layered non-destructively
 over the keyframes and baked into literal keyframes on export.
 

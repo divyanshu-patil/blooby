@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useEditor } from '../core/store';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
+import { buildRuntimePack } from '../export/runtime';
+import { validateMachine } from '../core/stateMachine';
 import { download, exportGif, exportPng, exportVideo, videoMime } from '../export/raster';
 import { useStageBg } from './stageBg';
 
@@ -46,11 +48,24 @@ export function ExportBar() {
     ].filter(Boolean).join(' · '));
   };
 
+  // §16: a machine with a broken transition or a mistyped condition loads and then
+  // silently never transitions, which is the worst possible time to find out. Both
+  // state-machine exports are blocked until it is right, and the reason is on the button.
+  const errors = validateMachine(project).filter((i) => i.level === 'error');
+  const blocked = errors.length ? `${errors.length} state-machine error${errors.length === 1 ? '' : 's'} — ${errors[0].message}` : null;
+
   const dotLottie = () => {
-    const { blob, animations } = buildDotLottie(project, { background });
+    const { blob, animations, machine } = buildDotLottie(project, { background });
     download(blob, `${base}.lottie`);
-    setNote(`${animations.length} animation${animations.length === 1 ? '' : 's'}: ${animations.join(', ')}`);
+    const edges = machine.json.states.reduce((n, st) => n + st.transitions.length, 0);
+    setNote(`${animations.length} animation${animations.length === 1 ? '' : 's'} · ${machine.json.inputs.length} inputs · ${edges} transitions · state machine "${machine.id}"`);
   };
+
+  const runtimePack = () => run('React Native pack', async () => {
+    const { blob } = await buildRuntimePack(project, { background });
+    download(blob, `${base}-mascot.zip`);
+    setNote('.lottie + Mascot.tsx + blooby.machine.json + README — drop the folder into your app.');
+  });
 
   return (
     <>
@@ -76,9 +91,14 @@ export function ExportBar() {
             </div>
             <div className="divider" />
             <button className="btn" onClick={lottieJson}>Lottie JSON</button>
-            <button className="btn" onClick={dotLottie}>
+            <button className="btn" onClick={dotLottie} disabled={!!blocked} title={blocked ?? 'Animations + the state machine'}>
               .lottie {project.timelines.length > 1 ? `· ${project.timelines.length} states` : ''}
             </button>
+            <button className="btn" onClick={runtimePack} disabled={!!blocked || !!busy}
+              title={blocked ?? 'The .lottie plus a generated <Mascot> for @lottiefiles/dotlottie-react-native'}>
+              React Native pack
+            </button>
+            {blocked && <p className="hint" style={{ color: 'var(--hot)' }}>{blocked}</p>}
             <button className="btn" disabled={!!busy}
               onClick={() => run('GIF', async (p) => download(await exportGif(project, { fps: Math.min(project.fps, 25), scale, background }, p), `${base}.gif`))}>
               Animated GIF

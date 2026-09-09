@@ -77,3 +77,54 @@ export function zipStore(entries: ZipEntry[]): Blob {
 
   return new Blob([...parts, ...central, end], { type: 'application/zip' });
 }
+
+/**
+ * Store-only ZIP reader, plus deflate via the platform's own `DecompressionStream`.
+ *
+ * A `.lottie` from anywhere but here is usually deflated, so importing one needs to
+ * inflate — but `DecompressionStream('deflate-raw')` has shipped in every browser and in
+ * Node since 22, which makes a zip *library* still not worth a dependency. Entries are
+ * read from the central directory (the authoritative index) rather than by scanning for
+ * local headers, so a streamed archive with data descriptors reads correctly.
+ */
+export async function unzip(bytes: Uint8Array<ArrayBuffer>): Promise<Map<string, Uint8Array<ArrayBuffer>>> {
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  // end-of-central-directory, scanned backwards past a possible comment
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0 && i > bytes.length - 22 - 0xffff; i--) {
+    if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('Not a zip file.');
+
+  const count = v.getUint16(eocd + 10, true);
+  let p = v.getUint32(eocd + 16, true);
+  const out = new Map<string, Uint8Array<ArrayBuffer>>();
+  const dec = new TextDecoder();
+
+  for (let i = 0; i < count; i++) {
+    if (v.getUint32(p, true) !== 0x02014b50) break;
+    const method = v.getUint16(p + 10, true);
+    const compressed = v.getUint32(p + 20, true);
+    const nameLen = v.getUint16(p + 28, true);
+    const extraLen = v.getUint16(p + 30, true);
+    const commentLen = v.getUint16(p + 32, true);
+    const local = v.getUint32(p + 42, true);
+    const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+
+    // the local header's own name/extra lengths, not the central one's — they differ
+    const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
+    const raw = bytes.subarray(start, start + compressed) as Uint8Array<ArrayBuffer>;
+    if (name.endsWith('/')) continue;
+    if (method === 0) out.set(name, raw);
+    else if (method === 8) out.set(name, await inflateRaw(raw));
+    else throw new Error(`"${name}" uses an unsupported compression method (${method}).`);
+  }
+  return out;
+}
+
+async function inflateRaw(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+  if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot read compressed .lottie files.');
+  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer()) as Uint8Array<ArrayBuffer>;
+}

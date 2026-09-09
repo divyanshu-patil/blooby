@@ -394,6 +394,84 @@ export interface Timeline {
    */
   transitionMs?: number;
   transitionEasing?: EasingCurve;
+  /**
+   * The animation this state plays, when it is not this timeline's own baked one.
+   *
+   * Set only by importing a `.lottie`: the state machine there points at animations
+   * Blooby did not author and cannot re-draw, so the id is kept and the original
+   * animation JSON travels with the project (`Project.importedAnimations`) to be written
+   * back out untouched. Undefined — every timeline authored here — means "bake me".
+   */
+  animationId?: string;
+}
+
+/**
+ * dotLottie state-machine inputs, spelled exactly as the runtime's JSON spells them
+ * ("Boolean"/"Numeric"/"String"/"Event") so the export is close to an identity mapping
+ * rather than a translation nobody can check against a player. The friendly labels
+ * ("is true", ">") live in the UI; the wire format never sees them.
+ */
+export type InputType = 'Boolean' | 'Numeric' | 'String' | 'Event';
+export type InputValue = boolean | number | string;
+
+export interface SmInput {
+  name: string;
+  type: InputType;
+  /** the default the machine starts with — dotLottie's `value`. Event inputs have none. */
+  value?: InputValue;
+  description?: string;
+}
+
+/**
+ * A guard's `conditionType`, verbatim from dotlottie-rs. `Fired` is ours and never
+ * reaches the wire: an Event guard is `{ type: 'Event', inputName }` with no condition
+ * at all, so this is just how the editor says "this input fired".
+ */
+export type ConditionOp =
+  | 'Equal' | 'NotEqual'
+  | 'GreaterThan' | 'GreaterThanOrEqual' | 'LessThan' | 'LessThanOrEqual'
+  | 'Fired';
+
+export interface SmCondition {
+  /** an SmInput.name — never a free-text expression */
+  input: string;
+  operator: ConditionOp;
+  value?: InputValue;
+}
+
+/**
+ * One conditional edge between two states.
+ *
+ * `from`/`to` are timeline ids, not names, so renaming a state cannot break an edge.
+ * Names are resolved once, at export.
+ */
+export interface SmTransition {
+  id: string;
+  from: string;
+  to: string;
+  conditions: SmCondition[];
+  /**
+   * How several conditions combine. A dotLottie guard list is always ANDed — there is no
+   * OR in the format — so an OR fans out to one transition per condition on export. Same
+   * semantics, deterministically, instead of an invented `logic` field a player ignores.
+   */
+  logic?: 'AND' | 'OR';
+  /** the blend into `to`, in ms. 0 (or absent) exports as a plain instant Transition. */
+  durationMs?: number;
+  easing?: EasingCurve;
+}
+
+/**
+ * The state machine itself. States are the project's timelines — they already were, in
+ * the exporter and in setState — so this holds only what a timeline cannot: the shared
+ * inputs, the conditional edges between states, and which state the machine boots into.
+ */
+export interface StateMachineDef {
+  id: string;
+  /** a timeline id; falls back to the first timeline when unset or stale */
+  initialStateId?: string;
+  inputs: SmInput[];
+  transitions: SmTransition[];
 }
 
 /** An SVG kept with the project so it can be reused — by an emitter, or as a layer. */
@@ -409,6 +487,18 @@ export interface Project {
   timelines: Timeline[];
   activeTimelineId: string;
   fps: number;
+  /**
+   * Which document shape this project was written in — see core/migrate.ts, which is the
+   * only thing that reads or writes it. Optional because every project saved before
+   * versioning existed has no value here, and that absence is exactly what identifies it.
+   */
+  schemaVersion?: number;
+  /** Optional so every project saved before state machines existed loads untouched —
+   *  `machineOf()` in core/stateMachine.ts is the one place that defaults it. */
+  stateMachine?: StateMachineDef;
+  /** animation id → Lottie JSON, for animations that came in from an imported `.lottie`
+   *  and are re-exported verbatim. Never populated by anything authored here. */
+  importedAnimations?: Record<string, unknown>;
 }
 
 export const CAMERA_ID = '__camera';
