@@ -671,7 +671,8 @@ export const useEditor = create<Editor>((set, get) => ({
           keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
         });
       }
-      attachPresetEffects(tl, preset, blockId);
+      // with the rig, so a preset that brings its own layers (an arm, a sticker) adds them
+      attachPresetEffects(tl, preset, blockId, p.rig);
       const shifted = tl.blocks.slice(at0).map((b) => b.id);
       if (shifted.length) {
         const set2 = new Set(shifted);

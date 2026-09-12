@@ -5,6 +5,7 @@ import { CONFETTI_COLORS } from './emitters';
 import { SCHEMA_VERSION } from './migrate';
 import { uid } from './id';
 import { COMP } from './comp';
+import { showcasePresets } from './showcase';
 
 export { uid } from './id';
 export { COMP, compOf } from './comp';
@@ -112,6 +113,9 @@ const bothEyes = (property: string, keys: Keyframe[]): Track[] => [
 
 export function builtinPresets(): Preset[] {
   return [
+    // first, so the rail's first rows show what the editor can do now: hands, legs,
+    // stickers, morphs — see core/showcase.ts
+    ...showcasePresets(),
     {
       // no tracks at all — dropped into a sequence it just holds whatever pose already
       // precedes it (the rig's own rest pose if it's first). The "base state" clip §8
@@ -504,7 +508,13 @@ export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId:
   for (const m of preset.modifiers ?? []) timeline.modifiers.push({ ...m, id: uid('m'), blockId });
   for (const e of preset.emitters ?? []) (timeline.emitters ??= []).push({ ...e, id: uid('e'), blockId });
   if (rig) addPresetLayers(rig, preset);
-  for (const a of preset.appearances ?? []) (timeline.appearances ??= []).push({ ...a, id: uid('ap'), blockId });
+  for (const a of preset.appearances ?? []) {
+    // a range narrows a layer to it — so never give one to a layer the user already had
+    // that is always there: placing "Hii!" must not hide their own arm everywhere else
+    const n = rig?.nodes[a.nodeId];
+    if (n && !n.ranged) continue;
+    (timeline.appearances ??= []).push({ ...a, id: uid('ap'), blockId });
+  }
 }
 
 /** A preset's own layers into a rig, reusing any already there. A parent the rig does not

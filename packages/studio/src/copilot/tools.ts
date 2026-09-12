@@ -1015,7 +1015,7 @@ export function applyCalls(calls: ToolCall[]) {
           tl.blocks.splice(index, 0, { id: blockId, presetId: preset.id, name: preset.name, durationMs: preset.durationMs });
           // a preset's effects and emitters come with it — "Sleepy" without the zzz is
           // not sleepy, and the copilot placing one must get the same clip the panel does
-          attachPresetEffects(tl, preset, blockId);
+          attachPresetEffects(tl, preset, blockId, p.rig);
           break;
         }
         case 'add_modifier':

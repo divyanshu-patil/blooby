@@ -1129,3 +1129,15 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   /* out of reach: from where the hose ends to where the hand was asked to be */
   .limb-reach { stroke: var(--paper); stroke-width: 1.25; stroke-dasharray: 1 4; stroke-linecap: round; opacity: .8; }
 }
+
+@layer blooby {
+  /* --- preset chips: the picture plays on hover, the tagline says what it shows ------- */
+  .chip { gap: 2px; }
+  .chip .glyph { margin-bottom: 2px; }
+  .chip-name { font: 500 11px var(--ui); color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip-tag {
+    font: 500 9.5px var(--ui); color: var(--muted); min-height: 12px; line-height: 12px;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chips-peek { --chip-h: 86px; }
+}
