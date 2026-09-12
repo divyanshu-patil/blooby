@@ -13,7 +13,7 @@ import type { MorphMode } from './easing';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
-import { defaultValues, machineOf, nextTransition, slug } from './stateMachine';
+import { defaultValues, directTransition, machineOf, nextTransition, slug, type DirectOptions } from './stateMachine';
 import { migrateProject, SCHEMA_VERSION } from './migrate';
 import type { Block, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
@@ -194,6 +194,11 @@ export interface Editor {
   updateStateTransition: (id: string, patch: Partial<Omit<SmTransition, 'id'>>) => void;
   removeStateTransition: (id: string) => void;
   setInitialState: (timelineId: string) => void;
+  /**
+   * CURRENT → TARGET: a direct transition from the active state (or every state) to the
+   * target, on the `state` input, then played straight away in the preview.
+   */
+  goToState: (targetId: string, opts: DirectOptions) => void;
   setMachineId: (id: string) => void;
   /** Clear the machine — every input and every transition — leaving the states and their
    *  animation work untouched. Undoable, like any other document edit. */
@@ -1080,6 +1085,15 @@ export const useEditor = create<Editor>((set, get) => ({
 
   setInitialState(timelineId) {
     get().commit((p) => { (p.stateMachine ??= machineOf(p)).initialStateId = timelineId; });
+  },
+
+  goToState(targetId, opts) {
+    const from = get().project.activeTimelineId;
+    let fired: { input: string; value: InputValue } | null = null;
+    get().commit((p) => { fired = directTransition(p, from, targetId, opts); });
+    // drive it: set the input and let the machine take the edge it now has, exactly as the
+    // player would — so what the button does IS what the exported file does
+    if (fired) get().setInput((fired as { input: string }).input, (fired as { value: InputValue }).value);
   },
 
   setMachineId(id) {

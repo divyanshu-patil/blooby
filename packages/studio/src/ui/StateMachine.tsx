@@ -3,11 +3,13 @@ import { useEditor } from '../core/store';
 import { Collapsible } from './Collapsible';
 import { CurveEditor } from './CurveEditor';
 import { StateGraph } from './StateGraph';
-import { easingLabel } from '../core/easing';
+import { EASING_NAMES, easingLabel, namedEasing } from '../core/easing';
 import {
   conditionText, defaultValueFor, defaultValues, machineOf, OPERATORS, opLabel,
-  RUNTIME_SETTER, slug, validateMachine,
+  RUNTIME_SETTER, slug, STATE_INPUT, validateMachine,
 } from '../core/stateMachine';
+import { valueAt } from '../core/scene';
+import { shapeById, shapeIdOf } from '../core/emitters';
 import type { ConditionOp, EasingCurve, InputType, InputValue, SmCondition, SmInput, SmTransition } from '../core/types';
 
 /**
@@ -54,11 +56,11 @@ export function StateMachine() {
   return (
     <>
       <MachineHeader errors={errors.length} />
+      <Collapsible title="Current → target" storageKey="sm-direct">
+        <StateDirector selectedId={selectedTransition} onSelect={setSelectedTransition} />
+      </Collapsible>
       <Collapsible title="Inputs" storageKey="sm-inputs" badge={machine.inputs.length || undefined}>
         <Inputs />
-      </Collapsible>
-      <Collapsible title="Graph" storageKey="sm-graph">
-        <StateGraph selectedId={selectedTransition} onSelect={(t) => setSelectedTransition(t?.id ?? null)} />
       </Collapsible>
       <Collapsible title="States" storageKey="sm-states" badge={project.timelines.length}>
         <States />
@@ -80,6 +82,124 @@ export function StateMachine() {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * CURRENT → TARGET. The one question a state editor has to answer quickly: "I am in
+ * Excited — take me to Angry." That is one direct transition, never Excited → Happy →
+ * Idle → Angry, and it is written as a real dotLottie edge on an input the app sets.
+ *
+ * The current values are here so "where am I" is a set of numbers, not a guess: the
+ * selected layer's (or the body's) scale, roll, opacity, shape, yaw and pitch right now.
+ */
+function StateDirector({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string | null) => void }) {
+  const project = useEditor((s) => s.project);
+  const playhead = useEditor((s) => s.playhead);
+  const selection = useEditor((s) => s.selection);
+  const setActiveTimeline = useEditor((s) => s.setActiveTimeline);
+  const goToState = useEditor((s) => s.goToState);
+  const [target, setTarget] = useState('');
+  const [cut, setCut] = useState(false);
+  const [dur, setDur] = useState(400);
+  const [ease, setEase] = useState('easeOut');
+  const [fromAny, setFromAny] = useState(false);
+  const [inputName, setInputName] = useState(STATE_INPUT);
+  const machine = machineOf(project);
+
+  const active = project.timelines.find((t) => t.id === project.activeTimelineId) ?? project.timelines[0];
+  const others = project.timelines.filter((t) => t.id !== active.id);
+  const targetId = others.some((t) => t.id === target) ? target : others[0]?.id ?? '';
+  const targetName = project.timelines.find((t) => t.id === targetId)?.name ?? '';
+  const layerId = selection[0] && project.rig.nodes[selection[0]] ? selection[0] : project.rig.rootId;
+  const layer = project.rig.nodes[layerId];
+  const num = (p: string) => valueAt(project, layerId, p, playhead);
+  const shape = valueAt(project, layerId, 'shape.path', playhead);
+  const usable = machine.inputs.filter((i) => i.type === 'String' || i.type === 'Numeric');
+  const chosen = usable.find((i) => i.name === inputName);
+  const fires = chosen?.type === 'Numeric' ? String(project.timelines.findIndex((t) => t.id === targetId)) : JSON.stringify(targetName);
+
+  const rows: [string, string][] = [
+    ['Scale', fmt(num('transform.scale.x'), '×')],
+    ['Rotation', fmt(num('transform.rotation'), '°')],
+    ['Opacity', fmt(num('opacity'), '')],
+    ['Shape', typeof shape === 'string' ? shapeById(shapeIdOf(shape) ?? '')?.name ?? 'Custom' : layer?.kind === 'body' ? 'Circle' : 'Natural'],
+    ['Yaw', fmt(num('surface.yaw'), '°')],
+    ['Pitch', fmt(num('surface.pitch'), '°')],
+  ];
+
+  if (!others.length) {
+    return <p className="hint" style={{ margin: 0 }}>Add a second state from the timeline tabs, then take the mascot to it from here.</p>;
+  }
+  return (
+    <div className="director">
+      <div className="dir-row">
+        <span className="dir-key">State</span>
+        <select className="sel dir-state" value={active.id} aria-label="Current state" onChange={(e) => setActiveTimeline(e.target.value)}>
+          {project.timelines.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </div>
+
+      <div className="dir-values" aria-label="Current values">
+        <span className="dir-caption">Current value · {layerId === project.rig.rootId ? 'Mascot' : layer?.name}</span>
+        {rows.map(([k, v]) => <div key={k} className="dir-value"><span>{k}</span><b>{v}</b></div>)}
+      </div>
+
+      <div className="dir-row">
+        <span className="dir-key">Target</span>
+        <select className="sel" style={{ flex: 1 }} value={targetId} aria-label="Target state" onChange={(e) => setTarget(e.target.value)}>
+          {others.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </div>
+      <div className="dir-row">
+        <span className="dir-key">Transition</span>
+        <div className="seg">
+          <button aria-pressed={!cut} onClick={() => setCut(false)} title="Blend into the target — dotLottie Tweened">Tween</button>
+          <button aria-pressed={cut} onClick={() => setCut(true)} title="Switch instantly">Cut</button>
+        </div>
+      </div>
+      {!cut && (
+        <>
+          <div className="dir-row">
+            <span className="dir-key">Duration</span>
+            <input className="prop-num" style={{ width: 70 }} type="number" min={0} step={20} value={dur}
+              aria-label="Transition duration, ms" onChange={(e) => setDur(Math.max(0, Math.round(+e.target.value)))} />
+            <span className="hint">ms</span>
+          </div>
+          <div className="dir-row">
+            <span className="dir-key">Easing</span>
+            <select className="sel" value={ease} aria-label="Transition easing" onChange={(e) => setEase(e.target.value)}>
+              {EASING_NAMES.filter((n) => n !== 'hold').map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+        </>
+      )}
+      <div className="dir-row">
+        <span className="dir-key">From</span>
+        <div className="seg">
+          <button aria-pressed={!fromAny} onClick={() => setFromAny(false)} title={`Only from ${active.name}`}>{active.name}</button>
+          <button aria-pressed={fromAny} onClick={() => setFromAny(true)} title="From every other state, one direct edge each">Any state</button>
+        </div>
+      </div>
+      <div className="dir-row">
+        <span className="dir-key">Input</span>
+        <select className="sel" style={{ flex: 1 }} value={inputName} aria-label="Input the transition listens to"
+          onChange={(e) => setInputName(e.target.value)}>
+          {!usable.some((i) => i.name === STATE_INPUT) && <option value={STATE_INPUT}>{STATE_INPUT} (new String input)</option>}
+          {usable.map((i) => <option key={i.name} value={i.name}>{i.name} ({i.type})</option>)}
+        </select>
+      </div>
+      <button className="btn primary" disabled={!targetId}
+        onClick={() => goToState(targetId, { durationMs: cut ? 0 : dur, easing: namedEasing(ease), input: inputName, fromAny })}>
+        Create transition
+      </button>
+      <p className="hint" style={{ margin: 0 }}>
+        {fromAny ? 'Every state' : active.name} → <b>{targetName}</b> directly, when <code>{inputName} == {fires}</code>. Nothing in between — and the preview takes it now.
+      </p>
+      <StateGraph selectedId={selectedId} onSelect={(t) => onSelect(t?.id ?? null)} />
+    </div>
+  );
+}
+
+const fmt = (v: unknown, unit: string) => (typeof v === 'number' ? `${Number.isInteger(v) ? v : v.toFixed(2)}${unit}` : '—');
 
 function MachineHeader({ errors }: { errors: number }) {
   const project = useEditor((s) => s.project);

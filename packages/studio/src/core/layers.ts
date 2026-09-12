@@ -2,6 +2,7 @@ import { uid } from './id';
 import { compOf } from './comp';
 import { primitivePath, SHAPE_LABEL } from './path';
 import { importSvg, parseSvg } from './svg';
+import { restLength } from './limb';
 import { screenToSurface } from './curvature';
 import { setProp } from './props';
 import { activeTrackFor, appearanceSpans, buildScene, evaluateRig, fromFrame, toFrame, WORLD, type LayerFrame } from './scene';
@@ -48,9 +49,13 @@ export function makeShapeLayer(shape: ShapeKind, over: Partial<RigNode> = {}): R
  */
 export function makeLimb(type: 'arm' | 'leg', side: -1 | 1, parentId: string | null = 'body', over: Partial<RigNode> = {}): RigNode {
   const s = side;
+  const arm = { a: { x: 118 * s, y: 30 }, b: { x: 196 * s, y: 96 } };
+  const leg = { a: { x: 56 * s, y: 112 }, b: { x: 68 * s, y: 176 }, c: { x: 60 * s, y: 230 } };
+  // a relaxed length — a touch longer than the points are apart — so a new limb rests with
+  // a soft curve, and bringing the hand in shows the hose bowing straight away
   const limb: RigNode['limb'] = type === 'arm'
-    ? { type, a: { x: 118 * s, y: 30 }, b: { x: 196 * s, y: 96 }, hose: 1, thickness: 24, bend: 0.25 * s, roundness: 1, taper: 0.12, length: 1 }
-    : { type, a: { x: 56 * s, y: 112 }, b: { x: 68 * s, y: 176 }, c: { x: 60 * s, y: 230 }, hose: 1, thickness: 26, bend: 0, roundness: 1, taper: 0.08, length: 1,
+    ? { type, ...arm, hose: 1, thickness: 24, bend: s, roundness: 1, taper: 0.12, length: restLength(arm) }
+    : { type, ...leg, hose: 1, thickness: 26, bend: s, roundness: 1, taper: 0.08, length: restLength(leg),
       foot: { angle: 0, length: 40, width: 24 } };
   return {
     id: uid(type), name: `${s < 0 ? 'Left' : 'Right'} ${type === 'arm' ? 'hand' : 'leg'}`, kind: 'limb', parentId,

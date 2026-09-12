@@ -345,6 +345,65 @@ export function fromDotLottie(machineJson: unknown, timelineIdFor: (stateName: s
 }
 
 // ---------------------------------------------------------------------------
+// current → desired
+
+/** The input "go to a state" transitions are written against, unless another is picked. */
+export const STATE_INPUT = 'state';
+
+export interface DirectOptions {
+  durationMs: number;
+  easing?: EasingCurve;
+  /** which input carries the request; created as a String input when absent */
+  input?: string;
+  /** a Numeric input compares against this; a String one against the target's name */
+  value?: InputValue;
+  /** every other state gets the edge, not just `from` — "from whatever state I'm in" */
+  fromAny?: boolean;
+}
+
+/**
+ * CURRENT → TARGET, as one real dotLottie transition — never a chain through the states
+ * in between.
+ *
+ * The request travels on an input, because that is all a state machine can react to: a
+ * String input named `state`, set to the target's name, is the plain-English form ("go
+ * to Angry"), and a Numeric input set to a number works the same way. The edge is DIRECT,
+ * from the state you are in (or from every state, with `fromAny`) straight to the target.
+ * Asking for the same edge again updates its blend instead of adding a second one.
+ *
+ * Mutates `p`. Returns the input name and the value that fires it, so the caller can
+ * drive the edge straight away.
+ */
+export function directTransition(p: Project, fromId: string, toId: string, opts: DirectOptions): { input: string; value: InputValue } | null {
+  const target = p.timelines.find((t) => t.id === toId);
+  if (!target) return null;
+  const m = (p.stateMachine ??= machineOf(p));
+  const name = (opts.input ?? STATE_INPUT).trim() || STATE_INPUT;
+  let input = m.inputs.find((i) => i.name === name);
+  if (!input) {
+    input = { name, type: 'String', value: '', description: 'The state to go to — set it to a state\'s name.' };
+    m.inputs.push(input);
+  }
+  if (input.type === 'Event' || input.type === 'Boolean') return null;
+  const value: InputValue = input.type === 'Numeric'
+    ? (typeof opts.value === 'number' ? opts.value : p.timelines.indexOf(target))
+    : (typeof opts.value === 'string' && opts.value ? opts.value : target.name);
+  const condition: SmCondition = { input: input.name, operator: 'Equal', value };
+  const sources = opts.fromAny ? p.timelines.filter((t) => t.id !== toId).map((t) => t.id) : [fromId];
+  for (const from of sources) {
+    if (from === toId || !p.timelines.some((t) => t.id === from)) continue;
+    const same = m.transitions.find((t) => t.from === from && t.to === toId
+      && t.conditions.length === 1 && t.conditions[0].input === input!.name && t.conditions[0].value === value);
+    if (same) { same.durationMs = Math.max(0, opts.durationMs); if (opts.easing) same.easing = opts.easing; continue; }
+    m.transitions.push({
+      id: `sm_${Math.random().toString(36).slice(2, 9)}`, from, to: toId, conditions: [condition], logic: 'AND',
+      durationMs: Math.max(0, opts.durationMs), ...(opts.easing ? { easing: opts.easing } : {}),
+    });
+  }
+  return { input: input.name, value };
+}
+
+// ---------------------------------------------------------------------------
 // validation (§16)
 
 export interface Issue { level: 'error' | 'warning'; message: string; transitionId?: string; inputName?: string }

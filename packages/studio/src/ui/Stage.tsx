@@ -6,7 +6,7 @@ import { TrajectoryHandles } from './TrajectoryHandles';
 import { ShapeHandles } from './ShapeHandles';
 import { screenToSurface } from '../core/curvature';
 import { flattenPath } from '../core/path';
-import { limbPoints } from '../core/limb';
+import { hoseInputOf, limbPoints, rubberHose } from '../core/limb';
 import { Shapes } from './Mascot';
 import { activeTimeline } from '../core/types';
 import { DEFAULT_BG, useStageBg } from './stageBg';
@@ -213,7 +213,7 @@ export function Stage() {
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const p = toComp(e);
     drag.current = { mode: 'limb', id: selNode.id, key, ox: p.x, oy: p.y, frame: frames.get(selNode.parentId ?? WORLD),
-      start: { ax: node.limb!.a.x, ay: node.limb!.a.y, length: node.limb!.length || 1 } };
+      start: { x: node.limb![key]?.x ?? 0, y: node.limb![key]?.y ?? 0 } };
   };
 
   const onMove = (e: React.PointerEvent) => {
@@ -233,13 +233,11 @@ export function Stage() {
     }
 
     if (d.mode === 'limb' && d.frame && d.key) {
-      // the handle sits where the point is DRAWN — after `length` stretches it from the
-      // shoulder — so the drag is converted back into the raw point it came from
+      // the points ARE where the shoulder, hand, knee and ankle sit — the hose's length
+      // decides the curve between them — so a drag writes the point straight back
       const local = fromFrame(d.frame, p);
-      const k = d.key === 'a' ? 1 : d.start.length;
-      const raw = d.key === 'a' ? local : { x: d.start.ax + (local.x - d.start.ax) / k, y: d.start.ay + (local.y - d.start.ay) / k };
-      setValue(d.id, `limb.${d.key}.x`, round2(raw.x), `limb.${d.id}`);
-      setValue(d.id, `limb.${d.key}.y`, round2(raw.y), `limb.${d.id}`);
+      setValue(d.id, `limb.${d.key}.x`, round2(local.x), `limb.${d.id}`);
+      setValue(d.id, `limb.${d.key}.y`, round2(local.y), `limb.${d.id}`);
       return;
     }
 
@@ -400,15 +398,23 @@ export function Stage() {
           <g className="limb-handles">
             {(() => {
               const l = limbNode.limb!;
-              const drawn = (k: 'a' | 'b' | 'c') => {
-                const pt = l[k]!;
-                const reach = k === 'a' ? pt : { x: l.a.x + (pt.x - l.a.x) * l.length, y: l.a.y + (pt.y - l.a.y) * l.length };
-                return toFrame(limbFrame, reach);
-              };
+              // exactly on the points: the length shapes the curve between them, never
+              // where they are
+              const drawn = (k: 'a' | 'b' | 'c') => toFrame(limbFrame, l[k]!);
               const pts = limbPoints(l).map((k) => ({ k, at: drawn(k) }));
+              // where the hose actually ends: short of the hand when it is out of reach,
+              // because a rubber hose keeps its length rather than stretching
+              const end = rubberHose(hoseInputOf(l, (v) => toFrame(limbFrame, v), limbFrame.cum))?.end;
+              const target = pts[pts.length - 1].at;
+              const short = end && Math.hypot(end.x - target.x, end.y - target.y) > 2 ? end : null;
               return (
                 <>
                   <polyline points={pts.map((q) => `${q.at.x},${q.at.y}`).join(' ')} className="limb-bone" pointerEvents="none" />
+                  {short && (
+                    <line x1={short.x} y1={short.y} x2={target.x} y2={target.y} className="limb-reach" pointerEvents="none">
+                      <title>Out of reach — the limb keeps its length. Lengthen it to reach.</title>
+                    </line>
+                  )}
                   {pts.map(({ k, at }) => (
                     <circle key={k} cx={at.x} cy={at.y} r={k === 'a' ? 6 : 7} className={`limb-pt limb-pt-${k}`}
                       pointerEvents="all" onPointerDown={startLimbPoint(k)} onPointerMove={onMove} onPointerUp={onUp}>

@@ -1107,3 +1107,25 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   }
   .appear-add:hover { border-color: var(--ink); color: var(--ink); }
 }
+
+@layer blooby {
+  /* --- state panel: current → target ----------------------------------------------- */
+  .director { display: flex; flex-direction: column; gap: 7px; }
+  .dir-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .dir-key { flex: 0 0 64px; font: 600 10px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .dir-state { flex: 1; font-weight: 600; }
+  .dir-values {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; padding: 8px;
+    border: 1px solid var(--line-soft); border-radius: var(--r); background: var(--field);
+  }
+  .dir-caption { grid-column: 1 / -1; font: 600 10px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .dir-value { display: flex; justify-content: space-between; font: 500 11.5px var(--ui); color: var(--ink-2); }
+  .dir-value b { font: 500 11px var(--mono); color: var(--ink); }
+  .director .btn.primary { justify-content: center; height: 30px; }
+  .director code { font: 500 10.5px var(--mono); background: var(--field); padding: 0 3px; border-radius: 3px; }
+}
+
+@layer blooby {
+  /* out of reach: from where the hose ends to where the hand was asked to be */
+  .limb-reach { stroke: var(--paper); stroke-width: 1.25; stroke-dasharray: 1 4; stroke-linecap: round; opacity: .8; }
+}
