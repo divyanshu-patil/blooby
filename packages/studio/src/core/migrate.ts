@@ -1,4 +1,5 @@
 import { makeTimeline } from './defaults';
+import { showcasePresets } from './showcase';
 import { slug } from './stateMachine';
 import type { Block, Modifier, Project, Track } from './types';
 
@@ -23,7 +24,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 interface Migration {
   /** the version this step produces */
@@ -135,6 +136,24 @@ const MIGRATIONS: Migration[] = [
       const stale = (t: Track) => mapped.has(t?.nodeId) && (t.property === 'flatOffset.x' || t.property === 'flatOffset.y');
       for (const tl of p.timelines ?? []) if (Array.isArray(tl?.tracks)) tl.tracks = tl.tracks.filter((t) => !stale(t));
       for (const pr of p.presets ?? []) if (Array.isArray(pr?.tracks)) pr.tracks = pr.tracks.filter((t) => !stale(t));
+    },
+  },
+  {
+    to: 4,
+    label: 'showcase presets',
+    /**
+     * The preset library is saved INSIDE the project, so a project from before the
+     * showcase presets existed never shows them — the autosaved one a user reopens every
+     * day least of all. Add the ones it lacks, first in the library as in a new project.
+     *
+     * A step, not a merge on every load: it runs once per document, so a showcase preset
+     * the user deletes afterwards stays deleted. A document without a preset list is left
+     * alone — `defaultProject()` is merged over it and brings the full library.
+     */
+    run(p) {
+      if (!Array.isArray(p.presets)) return;
+      const have = new Set(p.presets.map((x) => x?.id));
+      p.presets = [...showcasePresets().filter((x) => !have.has(x.id)), ...p.presets];
     },
   },
 ];
