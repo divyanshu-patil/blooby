@@ -1,10 +1,10 @@
 import { compOf } from '../core/comp';
 import { sceneAt, type SceneItem } from '../core/scene';
-import { flattenPath, pathFromPoints, primitivePath, splitSubpaths } from '../core/path';
+import { flattenPath, pathFromPoints, pathToBezier, primitivePath, splitSubpaths } from '../core/path';
 import { outlinesOf } from '../core/emitters';
 import { activeTimeline } from '../core/types';
 import { parseHex } from '../core/color';
-import type { ColorStop, Project } from '../core/types';
+import type { ColorStop, Project, Vec2 } from '../core/types';
 
 /**
  * Bakes a Project into Lottie JSON.
@@ -39,11 +39,19 @@ type Vec = number[];
 
 interface Chan {
   p: Vec[]; s: Vec[]; r: Vec[]; o: Vec[]; c: Vec[];
+  /** the layer fill's own opacity, apart from the layer's */
+  fo: Vec[];
+  /** the layer stroke: colour, its own opacity, width in the shape's own units */
+  sc: Vec[]; so: Vec[]; sw: Vec[];
   /** a pill's own width/height and corner radius, in composition units */
   wh: Vec[]; rr: Vec[];
 }
 
-const EPS = { p: 0.2, s: 0.12, r: 0.04, o: 0.4, c: 0.0015 };
+const EPS = { p: 0.2, s: 0.12, r: 0.04, o: 0.4, c: 0.0015, v: 0.25 };
+
+/** Lottie's own enums for a stroke's ends and corners. */
+const LINE_CAP = { butt: 1, round: 2, square: 3 } as const;
+const LINE_JOIN = { miter: 1, round: 2, bevel: 3 } as const;
 
 /** Drop every frame a straight line between its neighbours already predicts. */
 function reduce(frames: Vec[], eps: number): number[] {
@@ -150,6 +158,10 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       .map((scene) => scene.find((it) => it.id === id))
       .reduce<Outline[] | null>((found, it) => found ?? (it ? outlinesFor(it) : null), null);
     if (outlines) { baked.add(first.name); }
+    // An SVG whose markup held nothing readable as geometry has no honest Lottie form. It
+    // is named, so the export note says so, and it does NOT fall through to the pill
+    // below — a rounded rectangle standing in for someone's artwork is a silent lie.
+    if (!outlines && first.svg) { skipped.push(first.name); return; }
 
     // base geometry: the largest the shape ever gets, so scale stays <= 100%
     let w0 = 0, h0 = 0;
@@ -158,21 +170,6 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       if (it) { w0 = Math.max(w0, it.w); h0 = Math.max(h0, it.h); }
     }
     w0 = Math.max(w0, 0.01); h0 = Math.max(h0, 0.01);
-
-    const ch: Chan = { p: [], s: [], r: [], o: [], c: [], wh: [], rr: [] };
-    let last: SceneItem = first;
-    for (const scene of frames) {
-      const it = scene.find((s) => s.id === id);
-      const cur = it ?? last;
-      if (it) last = it;
-      ch.p.push([round(cur.cx, 2), round(cur.cy, 2)]);
-      ch.s.push([round((cur.w / w0) * 100, 3), round((cur.h / h0) * 100, 3)]);
-      ch.wh.push([round(cur.w, 3), round(cur.h, 3)]);
-      ch.rr.push([round(Math.min(cur.w, cur.h) / 2, 3)]);
-      ch.r.push([round(cur.rotation, 3)]);
-      ch.o.push([it ? round(cur.color.a * 100, 2) : 0]);
-      ch.c.push([round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4), 1]);
-    }
 
     /**
      * A pill has to be resized, not scaled.
@@ -185,6 +182,45 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
      * outline, which is written per frame anyway.
      */
     const pill = !outlines && first.shape !== 'ellipse';
+
+    const ch: Chan = { p: [], s: [], r: [], o: [], c: [], fo: [], sc: [], so: [], sw: [], wh: [], rr: [] };
+    let last: SceneItem = first;
+    // seeded with the FIRST stroke it ever has, so the frames before it appears hold that
+    // paint rather than ramping in from an invented black
+    let stroked: SceneItem['stroke'] | undefined = frames.map((scene) => scene.find((s) => s.id === id)?.stroke).find(Boolean);
+    for (const scene of frames) {
+      const it = scene.find((s) => s.id === id);
+      const cur = it ?? last;
+      if (it) last = it;
+      ch.p.push([round(cur.cx, 2), round(cur.cy, 2)]);
+      const sx = cur.w / w0, sy = cur.h / h0;
+      ch.s.push([round(sx * 100, 3), round(sy * 100, 3)]);
+      ch.wh.push([round(cur.w, 3), round(cur.h, 3)]);
+      ch.rr.push([round(Math.min(cur.w, cur.h) / 2, 3)]);
+      ch.r.push([round(cur.rotation, 3)]);
+      /**
+       * Layer opacity and paint opacity are separate channels. A layer's alpha — presence,
+       * rim fade, opacity, appearance — is the layer's `o`; the fill's and the stroke's own
+       * opacities are their own `o`. Folding them together would dim an opaque stroke
+       * whenever its fill was set to half. An item that does not report a layer alpha (a
+       * particle) keeps the old single channel: its colour's alpha IS its opacity.
+       */
+      const alpha = cur.alpha ?? cur.color.a;
+      const paint = (a: number) => (cur.alpha === undefined ? 1 : Math.min(1, a / Math.max(alpha, 1e-6)));
+      ch.o.push([it ? round(alpha * 100, 2) : 0]);
+      ch.c.push([round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4), 1]);
+      ch.fo.push([round(paint(cur.color.a) * 100, 2)]);
+      const st = it?.stroke;
+      if (st) stroked = st;
+      const sc = st?.color ?? stroked?.color ?? { r: 0, g: 0, b: 0, a: 0 };
+      ch.sc.push([round(sc.r / 255, 4), round(sc.g / 255, 4), round(sc.b / 255, 4), 1]);
+      ch.so.push([st ? round(paint(st.color.a) * 100, 2) : 0]);
+      // a stroke is screen px, but the shape it wraps is scaled by the layer — divide it
+      // back out (a pill is resized, not scaled, so it needs nothing)
+      const k = pill ? 1 : Math.sqrt(Math.max(1e-6, Math.abs(sx * sy)));
+      ch.sw.push([round((st?.width ?? stroked?.width ?? 0) / k, 3)]);
+    }
+
     const geometry: Record<string, unknown>[] = outlines
       ? bezierShapes(id, frames, outlines, w0, h0, (n2) => { keyframeCount += n2; })
       : first.shape === 'ellipse'
@@ -207,13 +243,22 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       s: pill ? { a: 0, k: [100, 100] } : prop(ch.s, EPS.s, 0),
     };
     for (const v of Object.values(ks)) if (v.a === 1) keyframeCount += (v.k as unknown[]).length;
-    const fill = prop(ch.c, EPS.c, 0);
-    if (fill.a === 1) keyframeCount += (fill.k as unknown[]).length;
+    const count = <T extends { a: number; k: unknown }>(v: T) => { if (v.a === 1) keyframeCount += (v.k as unknown[]).length; return v; };
+    const layerPaint: LayerPaint = {
+      fill: { c: count(prop(ch.c, EPS.c, 0)), o: count(prop(ch.fo, EPS.o, 0)) },
+      stroke: stroked
+        ? { c: count(prop(ch.sc, EPS.c, 0)), o: count(prop(ch.so, EPS.o, 0)), w: count(prop(ch.sw, EPS.p, 0)),
+          lc: LINE_CAP[stroked.cap], lj: LINE_JOIN[stroked.join] }
+        : undefined,
+      // an imported path's own stroke width is a fraction of the layer's size, which the
+      // layer transform already scales — so in the shape's own units it is constant
+      unit: Math.sqrt(w0 * h0),
+    };
 
     layers.push({
       ddd: 0, ind: n + 1, ty: 4, nm: first.name, sr: 1, ao: 0, bm: 0,
       ks,
-      shapes: groupByFill(first.name, geometry, outlines ?? [], fill),
+      shapes: paintGroups(first.name, geometry, outlines ?? [], layerPaint),
       ip: 0, op: total + 1, st: 0,
     });
   });
@@ -252,35 +297,63 @@ const round = (v: number, d: number) => {
 };
 
 
+type Animated = { a: number; k: unknown };
+interface LayerPaint {
+  fill: { c: Animated; o: Animated };
+  stroke?: { c: Animated; o: Animated; w: Animated; lc: number; lj: number };
+  /** the shape's own size unit, sqrt(w0·h0) — what an imported path's stroke width is a fraction of */
+  unit: number;
+}
+
+const staticColor = (c: ColorStop) => ({ a: 0, k: [round(c.r / 255, 4), round(c.g / 255, 4), round(c.b / 255, 4), 1] });
+
 /**
- * The shape groups for one layer, split so a path keeps its own colour.
+ * The shape groups for one layer, each with its own fill and stroke.
  *
- * Everything painted in the layer's colour stays in ONE group, because a group is also
- * what makes holes work: a donut is two paths whose fills cancel by winding. Only a path
- * the markup gave a colour of its own is lifted out into a group with that fill, which is
- * how an imported SVG keeps its palette instead of coming out a flat silhouette.
+ * Paths run together while they share a paint, because a group is also what makes holes
+ * work: a donut is two subpaths whose fills cancel by winding, and splitting them apart
+ * would fill the hole. A path the artwork painted itself — its own colour, its own line —
+ * starts a new run with that paint, which is how an imported SVG keeps its palette and its
+ * strokes instead of coming out a flat silhouette. Only CONSECUTIVE paths share a group,
+ * so the stacking the artwork was drawn in survives.
+ *
+ * Within a group the stroke is listed before the fill: in Lottie the earlier item paints
+ * on top, and an outline belongs over its fill as it does in SVG.
  */
-function groupByFill(
-  name: string, geometry: Record<string, unknown>[], outlines: Outline[],
-  layerFill: { a: number; k: unknown },
-): Record<string, unknown>[] {
+function paintGroups(name: string, geometry: Record<string, unknown>[], outlines: Outline[], paint: LayerPaint): Record<string, unknown>[] {
   const tr = { ty: 'tr', p: { a: 0, k: [0, 0] }, a: { a: 0, k: [0, 0] }, s: { a: 0, k: [100, 100] }, r: { a: 0, k: 0 }, o: { a: 0, k: 100 }, sk: { a: 0, k: 0 }, sa: { a: 0, k: 0 }, nm: 'transform' };
-  const buckets = new Map<string, { fill: { a: number; k: unknown }; shapes: Record<string, unknown>[] }>();
+  const keyOf = (o: Outline | undefined) => {
+    const f = o?.fill === null ? 'none' : o?.fill ? `${o.fill.r},${o.fill.g},${o.fill.b},${o.fill.a}` : 'layer';
+    const s = o?.stroke === null || (o?.stroke === undefined && !paint.stroke) ? 'none'
+      : o?.stroke ? `${o.stroke.r},${o.stroke.g},${o.stroke.b},${o.stroke.a}:${o.strokeWidth ?? 0}` : `layer:${o?.strokeWidth ?? ''}`;
+    return `${f}|${s}|${o?.evenOdd ? 'eo' : 'nz'}`;
+  };
+  const runs: { key: string; outline?: Outline; shapes: Record<string, unknown>[] }[] = [];
   geometry.forEach((sh, i) => {
-    const own = outlines[i]?.fill;
-    const key = own ? `${own.r},${own.g},${own.b}` : 'layer';
-    if (!buckets.has(key)) {
-      buckets.set(key, {
-        fill: own ? { a: 0, k: [round(own.r / 255, 4), round(own.g / 255, 4), round(own.b / 255, 4), 1] } : layerFill,
-        shapes: [],
-      });
-    }
-    buckets.get(key)!.shapes.push(sh);
+    const key = keyOf(outlines[i]);
+    const lastRun = runs[runs.length - 1];
+    if (lastRun?.key === key) lastRun.shapes.push(sh);
+    else runs.push({ key, outline: outlines[i], shapes: [sh] });
   });
-  return [...buckets.values()].map((b, i) => ({
-    ty: 'gr', nm: buckets.size > 1 ? `${name} ${i + 1}` : name, np: 2, cix: 2, bm: 0, hd: false,
-    it: [...b.shapes, { ty: 'fl', c: b.fill, o: { a: 0, k: 100 }, r: 1, bm: 0, nm: 'fill', hd: false }, tr],
-  }));
+  // later paths paint over earlier ones in SVG; in Lottie the first group is on top
+  return runs.reverse().map((run, i) => {
+    const o = run.outline;
+    const items: Record<string, unknown>[] = [...run.shapes];
+    if (o?.stroke) {
+      items.push({ ty: 'st', c: staticColor(o.stroke), o: { a: 0, k: round(o.stroke.a * 100, 2) }, w: { a: 0, k: round((o.strokeWidth ?? 0) * paint.unit, 3) },
+        lc: paint.stroke?.lc ?? 2, lj: paint.stroke?.lj ?? 2, ml: 4, bm: 0, nm: 'stroke', hd: false });
+    } else if (o?.stroke === undefined && paint.stroke) {
+      items.push({ ty: 'st', c: paint.stroke.c, o: paint.stroke.o,
+        w: o?.strokeWidth ? { a: 0, k: round(o.strokeWidth * paint.unit, 3) } : paint.stroke.w,
+        lc: paint.stroke.lc, lj: paint.stroke.lj, ml: 4, bm: 0, nm: 'stroke', hd: false });
+    }
+    if (o?.fill !== null) {
+      const fill = o?.fill ? { c: staticColor(o.fill), o: { a: 0, k: round(o.fill.a * 100, 2) } } : paint.fill;
+      items.push({ ty: 'fl', c: fill.c, o: fill.o, r: o?.evenOdd ? 2 : 1, bm: 0, nm: 'fill', hd: false });
+    }
+    items.push(tr);
+    return { ty: 'gr', nm: runs.length > 1 ? `${name} ${i + 1}` : name, np: items.length - 1, cix: 2, bm: 0, hd: false, it: items };
+  });
 }
 
 
@@ -357,12 +430,31 @@ function textLayer(
 export interface Outline {
   /** a unit-box `d` */
   d: string;
-  /** the path's own colour, when the markup gave it one that is not `currentColor` */
-  fill?: ColorStop;
+  /** the path's own colour, when the artwork gave it one; null for none; undefined for
+   *  the layer's own (animated) fill */
+  fill?: ColorStop | null;
+  /** the same for its outline: undefined is the layer's stroke, if it has one */
+  stroke?: ColorStop | null;
+  /** an imported path's stroke width, as a fraction of the layer's size */
+  strokeWidth?: number;
+  evenOdd?: boolean;
+  /** vertices to resample to; more for an outline that curves a lot, like a limb */
+  verts?: number;
 }
 
 function outlinesFor(item: SceneItem): Outline[] | null {
-  if (item.path) return [{ d: item.path }];
+  // several subpaths are several outlines — a leg and its foot, the dot on an "i" —
+  // flattened as one they would be joined by an edge that is not there
+  if (item.path) return splitSubpaths(item.path).map((d) => ({ d, ...(item.limb ? { verts: 72 } : {}) }));
+  if (item.paths?.length) {
+    const out: Outline[] = [];
+    for (const p of item.paths) {
+      for (const d of splitSubpaths(p.d)) {
+        out.push({ d, fill: p.fill, stroke: p.stroke, strokeWidth: p.strokeWidth, evenOdd: !!p.evenOdd });
+      }
+    }
+    return out.length ? out : null;
+  }
   if (!item.svg) return null;
   const paths = outlinesOf(item.svg.sourceMarkup);
   if (!paths.length) return null;
@@ -418,31 +510,54 @@ function bezierShapes(
   id: string, frames: SceneItem[][], outlines: Outline[], w0: number, h0: number,
   countKeys: (n: number) => void,
 ): Record<string, unknown>[] {
-  return outlines.map((_, oi) => {
-    const perFrame = frames.map((scene) => {
+  // a closed outline is filled; an open one (an imported line) must stay open, or its
+  // stroke gains a closing edge the artwork never had
+  const closed = (d: string) => /z\s*$/i.test(d.trim());
+  return outlines.map((o, oi) => {
+    const verts = o.verts ?? VERTS;
+    const ds = frames.map((scene) => {
       const it = scene.find((s) => s.id === id);
       // a frame where this layer has no outline of its own still needs one, or its
       // geometry would jump; use the primitive it is drawing at that instant
       const outs = it ? outlinesFor(it) ?? primitiveOutline(it) : null;
-      const d = (outs?.[oi] ?? outs?.[0] ?? outlines[oi]).d;
-      // scaled into the layer's own base box: the transform channel handles the rest
-      return flattenPath(d, VERTS).map((p) => [round(p.x * w0, 3), round(p.y * h0, 3)]);
+      return (outs?.[oi] ?? outs?.[0] ?? outlines[oi]).d;
     });
+    const c = closed(o.d);
+
+    // An outline that never changes is written exactly, curves and corners as they are.
+    // Only one that animates is resampled, because a morph needs the same vertex count
+    // on every frame and two arbitrary outlines never share one.
+    if (ds.every((d) => d === ds[0])) {
+      const bz = pathToBezier(ds[0]);
+      if (bz) {
+        const at = (p: Vec2) => [round(p.x * w0, 3), round(p.y * h0, 3)];
+        return { ty: 'sh', ind: oi, ks: { a: 0, k: { i: bz.i.map(at), o: bz.o.map(at), v: bz.v.map(at), c: bz.c } }, nm: `path${oi}`, hd: false };
+      }
+    }
+    // scaled into the layer's own base box: the transform channel handles the rest
+    const perFrame = ds.map((d) => flattenPath(d, verts).map((p) => [round(p.x * w0, 3), round(p.y * h0, 3)]));
 
     const zeros = perFrame[0].map(() => [0, 0]);
     const same = perFrame.every((f) => JSON.stringify(f) === JSON.stringify(perFrame[0]));
     if (same) {
-      return { ty: 'sh', ind: oi, ks: { a: 0, k: { i: zeros, o: zeros, v: perFrame[0], c: true } }, nm: `path${oi}`, hd: false };
+      return { ty: 'sh', ind: oi, ks: { a: 0, k: { i: zeros, o: zeros, v: perFrame[0], c } }, nm: `path${oi}`, hd: false };
     }
-    countKeys(perFrame.length);
+    /**
+     * Only the frames a straight line between neighbours cannot predict, like every other
+     * channel here. A limb holding still for half a clip, or a morph that has landed, is
+     * written as two keyframes rather than one per frame. Linear tangents, because the
+     * easing is already in the sampled vertices.
+     */
+    const keep = reduce(perFrame.map((f) => f.flat()), EPS.v);
+    countKeys(keep.length);
     return {
       ty: 'sh', ind: oi, nm: `path${oi}`, hd: false,
       ks: {
         a: 1,
-        k: perFrame.map((v, f) => ({
+        k: keep.map((f, n) => ({
           t: f,
-          s: [{ i: zeros, o: zeros, v, c: true }],
-          ...(f < perFrame.length - 1 ? { i: { x: [0.5], y: [1] }, o: { x: [0.5], y: [0] } } : {}),
+          s: [{ i: zeros, o: zeros, v: perFrame[f], c }],
+          ...(n < keep.length - 1 ? { i: { x: [1], y: [1] }, o: { x: [0], y: [0] } } : {}),
         })),
       },
     };

@@ -145,6 +145,32 @@ export function mapPath(d: string, f: (p: Vec2) => Vec2): string {
     .join(' ');
 }
 
+/**
+ * One subpath as Lottie bezier data — vertices with in/out tangents relative to them —
+ * exactly, with no resampling. What a static outline is written as: a star keeps its
+ * sharp tips and a circle its four real arcs, where resampling to evenly spaced points
+ * would clip the one and facet the other.
+ */
+export function pathToBezier(d: string): { v: Vec2[]; i: Vec2[]; o: Vec2[]; c: boolean } | null {
+  const segs = segments(d).filter(finiteSeg);
+  if (!segs.length) return null;
+  const c = !!segs[0].closed;
+  const zero = { x: 0, y: 0 };
+  const v: Vec2[] = [], i: Vec2[] = [], o: Vec2[] = [];
+  for (const s of segs) {
+    v.push(s.p0);
+    i.push(zero);
+    o.push(s.c1 ? { x: s.c1.x - s.p0.x, y: s.c1.y - s.p0.y } : zero);
+  }
+  segs.forEach((s, k) => {
+    const inT = s.c2 ? { x: s.c2.x - s.p1.x, y: s.c2.y - s.p1.y } : zero;
+    if (k + 1 < v.length) i[k + 1] = inT;
+    else if (c) i[0] = inT;                                  // the closing curve lands on the start
+    else { v.push(s.p1); i.push(inT); o.push(zero); }        // an open path keeps its last point
+  });
+  return { v, i, o, c };
+}
+
 /** The box a path's outline occupies, or null for a path with nothing in it. */
 export function pathBounds(d: string): { x0: number; y0: number; x1: number; y1: number } | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;

@@ -71,13 +71,25 @@ function blendItem(a: SceneItem, b: SceneItem, u: number): SceneItem {
       r: lerp(a.color.r, b.color.r, u), g: lerp(a.color.g, b.color.g, u),
       b: lerp(a.color.b, b.color.b, u), a: lerp(a.color.a, b.color.a, u),
     },
+    ...(a.alpha !== undefined || b.alpha !== undefined ? { alpha: lerp(a.alpha ?? a.color.a, b.alpha ?? b.color.a, u) } : {}),
+    ...(a.stroke || b.stroke ? { stroke: blendStroke(a.stroke, b.stroke, u) } : {}),
+  };
+}
+
+/** A stroke fades in or out across a morph rather than popping at its edge. */
+function blendStroke(a: SceneItem['stroke'], b: SceneItem['stroke'], u: number): NonNullable<SceneItem['stroke']> {
+  const from = a ?? { ...b!, color: { ...b!.color, a: 0 } };
+  const to = b ?? { ...a!, color: { ...a!.color, a: 0 } };
+  return {
+    ...from, width: lerp(from.width, to.width, u),
+    color: { r: lerp(from.color.r, to.color.r, u), g: lerp(from.color.g, to.color.g, u), b: lerp(from.color.b, to.color.b, u), a: lerp(from.color.a, to.color.a, u) },
   };
 }
 
 /** A layer only one side has fades rather than vanishing — this is what carries the
  *  orbit particles out of a pose that has them into one that does not. */
 const faded = (it: SceneItem, alpha: number): SceneItem =>
-  ({ ...it, color: { ...it.color, a: it.color.a * alpha } });
+  ({ ...it, color: { ...it.color, a: it.color.a * alpha }, ...(it.alpha !== undefined ? { alpha: it.alpha * alpha } : {}) });
 
 function blendScene(a: SceneItem[], b: SceneItem[], u: number): SceneItem[] {
   const bById = new Map(b.map((it) => [it.id, it]));
