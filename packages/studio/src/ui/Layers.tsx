@@ -203,5 +203,9 @@ function LayerThumb({ node }: { node: RigNode }) {
   } else {
     body = <path d={naturalOutline(node)} fill={fill} transform="scale(0.9)" />;
   }
-  return <svg className="layer-thumb" viewBox="-0.55 -0.55 1.1 1.1" aria-hidden>{body}</svg>;
+  // a dark layer on the dark tile is invisible (the eyes were black on black), so the tile
+  // flips to the light surface for anything darker than mid-grey
+  const { r, g, b } = node.color;
+  const dark = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
+  return <svg className={`layer-thumb${dark ? ' on-light' : ''}`} viewBox="-0.55 -0.55 1.1 1.1" aria-hidden>{body}</svg>;
 }

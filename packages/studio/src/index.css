@@ -1141,3 +1141,7 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   }
   .chips-peek { --chip-h: 86px; }
 }
+
+@layer blooby {
+  .layer-thumb.on-light { background: var(--field); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+}

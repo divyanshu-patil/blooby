@@ -37,6 +37,9 @@ Everything else reads a `Project`.
 | the character | `Rig` / `RigNode` | features are placed by **angle** on a sphere, not pixels |
 | one animation | `Timeline` | a project has several; each is one **state** |
 | a placed preset | `Block` | clip on the strip |
+| a freeform object | `RigNode` (`primitive` / `svgLayer` / `limb` / `group`) | `parentId: null` = world, child of the body = attached |
+| draw order | `RigNode.zIndex` | the ONLY ordering — `layerOrder()`, `reorderLayer()` |
+| when it is on screen | `Appearance` | on the timeline, scoped like an effect |
 | keyframes | `Track` / `Keyframe` | |
 | procedural motion | `Modifier` | shake, float, stretch, pendulum |
 | particles | `Emitter` / `EmitterPart` | zzz, tears, confetti |
@@ -54,6 +57,11 @@ Everything else reads a `Project`.
 | `core/stateMachine.ts` | dotLottie conversion both ways, evaluation, validation |
 | `core/migrate.ts` | **every old document shape.** Read it before changing `Project` |
 | `core/defaults.ts` | the default mascot, builtin presets, `makeTimeline` |
+| `core/showcase.ts` | the freeform showcase presets (they bring their own layers + ranges) |
+| `core/layers.ts` | **every layer operation** — order, attach, group, duplicate, appearance, SVG/shape/limb makers. Store and copilot both call it |
+| `core/limb.ts` | the rubber-hose engine: points + length → outline (Cavalry-style, length is kept) |
+| `core/svg.ts` | SVG → vector paths (and the sanitised markup kept alongside) |
+| `core/comp.ts` | `compOf(project)` — the canvas size. Never hard-code 720 |
 | `core/publicApi.ts` | `window.blooby.*` — the host-page surface |
 
 ### Export
