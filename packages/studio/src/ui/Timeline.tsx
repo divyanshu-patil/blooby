@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor, keyframeTimes, writeKeyframe } from '../core/store';
-import { COMP } from '../core/defaults';
-import { sceneAt } from '../core/scene';
+import { compOf } from '../core/comp';
+import { appearanceSpans, sceneAt } from '../core/scene';
+import { shapeById, shapeIdOf } from '../core/emitters';
 import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
 import { activeTimeline, MODIFIERS, type Block, type EasingCurve, type Keyframe, type KeyValue, type Project, type Timeline, type Track, type Transition } from '../core/types';
@@ -57,6 +58,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const savePreset = useEditor((s) => s.savePreset);
   const setBlockColor = useEditor((s) => s.setBlockColor);
   const commit = useEditor((s) => s.commit);
+  const setAppearance = useEditor((s) => s.setAppearance);
 
   const [view, setView] = useState<'tracks' | 'graph'>('tracks');
   const [zoom, setZoom] = useState(1);
@@ -209,7 +211,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
     () => tl.blocks.map((b, i) => {
       const preset = project.presets.find((p) => p.id === b.presetId);
       const rel = preset ? (characteristicTime(preset) / preset.durationMs) * b.durationMs : b.durationMs * 0.45;
-      return sceneAt(project, starts[i] + rel, COMP);
+      return sceneAt(project, starts[i] + rel, compOf(project));
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tl.blocks, tl.tracks, project.rig, tl.modifiers],
@@ -318,14 +320,24 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
       const mod = e.metaKey || e.ctrlKey;
 
       if (mod && e.key === 'c') { copyKeys(); }
-      else if (mod && e.key === 'v') { e.preventDefault(); pasteKeys(); }
       else if (mod && e.key === 'a') {
         e.preventDefault();
         setSelKeys(new Set(tl.tracks.flatMap((t) => t.keyframes.map((k) => kfKey(t.id, k.id)))));
       } else if (e.key === 'Escape') setSelKeys(new Set());
     };
+    // Paste is a paste EVENT, not a ⌘V keydown: cancelling the keydown killed every paste
+    // in the app, which is how an SVG copied from Figma could never reach the editor. An
+    // SVG on the clipboard is taken first (capture, in Editor.tsx); this sees the rest.
+    const onPaste = (e: ClipboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (!clipboard.current.length) return;
+      e.preventDefault();
+      pasteKeys();
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('paste', onPaste);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('paste', onPaste); };
   });
 
   const selKf = sel && tl.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
@@ -333,6 +345,35 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const colorForBlockId = (id: string | undefined) => (id ? clipColor(project, tl.blocks.find((b) => b.id === id)) : undefined);
 
   const tickStep = duration > 12000 ? 2000 : duration > 5000 ? 1000 : 500;
+
+  // When the selected layer is on screen: its own lane, above the property lanes, with
+  // the range as a bar you drag by either end or by the middle.
+  const appearNode = selection.length === 1 && selection[0] !== project.rig.rootId ? project.rig.nodes[selection[0]] : undefined;
+  const appearSpans = appearNode ? appearanceSpans(tl, appearNode.id) : [];
+  const appearSnaps = [...jumps, playhead, ...starts, duration];
+  const dragAppear = (entryId: string, grab: 'a' | 'b' | 'both', from: number, to: number) => (down: React.PointerEvent) => {
+    if (!appearNode) return;
+    down.preventDefault();
+    down.stopPropagation();
+    const x0 = down.clientX;
+    const reach = 6 / pxPerMs;
+    const snap = (v: number, free: boolean) => {
+      if (free) return v;
+      const hit = appearSnaps.reduce((best, s2) => (Math.abs(s2 - v) < Math.abs(best - v) ? s2 : best), appearSnaps[0]);
+      return Math.abs(hit - v) <= reach ? hit : v;
+    };
+    const move = (e: PointerEvent) => {
+      const d = (e.clientX - x0) / pxPerMs;
+      let a = from, b = to;
+      if (grab === 'a') a = Math.max(0, Math.min(to - 40, snap(from + d, e.shiftKey)));
+      else if (grab === 'b') b = Math.min(duration, Math.max(from + 40, snap(to + d, e.shiftKey)));
+      else { const w = to - from; a = Math.max(0, Math.min(duration - w, snap(from + d, e.shiftKey))); b = a + w; }
+      setAppearance(appearNode.id, { startMs: Math.round(a), endMs: Math.round(b) }, `appear.${appearNode.id}`, entryId);
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const activeBlock = starts.findIndex((s, i) => playhead >= s && playhead < s + tl.blocks[i].durationMs);
 
   return (
@@ -468,7 +509,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                 <input type="color" className="block-color" title="Clip accent color — shows in the strip, track lanes and graph"
                   value={color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
                   onChange={(e) => { e.stopPropagation(); setBlockColor(b.id, e.target.value); }} />
-                <MascotThumb className="thumb" scene={thumbs[i]} view={COMP} />
+                <MascotThumb className="thumb" scene={thumbs[i]} view={compOf(project)} />
                 <span style={{ font: '600 10.5px var(--ui)', width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                 <DurInput ms={b.durationMs} label={`${b.name} duration`} locked={tl.durationMode === 'even'}
                   onCommit={(sec) => setBlockDuration(b.id, sec * 1000)} />
@@ -534,6 +575,11 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                   <span className="fold-caret" aria-hidden>›</span>
                   {effectSpans.length} effect{effectSpans.length === 1 ? '' : 's'}
                 </button>
+              )}
+              {appearNode && (
+                <div className="appear-name" title="When this layer is on screen — drag the bar's ends">
+                  <span>On screen</span><span className="node">{appearNode.name}</span>
+                </div>
               )}
               {visible.map((t) => {
                 const numeric = t.keyframes.every((k) => typeof k.value === 'number');
@@ -603,6 +649,26 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                     ))}
                   </div>
                 )}
+                {appearNode && (
+                  <div className="appear-lane" onPointerDown={(e) => e.stopPropagation()}>
+                    {appearSpans.length ? appearSpans.map(({ entry, from, to }) => (
+                      <div key={entry.id} className="appear-bar" style={{ left: from * pxPerMs, width: Math.max(4, (to - from) * pxPerMs) }}
+                        title={`${appearNode.name} on screen ${fmtSec(from)} → ${fmtSec(to)} — drag to move, drag an end to trim (shift: no snapping)`}
+                        onPointerDown={dragAppear(entry.id, 'both', from, to)}>
+                        {!!entry.fadeInMs && <span className="appear-fade in" style={{ width: Math.min(entry.fadeInMs * pxPerMs, (to - from) * pxPerMs) }} />}
+                        {!!entry.fadeOutMs && <span className="appear-fade out" style={{ width: Math.min(entry.fadeOutMs * pxPerMs, (to - from) * pxPerMs) }} />}
+                        <span className="appear-grip a" onPointerDown={dragAppear(entry.id, 'a', from, to)} />
+                        <span className="appear-grip b" onPointerDown={dragAppear(entry.id, 'b', from, to)} />
+                      </div>
+                    )) : (
+                      <button className="appear-add" style={{ left: playhead * pxPerMs }}
+                        title="Always on screen. Click to make it appear from the playhead to the end."
+                        onClick={() => setAppearance(appearNode.id, { startMs: Math.round(playhead), endMs: Math.round(duration) })}>
+                        always · set range from here
+                      </button>
+                    )}
+                  </div>
+                )}
                 {visible.map((t) => {
                   const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                   return (
@@ -615,7 +681,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                           <span key={k.id} className="kfd" data-k={kfKey(t.id, k.id)}
                             data-sel={selKeys.has(kfKey(t.id, k.id))} data-shape={easingShape(k.easingOut)}
                             style={{ left: k.time * pxPerMs }}
-                            title={`${(k.time / 1000).toFixed(2)}s · ${easingLabel(k.easingOut)} — shift/cmd-click to select several`}
+                            title={`${(k.time / 1000).toFixed(2)}s · ${typeof k.value === 'string' ? `${shapeById(shapeIdOf(k.value) ?? '')?.name ?? 'custom shape'} · ` : ''}${easingLabel(k.easingOut)} — shift/cmd-click to select several`}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               (e.target as Element).setPointerCapture?.(e.pointerId);

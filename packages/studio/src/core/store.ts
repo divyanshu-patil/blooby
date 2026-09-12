@@ -1,11 +1,19 @@
 import { create } from 'zustand';
 import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
 import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
-import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
+import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack, valueAt } from './scene';
+import {
+  duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
+  setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
+  type AppearanceRange, type AttachMode, type ReorderTo,
+} from './layers';
+import { compOf } from './comp';
+import { naturalOutline } from './path';
+import type { MorphMode } from './easing';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
-import { defaultValues, machineOf, nextTransition, slug } from './stateMachine';
+import { defaultValues, directTransition, machineOf, nextTransition, slug, type DirectOptions } from './stateMachine';
 import { migrateProject, SCHEMA_VERSION } from './migrate';
 import type { Block, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, Timeline, Track, Transition } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
@@ -36,6 +44,10 @@ export interface Editor {
   selectedBlockId: string | null;
   /** the emitter whose trajectory handles are on the stage, if any */
   selectedEmitterId: string | null;
+  /** shape-edit mode: the selected outline's anchors are draggable on the stage. Off, the
+   *  stage shows the box and its handles instead — two sets of handles at once fight. */
+  editPoints: boolean;
+  setEditPoints: (v: boolean) => void;
   playhead: number;
   playing: boolean;
   loop: boolean;
@@ -83,6 +95,30 @@ export interface Editor {
   addNode: (node: RigNode) => void;
   deleteNode: (id: string) => void;
   updateNode: (id: string, fn: (n: RigNode) => void, label?: string) => void;
+
+  /**
+   * Layer operations. Each is one commit — one undo step — over the pure function of the
+   * same name in core/layers.ts, which the copilot's tools call too.
+   */
+  /** on top of everything (a limb keeps its place behind the body); `appearAt` starts it
+   *  there on the timeline, which is what pasting at the playhead means */
+  addLayer: (node: RigNode | RigNode[], opts?: { appearAt?: number }) => void;
+  duplicateLayer: (id: string) => string | null;
+  reorderLayer: (id: string, to: ReorderTo) => void;
+  /** world ↔ mascot, keeping the layer where it is on screen */
+  setAttachment: (id: string, mode: AttachMode, anchorId?: string) => void;
+  groupLayers: (ids: string[]) => void;
+  ungroupLayer: (id: string) => void;
+  /** in absolute ms; `null` removes every range so the layer is simply always there */
+  setAppearance: (nodeId: string, range: AppearanceRange | null, label?: string, entryId?: string) => void;
+  setComposition: (patch: Partial<{ width: number; height: number }>) => void;
+  /** how the shape keyframe under the playhead becomes the next one */
+  setShapeMorph: (nodeId: string, mode: MorphMode, durationMs?: number) => void;
+  /**
+   * CURRENT → TARGET for one property: a keyframe holding whatever it reads right now at
+   * the playhead, and one at `target` after `durationMs`. What "Apply transition" does.
+   */
+  tweenProperty: (nodeId: string, property: string, target: KeyValue, durationMs: number, easing: EasingCurve) => void;
 
   loadCatalog: () => Promise<void>;
   addBlock: (presetId: string, index?: number) => void;
@@ -158,6 +194,11 @@ export interface Editor {
   updateStateTransition: (id: string, patch: Partial<Omit<SmTransition, 'id'>>) => void;
   removeStateTransition: (id: string) => void;
   setInitialState: (timelineId: string) => void;
+  /**
+   * CURRENT → TARGET: a direct transition from the active state (or every state) to the
+   * target, on the `state` input, then played straight away in the preview.
+   */
+  goToState: (targetId: string, opts: DirectOptions) => void;
   setMachineId: (id: string) => void;
   /** Clear the machine — every input and every transition — leaving the states and their
    *  animation work untouched. Undoable, like any other document edit. */
@@ -314,6 +355,8 @@ export const useEditor = create<Editor>((set, get) => ({
   selectedTrackId: null,
   selectedBlockId: null,
   selectedEmitterId: null,
+  editPoints: false,
+  setEditPoints: (editPoints) => set({ editPoints }),
   playhead: 0,
   playing: false,
   loop: true,
@@ -359,7 +402,8 @@ export const useEditor = create<Editor>((set, get) => ({
     set({ project: future[0], past: [...past, project], future: future.slice(1), lastLabel: '' });
   },
 
-  select: (selection) => set({ selection }),
+  // a new selection starts out of point-edit mode: the anchors belong to one outline
+  select: (selection) => set({ selection, editPoints: false }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
   setPlaying: (playing) => set({ playing }),
   setLoop: (loop) => set({ loop }),
@@ -439,7 +483,12 @@ export const useEditor = create<Editor>((set, get) => ({
 
   addKeyframeNow(nodeId, property) {
     const { playhead, project } = get();
-    const v = read(project, evaluateRig(project, playhead), nodeId, property);
+    const rig = evaluateRig(project, playhead);
+    // a layer still drawing its plain ellipse or stadium has no outline to key yet — key
+    // the one it is visibly drawing, so its first keyframe is its real resting shape
+    const node = rig.nodes[nodeId];
+    const v = read(project, rig, nodeId, property)
+      ?? (property === 'shape.path' && node && node.kind !== 'limb' && !node.svg?.paths ? naturalOutline(node) : undefined);
     if (v === undefined) return;
     // writeKeyframe rather than a hand-rolled push: it scopes the new track to whichever
     // clip the playhead is in, and that is the scope activeTrackFor — and therefore the
@@ -513,27 +562,78 @@ export const useEditor = create<Editor>((set, get) => ({
   },
 
   deleteNode(id) {
-    get().commit((p) => {
-      if (id === p.rig.rootId) return;
-      const doomed = new Set([id]);
-      let grew = true;
-      while (grew) {
-        grew = false;
-        for (const n of Object.values(p.rig.nodes))
-          if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) { doomed.add(n.id); grew = true; }
-      }
-      for (const d of doomed) delete p.rig.nodes[d];
-      for (const n of Object.values(p.rig.nodes)) if (n.eye?.linkedToId && doomed.has(n.eye.linkedToId)) n.eye.linkedToId = null;
-      for (const tl of p.timelines) {
-        tl.tracks = tl.tracks.filter((t) => !doomed.has(t.nodeId));
-        tl.modifiers = tl.modifiers.filter((m) => !doomed.has(m.nodeId));
-      }
-    });
-    set({ selection: [] });
+    get().commit((p) => { removeLayer(p, id); });
+    set({ selection: get().selection.filter((s) => get().project.rig.nodes[s]) });
   },
 
   updateNode(id, fn, label) {
     get().commit((p) => { const n = p.rig.nodes[id]; if (n) fn(n); }, label);
+  },
+
+  addLayer(node, opts) {
+    const nodes = Array.isArray(node) ? node : [node];
+    if (!nodes.length) return;
+    get().commit((p) => {
+      for (const src of nodes) {
+        const n = structuredClone(src);
+        if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
+        if (n.parentId !== null && !p.rig.nodes[n.parentId]) n.parentId = p.rig.rootId;
+        p.rig.nodes[n.id] = n;
+        if (opts?.appearAt && opts.appearAt > 0) setAppearanceIn(p, n.id, { startMs: opts.appearAt }, opts.appearAt);
+      }
+    });
+    set({ selection: nodes.map((n) => n.id), selectedBlockId: null });
+  },
+
+  duplicateLayer(id) {
+    let made: string | null = null;
+    get().commit((p) => { made = duplicateLayerIn(p, id); });
+    if (made) set({ selection: [made] });
+    return made;
+  },
+
+  reorderLayer(id, to) { get().commit((p) => reorderLayerIn(p, id, to)); },
+
+  setAttachment(id, mode, anchorId) {
+    const { playhead } = get();
+    get().commit((p) => { setAttachmentIn(p, id, mode, anchorId, playhead); });
+  },
+
+  groupLayers(ids) {
+    const { playhead } = get();
+    let g: string | null = null;
+    get().commit((p) => { g = groupLayersIn(p, ids, playhead); });
+    if (g) set({ selection: [g] });
+  },
+
+  ungroupLayer(id) {
+    const { playhead } = get();
+    get().commit((p) => ungroupLayerIn(p, id, playhead));
+    set({ selection: [] });
+  },
+
+  setAppearance(nodeId, range, label, entryId) {
+    const { playhead } = get();
+    get().commit((p) => setAppearanceIn(p, nodeId, range, playhead, entryId), label ?? `appear.${nodeId}`);
+  },
+
+  setComposition(patch) {
+    get().commit((p) => { p.composition = compOf({ composition: { ...compOf(p), ...patch } }); }, 'comp');
+  },
+
+  setShapeMorph(nodeId, mode, durationMs) {
+    const { playhead } = get();
+    get().commit((p) => { setMorph(p, nodeId, playhead, mode, durationMs); }, `morph.${nodeId}`);
+  },
+
+  tweenProperty(nodeId, property, target, durationMs, easing) {
+    const { project, playhead } = get();
+    const from = valueAt(project, nodeId, property, playhead);
+    if (from === undefined) return;
+    get().commit((p) => {
+      writeKeyframe(p, nodeId, property, playhead, from, easing);
+      writeKeyframe(p, nodeId, property, playhead + Math.max(20, durationMs), target, easing);
+    });
   },
 
   async loadCatalog() {
@@ -571,7 +671,8 @@ export const useEditor = create<Editor>((set, get) => ({
           keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
         });
       }
-      attachPresetEffects(tl, preset, blockId);
+      // with the rig, so a preset that brings its own layers (an arm, a sticker) adds them
+      attachPresetEffects(tl, preset, blockId, p.rig);
       const shifted = tl.blocks.slice(at0).map((b) => b.id);
       if (shifted.length) {
         const set2 = new Set(shifted);
@@ -985,6 +1086,15 @@ export const useEditor = create<Editor>((set, get) => ({
 
   setInitialState(timelineId) {
     get().commit((p) => { (p.stateMachine ??= machineOf(p)).initialStateId = timelineId; });
+  },
+
+  goToState(targetId, opts) {
+    const from = get().project.activeTimelineId;
+    let fired: { input: string; value: InputValue } | null = null;
+    get().commit((p) => { fired = directTransition(p, from, targetId, opts); });
+    // drive it: set the input and let the machine take the edge it now has, exactly as the
+    // player would — so what the button does IS what the exported file does
+    if (fired) get().setInput((fired as { input: string }).input, (fired as { value: InputValue }).value);
   },
 
   setMachineId(id) {

@@ -5,6 +5,46 @@ import { activeTimeline } from '../core/types';
 import { PROP_LABEL } from '../core/props';
 import { activeTrackFor, valueAt } from '../core/scene';
 
+/**
+ * Thin-stroke icons for the layer panel, the stage and the inspector — scanned faster
+ * than words in a dense rail. Drawn in currentColor at 1.6px on a 24 grid, so they sit
+ * with the type rather than on top of it.
+ */
+const ICONS = {
+  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z M12 9.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Z',
+  eyeOff: 'M3 3l18 18 M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3 3.9 M6.5 6.6C3.9 8.3 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.5-1.6 M9.9 9.9a2.8 2.8 0 0 0 4 4',
+  lock: 'M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+  unlock: 'M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 6.8-1.2',
+  plus: 'M12 5v14 M5 12h14',
+  shape: 'M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7L12 3Z',
+  svg: 'M8 7l-5 5 5 5 M16 7l5 5-5 5 M14 4l-4 16',
+  hand: 'M5 18c3-2 5-5 6-9 M11 9c1-3 3-4 5-3 M16 6c2 0 3 2 2 4-.8 1.6-2.4 2-4 1.6',
+  leg: 'M9 3c-1 5 1 8 4 11 M13 14c1 2 .5 4-1 5 M12 19h6',
+  group: 'M4 7h6l2 2h8v10H4z',
+  front: 'M12 4v12 M7 9l5-5 5 5 M5 20h14',
+  back: 'M12 20V8 M7 15l5 5 5-5 M5 4h14',
+  up: 'M12 19V5 M6 11l6-6 6 6',
+  down: 'M12 5v14 M6 13l6 6 6-6',
+  copy: 'M9 9h11v11H9z M5 15H4V4h11v1',
+  trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+  world: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M3 12h18 M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9Z',
+  anchor: 'M12 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z M12 8v13 M5 14a7 7 0 0 0 14 0 M8 11h8',
+  points: 'M5 19l5-12 5 8 4-6 M5 19h.01 M10 7h.01 M15 15h.01 M19 9h.01',
+  play: 'M8 5l11 7-11 7z',
+} as const;
+
+export type IconName = keyof typeof ICONS;
+
+export function Icon({ name, size = 14, title }: { name: IconName; size?: number; title?: string }) {
+  return (
+    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden={title ? undefined : true} role={title ? 'img' : undefined}>
+      {title && <title>{title}</title>}
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
+
 export function Panel({ title, actions, children, flush }: { title: string; actions?: ReactNode; children: ReactNode; flush?: boolean }) {
   return (
     <section className={flush ? 'panel flush' : 'panel'}>

@@ -1000,3 +1000,148 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 /* the library is worth two more columns than the rail can give it */
 .drawer.wide { width: min(560px, 96vw); }
 .drawer.wide .chips { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+
+/* ============================================================================
+   Freeform: shapes, layers, limbs, appearance. Same vocabulary as above — hairlines,
+   the three-tone surface stack, ink for the one active thing, red only for delete.
+   ========================================================================= */
+@layer blooby {
+  /* --- shape picker ---------------------------------------------------------- */
+  .shape-pick { position: relative; flex: 1; min-width: 0; }
+  .shape-current { width: 100%; justify-content: flex-start; }
+  .shape-current svg { width: 14px; height: 14px; fill: currentColor; flex: none; }
+  .shape-custom { width: 14px; text-align: center; flex: none; }
+  .shape-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+  .shape-grid {
+    position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; width: 244px;
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; padding: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+  }
+  .shape-grid .shapepick-cell[aria-selected='true'] { border-color: var(--ink); background: var(--field); }
+  .shape-grid .shapepick-cell svg { width: 18px; height: 18px; fill: currentColor; }
+  .shape-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+  .shape-key {
+    font: 500 10.5px var(--ui); padding: 2px 7px; border-radius: 999px;
+    border: 1px solid var(--line-soft); background: var(--field); color: var(--ink-2);
+  }
+  .shape-key b { font: 500 10px var(--mono); color: var(--muted); margin-right: 2px; }
+  .shape-key[aria-pressed='true'] { border-color: var(--ink); }
+}
+
+@layer blooby {
+  /* --- icons ------------------------------------------------------------------ */
+  .icon { display: block; flex: none; }
+  .btn.icon .icon { margin: auto; }
+  .btn.danger-icon:hover:not(:disabled) { color: var(--hot); }
+
+  /* --- layer list: front at the top, a thumbnail per row --------------------- */
+  .layer-list { display: flex; flex-direction: column; gap: 1px; }
+  .layer { gap: 6px; padding: 3px 6px; border: 1px solid transparent; }
+  .layer[data-depth='3'] { padding-left: 44px; }
+  .layer[data-depth='4'] { padding-left: 56px; }
+  .layer[data-hidden] .layer-name, .layer[data-hidden] .layer-thumb { opacity: .4; }
+  .layer[data-drop='front'] { box-shadow: inset 0 2px 0 var(--ink); }
+  .layer[data-drop='back'] { box-shadow: inset 0 -2px 0 var(--ink); }
+  .layer[draggable='true'] { cursor: grab; }
+  .layer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .layer-rename { height: 20px; flex: 1; min-width: 0; }
+  .layer-thumb {
+    width: 18px; height: 18px; flex: none; border-radius: 4px;
+    background: var(--ink); color: var(--paper); padding: 1px;
+  }
+  .layer-btn {
+    width: 20px; height: 20px; flex: none; display: grid; place-items: center;
+    border-radius: 4px; color: var(--muted);
+  }
+  .layer-btn:hover { background: rgba(23, 22, 27, .07); color: var(--ink); }
+  .layer-btn.lock[data-on='false'] { opacity: 0; }
+  .layer:hover .layer-btn.lock, .layer-btn.lock:focus-visible { opacity: 1; }
+  .layer-badge { flex: none; color: var(--muted); display: grid; place-items: center; }
+  .layer-actions { display: flex; align-items: center; gap: 2px; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+
+  /* --- inspector: a name, then folds ------------------------------------------- */
+  .insp { display: flex; flex-direction: column; gap: 8px; }
+  .insp .fold + .fold { margin-top: 0; }
+  .insp-head { display: flex; align-items: center; gap: 6px; padding: 8px; background: var(--panel);
+    border: 1px solid var(--line-soft); border-radius: var(--r); box-shadow: var(--shadow); }
+  .insp-head .txt { flex: 1; }
+  .fold .fold { border-color: var(--line-soft); background: var(--surface-alt); }
+  .anim-list { display: flex; flex-direction: column; gap: 2px; }
+  .anim-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 6px; border-radius: 5px;
+    font: 500 11.5px var(--ui); text-align: left; }
+  .anim-row:hover { background: var(--field); }
+  .comp-presets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+}
+
+@layer blooby {
+  /* --- stage: box, limb points, tether ---------------------------------------- */
+  .handle.sq { cursor: nwse-resize; }
+  .limb-bone { fill: none; stroke: var(--paper); stroke-width: 1.25; stroke-dasharray: 3 4; opacity: .7; }
+  .limb-pt { fill: var(--paper); stroke: var(--ink); stroke-width: 2; cursor: grab; }
+  .limb-pt:hover, .limb-pt:active { fill: var(--ink); stroke: var(--paper); }
+  .limb-pt-a { stroke-dasharray: 2 2; }
+  .tether line { stroke: rgba(var(--stage-ink), .35); stroke-width: 1; stroke-dasharray: 2 4; }
+  .tether circle { fill: rgba(var(--stage-ink), .5); }
+}
+
+@layer blooby {
+  /* --- the selected layer's "on screen" range, as its own lane ---------------------- */
+  .appear-name, .appear-lane { height: 24px; border-bottom: 1px solid var(--line-soft); background: var(--surface-alt); }
+  .appear-name { display: flex; align-items: center; gap: 6px; padding: 0 8px; font: 600 10.5px var(--ui); color: var(--ink-2); }
+  .appear-name .node { color: var(--muted); font-weight: 500; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .appear-lane { position: relative; }
+  .appear-bar {
+    position: absolute; top: 5px; height: 14px; border-radius: 4px; cursor: grab;
+    background: color-mix(in oklab, var(--ink) 16%, transparent); border: 1px solid var(--ink);
+  }
+  .appear-bar:active { cursor: grabbing; }
+  .appear-grip { position: absolute; top: -2px; width: 7px; height: 16px; border-radius: 2px; background: var(--ink); cursor: ew-resize; }
+  .appear-grip.a { left: -4px; }
+  .appear-grip.b { right: -4px; }
+  .appear-fade { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+  .appear-fade.in { left: 0; background: linear-gradient(90deg, var(--panel), transparent); }
+  .appear-fade.out { right: 0; background: linear-gradient(-90deg, var(--panel), transparent); }
+  .appear-add {
+    position: absolute; top: 4px; height: 16px; padding: 0 7px; border-radius: 999px; white-space: nowrap;
+    border: 1px dashed var(--line); font: 500 9.5px var(--ui); color: var(--muted); background: var(--panel);
+  }
+  .appear-add:hover { border-color: var(--ink); color: var(--ink); }
+}
+
+@layer blooby {
+  /* --- state panel: current → target ----------------------------------------------- */
+  .director { display: flex; flex-direction: column; gap: 7px; }
+  .dir-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .dir-key { flex: 0 0 64px; font: 600 10px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .dir-state { flex: 1; font-weight: 600; }
+  .dir-values {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; padding: 8px;
+    border: 1px solid var(--line-soft); border-radius: var(--r); background: var(--field);
+  }
+  .dir-caption { grid-column: 1 / -1; font: 600 10px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .dir-value { display: flex; justify-content: space-between; font: 500 11.5px var(--ui); color: var(--ink-2); }
+  .dir-value b { font: 500 11px var(--mono); color: var(--ink); }
+  .director .btn.primary { justify-content: center; height: 30px; }
+  .director code { font: 500 10.5px var(--mono); background: var(--field); padding: 0 3px; border-radius: 3px; }
+}
+
+@layer blooby {
+  /* out of reach: from where the hose ends to where the hand was asked to be */
+  .limb-reach { stroke: var(--paper); stroke-width: 1.25; stroke-dasharray: 1 4; stroke-linecap: round; opacity: .8; }
+}
+
+@layer blooby {
+  /* --- preset chips: the picture plays on hover, the tagline says what it shows ------- */
+  .chip { gap: 2px; }
+  .chip .glyph { margin-bottom: 2px; }
+  .chip-name { font: 500 11px var(--ui); color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip-tag {
+    font: 500 9.5px var(--ui); color: var(--muted); min-height: 12px; line-height: 12px;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chips-peek { --chip-h: 86px; }
+}
+
+@layer blooby {
+  .layer-thumb.on-light { background: var(--field); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+}

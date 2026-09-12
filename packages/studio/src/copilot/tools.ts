@@ -1,15 +1,22 @@
 import { uniqueName, useEditor, writeKeyframe } from '../core/store';
 import { attachPresetEffects, makeTimeline, uid } from '../core/defaults';
 import { namedEasing, EASING_NAMES } from '../core/easing';
-import { blocksEnd, relayoutBlocks } from '../core/timeline';
+import { blockAt, blocksEnd, relayoutBlocks } from '../core/timeline';
 import { activeTrackFor } from '../core/scene';
 import { setProp } from '../core/props';
 import { activeTimeline, MODIFIER_KINDS, MODIFIERS } from '../core/types';
-import { defaultValueFor, machineOf, OPERATORS } from '../core/stateMachine';
-import { primitivePath, PRIMITIVE_SHAPES, type PrimitiveShape } from '../core/path';
-import { shapeById, SHAPE_LIBRARY } from '../core/emitters';
+import { defaultValueFor, directTransition, machineOf, OPERATORS } from '../core/stateMachine';
+import { libraryOutline, shapeById, SHAPE_LIBRARY } from '../core/emitters';
 import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
-import type { ConditionOp, EasingCurve, InputType, InputValue, ModifierKind, Project, SmCondition } from '../core/types';
+import {
+  duplicateLayer, makeGroup, makeLimb, makeShapeLayer, makeSvgLayer, removeLayer, reorderLayer,
+  setAppearance, setAttachment, setMorph, topZ, writeValue, type AppearanceRange,
+} from '../core/layers';
+import { looksLikeSvg } from '../core/svg';
+import { COMP_MAX, COMP_MIN, COMP_PRESETS, compOf } from '../core/comp';
+import { MORPH_MODE_NAMES, type MorphMode } from '../core/easing';
+import { parseHex } from '../core/color';
+import type { ColorStop, ConditionOp, EasingCurve, InputType, InputValue, KeyValue, LineCap, LineJoin, ModifierKind, Project, RigNode, SmCondition, Vec2 } from '../core/types';
 
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
@@ -21,6 +28,12 @@ export const TOOL_NAMES = [
   'add_timeline', 'set_camera', 'remove_keyframe', 'move_keyframe', 'edit_preset',
   'add_emitter', 'set_effect_range', 'set_shape', 'set_emitter_parts',
   'add_input', 'add_transition',
+  // freeform layers, paint, shape morphs, limbs, the canvas and states — see TOOL_DOCS
+  'add_layer', 'add_svg', 'remove_layer', 'duplicate_layer', 'reorder_layer',
+  'set_layer_visibility', 'set_layer_lock', 'set_layer_attachment', 'set_layer_appearance_range',
+  'set_svg_fill', 'set_svg_stroke', 'set_svg_stroke_width', 'set_shape_morph',
+  'set_hand_points', 'set_hand_rig', 'set_leg_points', 'set_leg_rig',
+  'set_composition', 'set_state', 'set_transition',
 ] as const;
 
 /** The JSON the model must produce. Ollama enforces this shape server-side via `format`. */
@@ -87,8 +100,10 @@ set_effect_range      { effect, startMs?, endMs? }
                       // effect = an effect's or emitter's name. Times are from the start of its
                       // scope \u2014 the clip it belongs to, or the timeline. Omit both to run always.
 
-set_shape             { nodeId, shape: "circle"|"pill"|"rect"|"polygon"|"star", points?, innerRatio?,
-                        cornerRadius?, vertexRadius?, rotation?, atMs? }
+set_shape             { nodeId, shape, points?, innerRatio?, cornerRadius?, vertexRadius?, rotation?, atMs? }
+                      // shape is any id from the shape library: ${SHAPE_LIBRARY.filter((s) => s.outline).map((s) => s.id).join(', ')},
+                      // or any artwork id listed under set_emitter_parts. On the body this changes
+                      // the MASCOT's shape \u2014 pebble, capsule (the pill), roundedRect, blob, octopus.
                       // gives a layer an outline. With atMs it is a keyframe, and two keyframes
                       // holding different shapes MORPH \u2014 that is how an eye becomes a star.
                       // points: sides, or a star's points. innerRatio: a star's waist, 0.05-0.9.
@@ -113,7 +128,51 @@ add_transition        { from, to, conditions: [{ input, operator, value? }], log
                       // logic is "AND" (default) or "OR" across several conditions.
                       // This is how behaviour is authored: "look at me when I'm typing" is an
                       // isTyping Boolean plus watching -> observing when it is true, NEVER a call
-                      // that plays an animation. The machine decides which state is active.`.trim()
+                      // that plays an animation. The machine decides which state is active.
+set_state             { state }                                // make that state (timeline) the active one
+set_transition        { to, from?: "current"|"any"|<state>, durationMs?, easing?, input? }
+                      // CURRENT -> TARGET as ONE direct edge, on a String input "state" set to the
+                      // target's name (created if missing). from defaults to "current" — the active
+                      // state. "any" adds one direct edge from every other state. Never chain
+                      // through states in between: Excited -> Angry is one call, not three.
+
+LAYERS — every object is a real animation layer. nodeId takes a layer's id or its name.
+Positions are px, +x right, +y DOWN: from the composition centre for a WORLD layer, from the
+body centre for one attached to the MASCOT.
+add_layer             { type: "shape"|"hand"|"leg"|"group", shape?, name?, x?, y?, width?, height?,
+                        fill?, attach?: "world"|"mascot", side?: "left"|"right"|"both" }
+                      // shape: a shape library id (see set_shape). fill: [r,g,b] or "#rrggbb".
+                      // "hand" / "leg" add rubber-hose limbs to the body, both sides by default.
+add_svg               { markup, name?, x?, y?, attach? }       // a whole <svg>…</svg>; becomes vector paths
+remove_layer          { nodeId }
+duplicate_layer       { nodeId }
+reorder_layer         { nodeId, to: "front"|"back"|"forward"|"backward" }  // the one draw order
+set_layer_visibility  { nodeId, visible }                      // the layer list's eye, not animated
+set_layer_lock        { nodeId, locked }
+set_layer_attachment  { nodeId, mode: "world"|"mascot", anchor? }
+                      // "mascot" makes it follow the head (anchor defaults to the body); it lands ON
+                      // the sphere, so surface.yaw / surface.pitch then carry it round the head.
+                      // Either way it keeps its place on screen.
+set_layer_appearance_range { nodeId, startMs?, endMs?, fadeInMs?, fadeOutMs?, clear? }
+                      // absolute ms: when the layer EXISTS. Keyframe "opacity" for how it looks.
+set_svg_fill          { nodeId, color?, opacity?, enabled?, atMs? }
+set_svg_stroke        { nodeId, color?, width?, opacity?, enabled?, cap?, join?, atMs? }
+set_svg_stroke_width  { nodeId, width, atMs? }
+                      // fill and stroke are separate tracks: with atMs each writes a keyframe, so
+                      // "fill blue -> pink while the stroke goes black -> white" is four calls.
+set_shape_morph       { nodeId, atMs, mode: ${MORPH_MODE_NAMES.map((m) => `"${m}"`).join('|')}, durationMs? }
+                      // how the shape keyframe at atMs becomes the next one; durationMs moves the next
+set_hand_points       { nodeId, shoulder?: {x,y}, hand?: {x,y}, atMs? }       // body px, +y down
+set_hand_rig          { nodeId, rubberHose?, length?, thickness?, bend?, roundness?, taper?, atMs? }
+set_leg_points        { nodeId, hip?: {x,y}, knee?: {x,y}, ankle?: {x,y}, atMs? }
+set_leg_rig           { nodeId, rubberHose?, length?, thickness?, bend?, roundness?, taper?,
+                        footAngle?, footLength?, footWidth?, atMs? }
+                      // a hand has exactly two points and a leg three. length is the hose's own
+                      // length in px and it is KEPT (Cavalry-style): points closer than it make
+                      // the limb bend, further and it straightens without stretching. So "longer"
+                      // and "bend more" are both a longer length (~+30%), or the points closer.
+                      // bend: its sign flips the side, ±1 a smooth arc, 0 a sharp elbow.
+set_composition       { width?, height?, preset?: ${COMP_PRESETS.map((c) => `"${c.width}x${c.height}"`).join('|')} }`.trim()
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A property the copilot may write: on a node, and a number. */
@@ -234,6 +293,49 @@ function findNode(p: Project, ref: unknown): string | undefined {
   return Object.values(p.rig.nodes).find((n) => n.name.toLowerCase() === lower)?.id;
 }
 
+/** A layer by id or name — `findNode`, returning the node itself. */
+const layerOf = (p: Project, ref: unknown): RigNode | undefined => {
+  const id = findNode(p, ref);
+  return id ? p.rig.nodes[id] : undefined;
+};
+
+/** [r,g,b], "#rrggbb" or {r,g,b} — however a model writes a colour. */
+function colorOf(v: unknown): ColorStop | undefined {
+  if (Array.isArray(v) && v.length >= 3 && v.slice(0, 3).every((x) => typeof x === 'number' && Number.isFinite(x))) {
+    const [r, g, b, a] = v as number[];
+    const c = (x: number) => Math.round(Math.min(255, Math.max(0, x)));
+    return { r: c(r), g: c(g), b: c(b), a: typeof a === 'number' ? Math.min(1, Math.max(0, a > 1 ? a / 255 : a)) : 1 };
+  }
+  if (typeof v === 'string' && /^#?[0-9a-f]{6}$|^#?[0-9a-f]{3}$/i.test(v.trim())) return parseHex(v.trim());
+  if (v && typeof v === 'object' && 'r' in v) return colorOf([(v as ColorStop).r, (v as ColorStop).g, (v as ColorStop).b, (v as ColorStop).a ?? 1]);
+  return undefined;
+}
+
+/** {x,y} or [x,y]. */
+function ptOf(v: unknown): Vec2 | undefined {
+  if (Array.isArray(v) && num(v[0]) !== undefined && num(v[1]) !== undefined) return { x: v[0], y: v[1] };
+  if (v && typeof v === 'object' && num((v as Vec2).x) !== undefined && num((v as Vec2).y) !== undefined) return { x: (v as Vec2).x, y: (v as Vec2).y };
+  return undefined;
+}
+
+const LIMB_POINTS = { arm: { shoulder: 'a', hand: 'b' }, leg: { hip: 'a', knee: 'b', ankle: 'c' } } as const;
+const LIMB_DIALS: Record<string, string> = {
+  length: 'limb.length', thickness: 'limb.thickness', bend: 'limb.bend', roundness: 'limb.roundness', taper: 'limb.taper',
+  footAngle: 'limb.foot.angle', footLength: 'limb.foot.length', footWidth: 'limb.foot.width',
+};
+const CAPS: LineCap[] = ['butt', 'round', 'square'];
+const JOINS: LineJoin[] = ['miter', 'round', 'bevel'];
+const ADD_TYPES = ['shape', 'hand', 'leg', 'group'] as const;
+const REORDER = ['front', 'back', 'forward', 'backward'] as const;
+
+/** A limb of the given type, found by id or name — or why not. */
+function limbCheck(p: Project, ref: unknown, type: 'arm' | 'leg'): string | null {
+  const n = layerOf(p, ref);
+  if (!n) return `no layer "${String(ref)}"`;
+  if (n.limb?.type !== type) return `"${n.name}" is not a ${type === 'arm' ? 'hand' : 'leg'} — add one with add_layer { type: "${type === 'arm' ? 'hand' : 'leg'}" }`;
+  return null;
+}
+
 /**
  * Rewrites the forgiving forms of a call into the exact ones before validation:
  * layer names become ids, and the aliases models reach for become the real argument
@@ -300,15 +402,27 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
 export function validateBatch(p: Project, calls: ToolCall[]): (string | null)[] {
   const view: Project = {
     ...p,
+    rig: { ...p.rig, nodes: { ...p.rig.nodes } },
     presets: [...p.presets],
     expressions: [...p.expressions],
-    timelines: [...p.timelines],
+    // tracks copied per timeline, so a stand-in track below never lands in the real project
+    timelines: p.timelines.map((t) => ({ ...t, tracks: [...t.tracks] })),
     stateMachine: { ...machineOf(p), inputs: [...machineOf(p).inputs] },
   };
   return calls.map((call) => {
     const problem = validate(view, call);
     if (problem) return problem;
     const a = call.args ?? {};
+    // "add a star, then make it fade in" names a layer the first call has not made yet
+    for (const n of plannedLayers(view, call)) view.rig.nodes[n.id] = n;
+    // and "key a shape, then say how it morphs" names a keyframe it has not made yet
+    if (call.name === 'set_shape' && num(a.atMs) !== undefined) {
+      const id = findNode(view, a.nodeId), tl = activeTimeline(view);
+      if (id && !activeTrackFor(tl, id, 'shape.path', num(a.atMs)!)) {
+        tl.tracks.push({ id: `__planned_${id}`, nodeId: id, property: 'shape.path', blockId: blockAt(tl, num(a.atMs)!)?.id,
+          keyframes: [{ id: '__k', time: num(a.atMs)!, value: '', easingOut: { type: 'linear' } }] });
+      }
+    }
     if (call.name === 'create_preset') view.presets.push({ id: uid('p'), name: String(a.name), source: 'custom', durationMs: 0, tracks: [] });
     if (call.name === 'create_expression') view.expressions.push({ id: uid('x'), name: String(a.name), snapshot: {} });
     // a batch that adds a state (or an input) and then references it is the normal shape
@@ -320,6 +434,44 @@ export function validateBatch(p: Project, calls: ToolCall[]): (string | null)[] 
     }
     return null;
   });
+}
+
+/**
+ * The layers an add_layer / add_svg call will create, exactly as applyCalls builds them —
+ * names included, so a later call in the same batch can find them by name.
+ */
+function plannedLayers(p: Project, call: ToolCall): RigNode[] {
+  const a = call.args ?? {};
+  if (call.name === 'add_svg') {
+    const made = makeSvgLayer(String(a.markup ?? ''), str(a.name));
+    return made ? [placed(p, made.node, a)] : [];
+  }
+  if (call.name !== 'add_layer') return [];
+  const type = String(a.type ?? 'shape');
+  const root = p.rig.rootId;
+  if (type === 'hand' || type === 'leg') {
+    const sides: (-1 | 1)[] = a.side === 'left' ? [-1] : a.side === 'right' ? [1] : [-1, 1];
+    return sides.map((s) => makeLimb(type === 'hand' ? 'arm' : 'leg', s, root, str(a.name) && sides.length === 1 ? { name: str(a.name)! } : {}));
+  }
+  if (type === 'group') return [placed(p, makeGroup(null, { name: str(a.name) ?? 'Group' }), a)];
+  const shape = str(a.shape) && shapeById(str(a.shape)!) ? str(a.shape)! : 'circle';
+  const node = makeShapeLayer('circle', { name: str(a.name) ?? shapeById(shape)?.name ?? 'Shape', shape: { kind: shape } });
+  node.shapePath = libraryOutline(shape) ?? node.shapePath;
+  const w = num(a.width), h = num(a.height);
+  if (w || h) node.size = { x: Math.max(1, w ?? h ?? 96), y: Math.max(1, h ?? w ?? 96) };
+  const fill = colorOf(a.fill ?? a.color);
+  if (fill) node.color = fill;
+  return [placed(p, node, a)];
+}
+
+/** Where a new layer goes: world by default, or on the mascot; x/y from that frame's centre. */
+function placed(p: Project, node: RigNode, a: Record<string, unknown>): RigNode {
+  const onMascot = a.attach === 'mascot';
+  return {
+    ...node,
+    parentId: onMascot ? p.rig.rootId : null,
+    surface: { ...node.surface, mapped: false, flatOffset: { x: num(a.x) ?? node.surface.flatOffset?.x ?? 0, y: num(a.y) ?? node.surface.flatOffset?.y ?? 0 } },
+  };
 }
 
 /** Shared by create_preset and edit_preset — an unknown layer here is silent otherwise:
@@ -433,9 +585,111 @@ export function validate(p: Project, call: ToolCall): string | null {
     case 'set_effect_range':
       return findEffect(p, a.effect) ? null : `no effect or emitter called "${String(a.effect)}"`;
     case 'set_shape': {
-      const bad = node(a.nodeId);
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      if (n.kind === 'limb' || n.kind === 'group') return `"${n.name}" is a ${n.kind} and has no outline to set`;
+      return shapeById(String(a.shape)) ? null : `shape must be a shape library id: ${SHAPE_LIBRARY.map((s) => s.id).join(', ')}`;
+    }
+    case 'add_layer': {
+      if (!(ADD_TYPES as readonly string[]).includes(String(a.type ?? 'shape'))) return `type must be one of ${ADD_TYPES.join(', ')}`;
+      if (a.shape !== undefined && !shapeById(String(a.shape))) return `no shape "${String(a.shape)}" — use a shape library id: ${SHAPE_LIBRARY.map((s) => s.id).join(', ')}`;
+      if (a.attach !== undefined && a.attach !== 'world' && a.attach !== 'mascot') return 'attach must be "world" or "mascot"';
+      if ((a.fill ?? a.color) !== undefined && !colorOf(a.fill ?? a.color)) return 'fill must be [r,g,b] or "#rrggbb"';
+      return null;
+    }
+    case 'add_svg':
+      if (!looksLikeSvg(String(a.markup ?? ''))) return 'markup must be a whole <svg>…</svg>';
+      return makeSvgLayer(String(a.markup)) ? null : 'that SVG could not be read';
+    case 'remove_layer':
+    case 'duplicate_layer': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      return n.id === p.rig.rootId ? `the body cannot be ${call.name === 'remove_layer' ? 'removed' : 'duplicated'}` : null;
+    }
+    case 'reorder_layer':
+      if (!layerOf(p, a.nodeId)) return `no layer "${String(a.nodeId)}"`;
+      return (REORDER as readonly string[]).includes(String(a.to)) || num(a.to) !== undefined ? null : `to must be one of ${REORDER.join(', ')}`;
+    case 'set_layer_visibility':
+    case 'set_layer_lock': {
+      if (!layerOf(p, a.nodeId)) return `no layer "${String(a.nodeId)}"`;
+      const flag = call.name === 'set_layer_lock' ? a.locked : a.visible;
+      return typeof flag === 'boolean' ? null : `${call.name === 'set_layer_lock' ? 'locked' : 'visible'} must be true or false`;
+    }
+    case 'set_layer_attachment': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      if (n.id === p.rig.rootId) return 'the body is the mascot — it cannot be attached to itself';
+      if (a.mode !== 'world' && a.mode !== 'mascot') return 'mode must be "world" or "mascot"';
+      if (a.anchor !== undefined && !layerOf(p, a.anchor)) return `no layer "${String(a.anchor)}" to anchor to`;
+      return null;
+    }
+    case 'set_layer_appearance_range': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      if (n.id === p.rig.rootId) return 'the body is always on screen';
+      const keys = ['startMs', 'endMs', 'fadeInMs', 'fadeOutMs'].filter((k) => a[k] !== undefined);
+      if (!keys.length && a.clear !== true) return 'give startMs/endMs (and optionally fadeInMs/fadeOutMs), or clear: true';
+      return keys.every((k) => num(a[k]) !== undefined && num(a[k])! >= 0) ? null : `${keys.join(', ')} must be numbers >= 0`;
+    }
+    case 'set_svg_fill':
+    case 'set_svg_stroke':
+    case 'set_svg_stroke_width': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      if (n.kind === 'group') return `"${n.name}" is a group and has no paint`;
+      if (a.color !== undefined && !colorOf(a.color)) return 'color must be [r,g,b] or "#rrggbb"';
+      if (call.name === 'set_svg_stroke_width') return num(a.width) !== undefined && num(a.width)! >= 0 ? null : 'width must be a number >= 0';
+      if (a.cap !== undefined && !CAPS.includes(a.cap as LineCap)) return `cap must be one of ${CAPS.join(', ')}`;
+      if (a.join !== undefined && !JOINS.includes(a.join as LineJoin)) return `join must be one of ${JOINS.join(', ')}`;
+      const any = ['color', 'opacity', 'enabled', 'width', 'cap', 'join'].some((k) => a[k] !== undefined);
+      return any ? null : `${call.name} needs at least one of color, opacity, enabled${call.name === 'set_svg_stroke' ? ', width, cap, join' : ''}`;
+    }
+    case 'set_shape_morph': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      if (!MORPH_MODE_NAMES.includes(a.mode as MorphMode)) return `mode must be one of ${MORPH_MODE_NAMES.join(', ')}`;
+      if (num(a.atMs) === undefined) return 'atMs must be a number — the time of a shape keyframe';
+      return activeTrackFor(activeTimeline(p), n.id, 'shape.path', num(a.atMs)!) ? null : `"${n.name}" has no shape keyframes — set_shape with atMs first`;
+    }
+    case 'set_hand_points':
+    case 'set_leg_points': {
+      const type = call.name === 'set_hand_points' ? 'arm' : 'leg';
+      const bad = limbCheck(p, a.nodeId, type);
       if (bad) return bad;
-      return PRIMITIVE_SHAPES.includes(a.shape as never) ? null : `shape must be one of ${PRIMITIVE_SHAPES.join(', ')}`;
+      const names = Object.keys(LIMB_POINTS[type]);
+      const given = names.filter((k) => a[k] !== undefined);
+      if (!given.length) return `give at least one of ${names.join(', ')} as {x, y}`;
+      return given.every((k) => ptOf(a[k])) ? null : `${given.join(', ')} must each be {x, y}`;
+    }
+    case 'set_hand_rig':
+    case 'set_leg_rig': {
+      const type = call.name === 'set_hand_rig' ? 'arm' : 'leg';
+      const bad = limbCheck(p, a.nodeId, type);
+      if (bad) return bad;
+      const dials = Object.keys(LIMB_DIALS).filter((k) => type === 'leg' || !k.startsWith('foot'));
+      const given = dials.filter((k) => a[k] !== undefined);
+      if (!given.length && a.rubberHose === undefined) return `give at least one of rubberHose, ${dials.join(', ')}`;
+      return given.every((k) => num(a[k]) !== undefined) ? null : `${given.join(', ')} must be numbers`;
+    }
+    case 'set_composition': {
+      if (a.preset !== undefined && !COMP_PRESETS.some((c) => `${c.width}x${c.height}` === String(a.preset).replace(/\s|×/g, 'x').replace(/x+/g, 'x'))) return `preset must be one of ${COMP_PRESETS.map((c) => `${c.width}x${c.height}`).join(', ')}`;
+      if (a.preset === undefined && a.width === undefined && a.height === undefined) return 'set_composition needs width, height or a preset';
+      for (const k of ['width', 'height'] as const) {
+        if (a[k] !== undefined && !(num(a[k])! >= COMP_MIN && num(a[k])! <= COMP_MAX)) return `${k} must be ${COMP_MIN}-${COMP_MAX}`;
+      }
+      return null;
+    }
+    case 'set_state':
+      return findState(p, a.state) ? null : `no state "${String(a.state)}" — the states are ${p.timelines.map((t) => t.name).join(', ')}`;
+    case 'set_transition': {
+      const to = findState(p, a.to);
+      if (!to) return `no state "${String(a.to)}"`;
+      const from = a.from === undefined || a.from === 'current' || a.from === 'any' ? null : findState(p, a.from);
+      if (a.from !== undefined && a.from !== 'current' && a.from !== 'any' && !from) return `no state "${String(a.from)}"`;
+      if ((from?.id ?? p.activeTimelineId) === to.id && a.from !== 'any') return `already in "${to.name}" — say which state to come from`;
+      const input = str(a.input) && machineOf(p).inputs.find((i) => i.name === str(a.input));
+      if (input && (input.type === 'Boolean' || input.type === 'Event')) return `"${input.name}" is ${input.type}; a direct transition needs a String or Numeric input`;
+      return null;
     }
     case 'set_emitter_parts': {
       const hit = findEffect(p, a.emitter);
@@ -509,7 +763,48 @@ export function describe(p: Project, call: ToolCall): string {
       return `Emit ${(a.glyphs as string[]).slice(0, 4).join(' ')} on a ${a.path ?? 'arc'} path${where} — "${a.name}"`;
     }
     case 'set_shape':
-      return `Make ${name(a.nodeId)} a ${a.shape}${a.atMs !== undefined ? ` at ${at(a.atMs)} — morphs from whatever it was` : ''}`;
+      return `Make ${name(a.nodeId)} a ${shapeById(String(a.shape))?.name ?? a.shape}${a.atMs !== undefined ? ` at ${at(a.atMs)} — morphs from whatever it was` : ''}`;
+    case 'add_layer': {
+      const type = String(a.type ?? 'shape');
+      if (type === 'hand' || type === 'leg') return `Add ${a.side === 'left' || a.side === 'right' ? `a ${a.side}` : 'both'} rubber-hose ${type === 'hand' ? 'hand' : 'leg'}${a.side === 'left' || a.side === 'right' ? '' : 's'}`;
+      if (type === 'group') return `Add a group${a.name ? ` "${a.name}"` : ''}`;
+      return `Add a ${shapeById(String(a.shape ?? 'circle'))?.name.toLowerCase() ?? 'shape'} layer${a.name ? ` "${a.name}"` : ''}${a.attach === 'mascot' ? ' on the mascot' : ''}`;
+    }
+    case 'add_svg': return `Add an SVG layer${a.name ? ` "${a.name}"` : ''}${a.attach === 'mascot' ? ' on the mascot' : ''}`;
+    case 'remove_layer': return `Remove ${name(a.nodeId)}`;
+    case 'duplicate_layer': return `Duplicate ${name(a.nodeId)}`;
+    case 'reorder_layer': return `Move ${name(a.nodeId)} ${a.to === 'front' || a.to === 'back' ? `to the ${a.to}` : a.to}`;
+    case 'set_layer_visibility': return `${a.visible ? 'Show' : 'Hide'} ${name(a.nodeId)}`;
+    case 'set_layer_lock': return `${a.locked ? 'Lock' : 'Unlock'} ${name(a.nodeId)}`;
+    case 'set_layer_attachment': return a.mode === 'world'
+      ? `Detach ${name(a.nodeId)} into world space, where it is now`
+      : `Attach ${name(a.nodeId)} to ${a.anchor ? name(a.anchor) : 'the mascot'}, so it follows it`;
+    case 'set_layer_appearance_range': return a.clear
+      ? `Show ${name(a.nodeId)} for the whole timeline`
+      : `Show ${name(a.nodeId)} ${a.startMs !== undefined ? `from ${at(a.startMs)} ` : ''}${a.endMs !== undefined ? `to ${at(a.endMs)}` : ''}${a.fadeInMs ? `, fading in ${a.fadeInMs}ms` : ''}${a.fadeOutMs ? `, out ${a.fadeOutMs}ms` : ''}`.trim();
+    case 'set_svg_fill': return `${name(a.nodeId)} fill${a.color !== undefined ? ` ${colorName(a.color)}` : ''}${a.opacity !== undefined ? ` at ${a.opacity} opacity` : ''}${a.enabled === false ? ' off' : ''}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'set_svg_stroke': return `${name(a.nodeId)} stroke${a.color !== undefined ? ` ${colorName(a.color)}` : ''}${a.width !== undefined ? ` ${a.width}px` : ''}${a.enabled === false ? ' off' : ''}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'set_svg_stroke_width': return `${name(a.nodeId)} stroke width ${a.width}px${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'set_shape_morph': return `Morph ${name(a.nodeId)}'s shape at ${at(a.atMs)} with ${String(a.mode)}${a.durationMs !== undefined ? ` over ${a.durationMs}ms` : ''}`;
+    case 'set_hand_points':
+    case 'set_leg_points': {
+      const keys = Object.keys(LIMB_POINTS[call.name === 'set_hand_points' ? 'arm' : 'leg']).filter((k) => ptOf(a[k]));
+      return `Move ${name(a.nodeId)}'s ${keys.map((k) => `${k} to ${ptOf(a[k])!.x},${ptOf(a[k])!.y}`).join(', ')}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    }
+    case 'set_hand_rig':
+    case 'set_leg_rig': {
+      const bits = [
+        a.rubberHose !== undefined ? `rubber hose ${a.rubberHose ? 'on' : 'off'}` : null,
+        ...Object.keys(LIMB_DIALS).filter((k) => num(a[k]) !== undefined).map((k) => `${k} ${a[k]}`),
+      ].filter(Boolean);
+      return `${name(a.nodeId)}: ${bits.join(', ')}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    }
+    case 'set_composition': return `Canvas ${a.preset ?? `${a.width ?? compOf(p).width}×${a.height ?? compOf(p).height}`}`;
+    case 'set_state': return `Switch to the "${named(findState(p, a.state), a.state)}" state`;
+    case 'set_transition': {
+      const from = a.from === 'any' ? 'any state' : a.from && a.from !== 'current' ? named(findState(p, a.from), a.from) : `${p.timelines.find((t) => t.id === p.activeTimelineId)?.name ?? 'the current state'} (current)`;
+      return `${from} → ${named(findState(p, a.to), a.to)} directly${a.durationMs !== undefined ? `, ${a.durationMs}ms` : ''}`;
+    }
     case 'set_emitter_parts':
       return `"${a.emitter}" throws ${(a.parts as { shape: string }[]).map((x) => x.shape).join(', ')}`;
     case 'set_effect_range':
@@ -531,6 +826,8 @@ export function describe(p: Project, call: ToolCall): string {
   }
 }
 
+const colorName = (v: unknown) => { const c = colorOf(v); return c ? `rgb(${c.r}, ${c.g}, ${c.b})` : String(v); };
+
 const EYE_MAP: Record<string, string> = {
   openness: 'eye.openness', distanceFromCenter: 'eye.distanceFromCenter', length: 'transform.length',
   scaleX: 'transform.scale.x', scaleY: 'transform.scale.y', rotation: 'transform.rotation',
@@ -539,10 +836,102 @@ const EYE_MAP: Record<string, string> = {
 /** Applies a validated batch as ONE undo step. */
 export function applyCalls(calls: ToolCall[]) {
   const store = useEditor.getState();
+  const playhead = store.playhead;
   store.commit((p) => {
+    // a value at atMs is a keyframe; with no atMs it lands where it will show at the
+    // playhead — into the track driving it there, or onto the resting pose
+    const put = (nodeId: string, prop: string, v: KeyValue, a: Record<string, unknown>) => {
+      if (num(a.atMs) !== undefined) writeKeyframe(p, nodeId, prop, num(a.atMs)!, v, easingOf(a.easing));
+      else writeValue(p, nodeId, prop, v, playhead);
+    };
+    // names resolve at apply time too: a layer made earlier in this batch has an id now
+    const nid = (ref: unknown) => findNode(p, ref) ?? String(ref);
     for (const call of calls) {
       const a = call.args ?? {};
       switch (call.name) {
+        case 'add_layer':
+        case 'add_svg': {
+          for (const n of plannedLayers(p, call)) {
+            if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
+            p.rig.nodes[n.id] = n;
+          }
+          break;
+        }
+        case 'remove_layer': removeLayer(p, nid(a.nodeId)); break;
+        case 'duplicate_layer': duplicateLayer(p, nid(a.nodeId)); break;
+        case 'reorder_layer': reorderLayer(p, nid(a.nodeId), num(a.to) ?? (a.to as 'front')); break;
+        case 'set_layer_visibility': { const n = p.rig.nodes[nid(a.nodeId)]; if (n) n.visible = a.visible === true; break; }
+        case 'set_layer_lock': { const n = p.rig.nodes[nid(a.nodeId)]; if (n) n.locked = a.locked === true; break; }
+        case 'set_layer_attachment':
+          setAttachment(p, nid(a.nodeId), a.mode as 'world' | 'mascot', a.anchor === undefined ? undefined : nid(a.anchor), playhead);
+          break;
+        case 'set_layer_appearance_range': {
+          if (a.clear === true) { setAppearance(p, nid(a.nodeId), null, playhead); break; }
+          const range: AppearanceRange = {};
+          for (const k of ['startMs', 'endMs', 'fadeInMs', 'fadeOutMs'] as const) if (num(a[k]) !== undefined) range[k] = num(a[k]);
+          setAppearance(p, nid(a.nodeId), range, num(a.startMs) ?? playhead);
+          break;
+        }
+        case 'set_svg_fill': {
+          const id = nid(a.nodeId);
+          const c = colorOf(a.color);
+          if (c) put(id, 'color', c, a);
+          if (num(a.opacity) !== undefined) put(id, 'fill.opacity', Math.min(1, Math.max(0, num(a.opacity)!)), a);
+          if (typeof a.enabled === 'boolean') put(id, 'fill.enabled', a.enabled ? 1 : 0, a);
+          break;
+        }
+        case 'set_svg_stroke':
+        case 'set_svg_stroke_width': {
+          const id = nid(a.nodeId);
+          const c = colorOf(a.color);
+          // asking for a stroke's colour or width is asking for a stroke
+          if (typeof a.enabled === 'boolean') put(id, 'stroke.enabled', a.enabled ? 1 : 0, a);
+          else if (c || num(a.width) !== undefined) put(id, 'stroke.enabled', 1, a);
+          if (c) put(id, 'stroke.color', c, a);
+          if (num(a.width) !== undefined) put(id, 'stroke.width', Math.max(0, num(a.width)!), a);
+          if (num(a.opacity) !== undefined) put(id, 'stroke.opacity', Math.min(1, Math.max(0, num(a.opacity)!)), a);
+          const n = p.rig.nodes[id];
+          if (n && (a.cap || a.join)) n.stroke = { ...n.stroke, ...(a.cap ? { lineCap: a.cap as LineCap } : {}), ...(a.join ? { lineJoin: a.join as LineJoin } : {}) };
+          break;
+        }
+        case 'set_shape_morph':
+          setMorph(p, nid(a.nodeId), num(a.atMs)!, a.mode as MorphMode, num(a.durationMs));
+          break;
+        case 'set_hand_points':
+        case 'set_leg_points': {
+          const id = nid(a.nodeId);
+          const map = LIMB_POINTS[call.name === 'set_hand_points' ? 'arm' : 'leg'] as Record<string, string>;
+          for (const [word, key] of Object.entries(map)) {
+            const pt = ptOf(a[word]);
+            if (!pt) continue;
+            put(id, `limb.${key}.x`, pt.x, a);
+            put(id, `limb.${key}.y`, pt.y, a);
+          }
+          break;
+        }
+        case 'set_hand_rig':
+        case 'set_leg_rig': {
+          const id = nid(a.nodeId);
+          if (a.rubberHose !== undefined) put(id, 'limb.hose', a.rubberHose ? 1 : 0, a);
+          for (const [k, prop] of Object.entries(LIMB_DIALS)) if (num(a[k]) !== undefined) put(id, prop, num(a[k])!, a);
+          break;
+        }
+        case 'set_composition': {
+          const preset = COMP_PRESETS.find((c) => `${c.width}x${c.height}` === String(a.preset ?? '').replace(/\s|×/g, 'x').replace(/x+/g, 'x'));
+          const cur = compOf(p);
+          p.composition = compOf({ composition: { width: preset?.width ?? num(a.width) ?? cur.width, height: preset?.height ?? num(a.height) ?? cur.height } });
+          break;
+        }
+        case 'set_state': p.activeTimelineId = findState(p, a.state)!.id; break;
+        case 'set_transition': {
+          const to = findState(p, a.to)!;
+          const from = a.from && a.from !== 'current' && a.from !== 'any' ? findState(p, a.from)!.id : p.activeTimelineId;
+          directTransition(p, from, to.id, {
+            durationMs: num(a.durationMs) ?? to.transitionMs ?? 300, easing: easingOf(a.easing),
+            fromAny: a.from === 'any', ...(str(a.input) ? { input: str(a.input) } : {}),
+          });
+          break;
+        }
         case 'set_eye_params': {
           for (const [k, prop] of Object.entries(EYE_MAP)) {
             const v = num(a[k]);
@@ -626,7 +1015,7 @@ export function applyCalls(calls: ToolCall[]) {
           tl.blocks.splice(index, 0, { id: blockId, presetId: preset.id, name: preset.name, durationMs: preset.durationMs });
           // a preset's effects and emitters come with it — "Sleepy" without the zzz is
           // not sleepy, and the copilot placing one must get the same clip the panel does
-          attachPresetEffects(tl, preset, blockId);
+          attachPresetEffects(tl, preset, blockId, p.rig);
           break;
         }
         case 'add_modifier':
@@ -706,22 +1095,19 @@ export function applyCalls(calls: ToolCall[]) {
           break;
         }
         case 'set_shape': {
-          const d = primitivePath(a.shape as PrimitiveShape, {
+          const params = {
             points: num(a.points), innerRatio: num(a.innerRatio),
             cornerRadius: num(a.cornerRadius), vertexRadius: num(a.vertexRadius), rotation: num(a.rotation),
-          });
-          const nodeId = String(a.nodeId);
+          };
+          // any library entry — a generated outline with its dials, or drawn artwork
+          const d = libraryOutline(String(a.shape), params);
+          const nodeId = nid(a.nodeId);
+          if (!d) break;
           if (num(a.atMs) !== undefined) writeKeyframe(p, nodeId, 'shape.path', num(a.atMs)!, d, easingOf(a.easing));
           else {
+            writeValue(p, nodeId, 'shape.path', d, playhead);
             const n2 = p.rig.nodes[nodeId];
-            if (n2) {
-              n2.shapePath = d;
-              n2.shape = {
-                kind: a.shape as 'circle' | 'pill' | 'rect' | 'polygon' | 'star',
-                points: num(a.points), innerRatio: num(a.innerRatio),
-                cornerRadius: num(a.cornerRadius), vertexRadius: num(a.vertexRadius), rotation: num(a.rotation),
-              };
-            }
+            if (n2) n2.shape = { kind: String(a.shape), ...params };
           }
           break;
         }

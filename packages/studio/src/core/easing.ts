@@ -44,6 +44,8 @@ export function applyEasing(curve: EasingCurve, t: number): number {
         const u = t - 2.625 / d;
         return n * u * u + 0.984375;
       }
+      // a cut, not a curve: the value holds until the next keyframe lands
+      if (curve.name === 'hold') return t >= 1 ? 1 : 0;
       if (curve.name === 'elastic') {
         if (t === 0 || t === 1) return t;
         const p = 0.3;
@@ -61,10 +63,38 @@ export function curveHandles(curve: EasingCurve): [Vec2, Vec2] {
   if (curve.type === 'preset' && PRESET_BEZIER[curve.name]) return PRESET_BEZIER[curve.name];
   if (curve.type === 'preset' && curve.name === 'bounce') return [{ x: 0.3, y: 1.4 }, { x: 0.6, y: 1 }];
   if (curve.type === 'preset' && curve.name === 'elastic') return [{ x: 0.2, y: 1.6 }, { x: 0.5, y: 0.9 }];
+  // the nearest a cubic gets to a step: flat, then everything at the very end
+  if (curve.type === 'preset' && curve.name === 'hold') return [{ x: 1, y: 0 }, { x: 1, y: 0 }];
   return [{ x: 1 / 3, y: 1 / 3 }, { x: 2 / 3, y: 2 / 3 }];
 }
 
-export const EASING_NAMES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'bounce', 'elastic'] as const;
+export const EASING_NAMES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'bounce', 'elastic', 'hold'] as const;
+
+/**
+ * How one shape becomes the next, as the easing on the outgoing shape keyframe.
+ *
+ * Not a second interpolation system: a shape keyframe morphs through `lerpValue` like
+ * every other keyframe, and these are named curves for it. `overshoot` and `elastic` carry
+ * the outline past its target and back — core/path.ts extrapolates rather than clamping,
+ * so that reads as a squash rather than a stall.
+ */
+export const MORPH_MODES = {
+  morph: { label: 'Morph', easing: { type: 'preset', name: 'easeInOut' } },
+  cut: { label: 'Cut', easing: { type: 'preset', name: 'hold' } },
+  smooth: { label: 'Smooth morph', easing: { type: 'bezier', p1: { x: 0.65, y: 0 }, p2: { x: 0.35, y: 1 } } },
+  elastic: { label: 'Elastic morph', easing: { type: 'preset', name: 'elastic' } },
+  overshoot: { label: 'Overshoot', easing: { type: 'bezier', p1: { x: 0.34, y: 1.56 }, p2: { x: 0.64, y: 1 } } },
+  ease: { label: 'Ease', easing: { type: 'preset', name: 'easeOut' } },
+} as const satisfies Record<string, { label: string; easing: EasingCurve }>;
+
+export type MorphMode = keyof typeof MORPH_MODES;
+export const MORPH_MODE_NAMES = Object.keys(MORPH_MODES) as MorphMode[];
+
+/** Which named morph a keyframe's easing is, or undefined for a hand-shaped curve. */
+export function morphModeOf(c: EasingCurve): MorphMode | undefined {
+  const s = JSON.stringify(c);
+  return MORPH_MODE_NAMES.find((m) => JSON.stringify(MORPH_MODES[m].easing) === s);
+}
 
 export function namedEasing(name: string): EasingCurve {
   return name === 'linear' ? { type: 'linear' } : { type: 'preset', name: name as 'easeIn' };
@@ -89,6 +119,7 @@ export function easingShape(c: EasingCurve): KeyframeShape {
     case 'easeOut': return 'triangle-right';
     case 'bounce':
     case 'elastic': return 'spring';
+    case 'hold': return 'square';
     default: return 'diamond'; // easeInOut — the common case keeps the familiar shape
   }
 }

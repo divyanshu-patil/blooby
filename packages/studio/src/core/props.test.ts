@@ -5,6 +5,7 @@ import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readEffectProp, readProp, resolveProp
 import { MODIFIER_KINDS, MODIFIERS } from './types';
 import { validate } from '../copilot/tools';
 import { activeTimeline } from './types';
+import { makeLimb } from './layers';
 
 // --- the registries: one table, and everything downstream derives from it -------
 {
@@ -12,6 +13,8 @@ import { activeTimeline } from './types';
   // getProp/setProp, and the property is animatable, inspectable AND known to the agent.
   // These two checks are what make that a guarantee rather than a note in a file.
   const rig = defaultProject().rig;
+  // a leg has every limb property there is — the foot and the ankle included
+  rig.nodes.legProbe = makeLimb('leg', 1, rig.rootId, { id: 'legProbe' });
   // the same guarantee for an effect's own properties, which live on the timeline rather
   // than in the rig and so have their own read/write pair
   const fxProject = defaultProject();
@@ -21,14 +24,17 @@ import { activeTimeline } from './types';
 
   const missing = NUMERIC_PROPS.filter((path) => {
     const spec = PROPS[path];
-    const probe = (spec.range![0] + spec.range![1]) / 2;
+    // the midpoint, snapped to the property's own step — an on/off switch only holds 0 or 1
+    const [min, max, step] = spec.range!;
+    const probe = +(Math.round((min + max) / 2 / step) * step).toFixed(6);
     if (spec.on === 'effect') {
       // amount/frequency/amplitude belong to a modifier, everything else to an emitter
       const id = ['fx.amount', 'fx.frequency', 'fx.amplitude'].includes(path) ? 'probeMod' : 'probeEm';
       writeEffectProp(fxTl, id, path, probe);
       return readEffectProp(fxTl, id, path) !== probe;
     }
-    const nodeId = spec.on === 'camera' ? '__camera' : (path.startsWith('eye.') ? 'eyeL' : rig.rootId);
+    const nodeId = spec.on === 'camera' ? '__camera'
+      : path.startsWith('eye.') ? 'eyeL' : path.startsWith('limb.') ? 'legProbe' : rig.rootId;
     writeProp(rig, nodeId, path, probe);
     return readProp(rig, nodeId, path) !== probe;
   });

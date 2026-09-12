@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useEditor } from '../core/store';
-import { COMP, presetPreviewProject } from '../core/defaults';
+import { compOf, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { MascotThumb } from './Mascot';
 import { Panel } from './bits';
@@ -10,13 +10,13 @@ import { activeTimeline } from '../core/types';
 import { hasBackend } from '../core/catalog';
 import { PublishDialog } from '../cloud/PublishDialog';
 import { assetsApi } from '../cloud/api';
-import { PresetPreview } from './PresetPreview';
+import { PresetPreview, usePresetScene } from './PresetPreview';
 import type { Expression, Preset, Project } from '../core/types';
 
 /** A preset's own pose at its most characteristic moment — the icon *is* the animation. */
 function glyphScene(project: Project, preset: Preset) {
   const temp = presetPreviewProject(project, preset);
-  return sceneAt(temp, characteristicTime(preset), COMP);
+  return sceneAt(temp, characteristicTime(preset), compOf(project));
 }
 
 /** The four places a preset can come from, plus "everything". Official and community
@@ -193,9 +193,15 @@ function PresetChip({ project, preset, onOpen, onRename, onColor, onPublish }: {
   /** absent for anything that is not yours to publish — a builtin has nowhere to go */
   onPublish?: () => void;
 }) {
+  // the still is the preset's most characteristic frame; hovering plays the real thing,
+  // through the same sceneAt the stage uses, so the browse IS the preview
+  const [hover, setHover] = useState(false);
+  const { scene: live, box } = usePresetScene(project, hover ? preset : null);
   return (
     <div className="chip" draggable role="button" tabIndex={0}
       title={`Preview ${preset.name} · ${(preset.durationMs / 1000).toFixed(1)}s — drag straight onto the strip to skip the preview, double-click to rename`}
+      onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}
+      onFocus={() => setHover(true)} onBlur={() => setHover(false)}
       onDragStart={(e) => { e.dataTransfer.setData('text/blooby-preset', preset.id); e.dataTransfer.effectAllowed = 'copy'; }}
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
@@ -207,8 +213,9 @@ function PresetChip({ project, preset, onOpen, onRename, onColor, onPublish }: {
       <input type="color" className="chip-color" title="Accent color — shows on this preset's clips"
         value={preset.color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
         onChange={(e) => onColor(e.target.value)} />
-      <MascotThumb className="glyph" scene={glyphScene(project, preset)} view={COMP} />
-      {preset.name}
+      <MascotThumb className="glyph" scene={live ?? glyphScene(project, preset)} view={compOf(project)} box={live ? box : undefined} />
+      <span className="chip-name">{preset.name}</span>
+      <span className="chip-tag">{preset.tagline ?? ''}</span>
       {onPublish && (
         <button className="chip-pub" title={`Publish "${preset.name}" to the community`}
           onClick={(e) => { e.stopPropagation(); onPublish(); }}>Publish</button>
@@ -287,7 +294,7 @@ export function OtherTimelines() {
         {others.map((t) => (
           <button key={t.id} className="chip" title={`Add all of "${t.name}" as one clip · ${(t.timelineDurationMs / 1000).toFixed(1)}s`}
             onClick={() => addClipFrom({ label: t.name, timeline: t })}>
-            <MascotThumb className="glyph" scene={sceneAt({ ...project, activeTimelineId: t.id }, t.timelineDurationMs * 0.45, COMP)} view={COMP} />
+            <MascotThumb className="glyph" scene={sceneAt({ ...project, activeTimelineId: t.id }, t.timelineDurationMs * 0.45, compOf(project))} view={compOf(project)} />
             {t.name}
           </button>
         ))}

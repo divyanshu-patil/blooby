@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { COMP, MascotThumb, sceneAt, type Project } from '@blooby/studio';
+import { compOf, MascotThumb, sceneAt, type Project } from '@blooby/studio';
 
 /**
  * Plays a splashscreen exactly as a visitor will see it — the same sceneAt() the runtime
@@ -30,7 +30,7 @@ export function SplashPreview({ data, background, durationMs, fadeMs, playKey }:
   }, [durationMs, playKey, data]);
 
   const scene = (() => {
-    try { return data ? sceneAt(data as Project, t, COMP) : null; } catch { return null; }
+    try { return data ? sceneAt(data as Project, t, compOf(data as Project)) : null; } catch { return null; }
   })();
 
   return (
@@ -38,7 +38,7 @@ export function SplashPreview({ data, background, durationMs, fadeMs, playKey }:
       {scene
         ? (
           <div style={{ width: '58%', opacity: fading ? 0 : 1, transition: `opacity ${fadeMs}ms ease` }}>
-            <MascotThumb scene={scene} view={COMP} />
+            <MascotThumb scene={scene} view={compOf(data as Project)} />
           </div>
         )
         : <p className="splash-preview-empty">This animation can’t be rendered. Choose another source.</p>}

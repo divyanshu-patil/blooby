@@ -50,7 +50,7 @@ const v1Timelines = () => JSON.parse(JSON.stringify({
 {
   const { project, from, applied } = migrateProject(v0Flat());
   it('an unversioned document is recognised as v0', check(from === 0, String(from)));
-  it('and both steps run on it', check(applied.length === 2, applied.join(', ')));
+  it('and every step runs on it', check(applied.length === 4, applied.join(', ')));
   it('it comes out stamped at the current version', check(project.schemaVersion === SCHEMA_VERSION));
 
   it('the flat animation became exactly one timeline', check(project.timelines.length === 1));
@@ -88,6 +88,63 @@ const v1Timelines = () => JSON.parse(JSON.stringify({
   it('the machine starts at the FIRST state, not whichever was last open', check(
     m.initialStateId === 'tl_a', String(m.initialStateId)));
   it('and the editor’s own active timeline is left alone', check(project.activeTimelineId === 'tl_b'));
+}
+
+// --- v2 → v3: freeform layers ---------------------------------------------------
+/**
+ * A v2 document, written out: a mapped sticker carrying a flatOffset the old renderer
+ * never drew, and a track on it. Opening it must not move anything that did not move.
+ */
+const v2Sticker = () => JSON.parse(JSON.stringify({
+  name: 'Sticker', schemaVersion: 2, fps: 30, expressions: [], presets: [],
+  rig: {
+    id: 'r', rootId: 'body', camera: { fov: 28, distance: 6, offset: { x: 0, y: 0 } },
+    nodes: {
+      body: { id: 'body', name: 'Body', kind: 'body', parentId: null, surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: 12, y: 0 } },
+        transform: { scale: { x: 1, y: 1 }, rotation: 0 }, size: { x: 148, y: 148 }, color: { r: 242, g: 239, b: 233, a: 1 }, visible: true, zIndex: 0 },
+      dot: { id: 'dot', name: 'Dot', kind: 'primitive', parentId: 'body', surface: { yaw: 10, pitch: -20, mapped: true, flatOffset: { x: 40, y: 40 } },
+        transform: { scale: { x: 1, y: 1 }, rotation: 0 }, size: { x: 20, y: 20 }, color: { r: 0, g: 0, b: 0, a: 1 }, visible: true, zIndex: 1, primitive: { shape: 'circle' } },
+    },
+  },
+  timelines: [{ id: 'tl', name: 'Idle', modifiers: [], blocks: [], durationMode: 'custom', timelineDurationMs: 1000, loop: false, tracks: [
+    { id: 'a', nodeId: 'dot', property: 'flatOffset.x', keyframes: [{ id: 'k', time: 0, value: 30, easingOut: { type: 'linear' } }] },
+    { id: 'b', nodeId: 'body', property: 'flatOffset.y', keyframes: [{ id: 'k2', time: 0, value: 5, easingOut: { type: 'linear' } }] },
+  ] }],
+  activeTimelineId: 'tl',
+  stateMachine: { id: 'sticker', initialStateId: 'tl', inputs: [], transitions: [] },
+})) as unknown as Project;
+{
+  const { project, from, applied } = migrateProject(v2Sticker());
+  it('a v2 document runs only the steps after it', check(from === 2 && applied.join() === 'freeform layers,showcase presets', applied.join()));
+  it('its composition is pinned at the size it always rendered at', check(project.composition?.width === 720 && project.composition?.height === 720));
+  it('a never-drawn offset on a mapped layer is dropped', check(project.rig.nodes.dot.surface.flatOffset === undefined));
+  it('and so is its track', check(!project.timelines[0].tracks.some((t) => t.nodeId === 'dot')));
+  it('while the body, which is not mapped, keeps its real position and its track', check(
+    project.rig.nodes.body.surface.flatOffset?.x === 12 && project.timelines[0].tracks.some((t) => t.nodeId === 'body')));
+  it('and the sphere placement is untouched', check(project.rig.nodes.dot.surface.yaw === 10 && project.rig.nodes.dot.surface.pitch === -20));
+}
+
+// --- v3 → v4: showcase presets ----------------------------------------------------
+/** A v3 document with the library it was saved with — before the showcase presets. */
+const v3Library = () => JSON.parse(JSON.stringify({
+  name: 'Library', schemaVersion: 3, fps: 30, expressions: [], composition: { width: 720, height: 720 },
+  presets: [
+    { id: 'p_idle', name: 'Idle', source: 'builtin', durationMs: 900, tracks: [], modifiers: [] },
+    { id: 'p_hii', name: 'My own Hii', source: 'custom', durationMs: 500, tracks: [], modifiers: [] },
+  ],
+})) as unknown as Project;
+{
+  const { project, applied } = migrateProject(v3Library());
+  const ids = project.presets.map((x) => x.id);
+  it('a v3 document runs only the showcase step', check(applied.join() === 'showcase presets', applied.join()));
+  it('the showcase presets it lacked are added, first in the library', check(
+    ids.slice(0, 6).join() === 'p_shapeshift,p_sticker,p_peek,p_newshape,p_dance,p_reveal', ids.join()));
+  it('one it already had is kept as it was, not doubled', check(
+    ids.filter((i) => i === 'p_hii').length === 1 && project.presets.find((x) => x.id === 'p_hii')?.name === 'My own Hii'));
+  it('and its own presets are still there', check(ids.includes('p_idle')));
+  const deleted = { ...project, presets: project.presets.filter((x) => x.id !== 'p_peek') };
+  const again = migrateProject(JSON.parse(JSON.stringify(deleted)) as Project).project;
+  it('a showcase preset deleted after the upgrade stays deleted', check(!again.presets.some((x) => x.id === 'p_peek')));
 }
 
 // --- idempotence and the future ------------------------------------------------

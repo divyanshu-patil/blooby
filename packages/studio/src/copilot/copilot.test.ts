@@ -533,7 +533,7 @@ import { activeTimeline } from '../core/types';
   const mk: ToolCall = { name: 'set_shape', args: { nodeId: 'Left eye', shape: 'star', points: 5, atMs: 0 } };
   const staged = normaliseCall(P(), mk);
   it('set_shape validates', check(validate(P(), staged) === null, String(validate(P(), staged))));
-  it('a shape nobody has is refused', check(validate(P(), { name: 'set_shape', args: { nodeId: 'eyeL', shape: 'blob' } }) !== null));
+  it('a shape nobody has is refused', check(validate(P(), { name: 'set_shape', args: { nodeId: 'eyeL', shape: 'trapezoid' } }) !== null));
   ed().addTimeline('CopilotShapes');
   applyCalls([{ name: 'set_shape', args: { nodeId: 'eyeL', shape: 'pill', atMs: 0 } },
               { name: 'set_shape', args: { nodeId: 'eyeL', shape: 'star', points: 5, atMs: 600 } }]);

@@ -10,12 +10,15 @@ import { fmtSec } from '../core/timeline';
  * timeline time. Dragging the middle slides the whole window without resizing it, which is
  * what you want once the length is right and only the timing is wrong.
  */
-export function RangeBar({ spanMs, startMs, endMs, onChange, label }: {
+export function RangeBar({ spanMs, startMs, endMs, onChange, label, snaps }: {
   spanMs: number;
   startMs?: number;
   endMs?: number;
   onChange: (start: number | undefined, end: number | undefined) => void;
   label: string;
+  /** times a handle clicks onto when dragged within a few pixels — keyframes, the
+   *  playhead, clip edges — in the same ms the bar measures in */
+  snaps?: number[];
 }) {
   const bar = useRef<HTMLDivElement>(null);
   const span = Math.max(1, spanMs);
@@ -31,13 +34,20 @@ export function RangeBar({ spanMs, startMs, endMs, onChange, label }: {
     const at = (clientX: number) => Math.round(((clientX - box.left) / box.width) * span);
     const grabbed = at(down.clientX);
     const from = { a, b };
+    // within 6px of something worth landing on, land on it (shift drags freely)
+    const reach = (6 / Math.max(1, box.width)) * span;
+    const snap = (v: number, free: boolean) => {
+      if (free || !snaps?.length) return v;
+      const hit = snaps.reduce((best, s) => (Math.abs(s - v) < Math.abs(best - v) ? s : best), snaps[0]);
+      return Math.abs(hit - v) <= reach ? Math.round(hit) : v;
+    };
 
     const move = (e: PointerEvent) => {
       const d = at(e.clientX) - grabbed;
       // 60ms is about the shortest window that reads as an effect running at all, so the
       // handles refuse to cross rather than silently producing a range nothing evaluates in
-      if (grab === 'a') onChange(Math.max(0, Math.min(from.b - 60, from.a + d)), from.b);
-      else if (grab === 'b') onChange(from.a, Math.min(span, Math.max(from.a + 60, from.b + d)));
+      if (grab === 'a') onChange(Math.max(0, Math.min(from.b - 60, snap(from.a + d, e.shiftKey))), from.b);
+      else if (grab === 'b') onChange(from.a, Math.min(span, Math.max(from.a + 60, snap(from.b + d, e.shiftKey))));
       else {
         const width = from.b - from.a;
         const start = Math.max(0, Math.min(span - width, from.a + d));
@@ -50,7 +60,7 @@ export function RangeBar({ spanMs, startMs, endMs, onChange, label }: {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-  }, [a, b, span, onChange]);
+  }, [a, b, span, onChange, snaps]);
 
   const pct = (v: number) => `${(v / span) * 100}%`;
 

@@ -3,10 +3,12 @@ import { derivedDuration } from './timeline';
 import { primitivePath } from './path';
 import { CONFETTI_COLORS } from './emitters';
 import { SCHEMA_VERSION } from './migrate';
+import { uid } from './id';
+import { COMP } from './comp';
+import { showcasePresets } from './showcase';
 
-export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
-
-export const COMP = { width: 720, height: 720 };
+export { uid } from './id';
+export { COMP, compOf } from './comp';
 
 export const BONE = { r: 242, g: 239, b: 233, a: 1 };
 /** Mood colours the built-in presets animate the body into and back out of. */
@@ -111,6 +113,9 @@ const bothEyes = (property: string, keys: Keyframe[]): Track[] => [
 
 export function builtinPresets(): Preset[] {
   return [
+    // first, so the rail's first rows show what the editor can do now: hands, legs,
+    // stickers, morphs — see core/showcase.ts
+    ...showcasePresets(),
     {
       // no tracks at all — dropped into a sequence it just holds whatever pose already
       // precedes it (the rig's own rest pose if it's first). The "base state" clip §8
@@ -495,10 +500,35 @@ export function makeTimeline(name: string): Timeline {
  * Shared by every path that places a preset — the Presets panel, `appendPreset` below and
  * the copilot's add_preset_to_timeline — because three copies of "and also copy the
  * effects" is three places to forget one.
+ *
+ * `rig` receives the layers the preset brings — the "Hi!" bubble, the waving arm — unless
+ * a layer by that id is already there, in which case the preset animates the one you have.
  */
-export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId: string): void {
+export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId: string, rig?: Rig): void {
   for (const m of preset.modifiers ?? []) timeline.modifiers.push({ ...m, id: uid('m'), blockId });
   for (const e of preset.emitters ?? []) (timeline.emitters ??= []).push({ ...e, id: uid('e'), blockId });
+  if (rig) addPresetLayers(rig, preset);
+  for (const a of preset.appearances ?? []) {
+    // a range narrows a layer to it — so never give one to a layer the user already had
+    // that is always there: placing "Hii!" must not hide their own arm everywhere else
+    const n = rig?.nodes[a.nodeId];
+    if (n && !n.ranged) continue;
+    (timeline.appearances ??= []).push({ ...a, id: uid('ap'), blockId });
+  }
+}
+
+/** A preset's own layers into a rig, reusing any already there. A parent the rig does not
+ *  have (a gallery mascot with no `body`) falls back to the rig's own root. */
+export function addPresetLayers(rig: Rig, preset: Preset): void {
+  const top = Math.max(0, ...Object.values(rig.nodes).map((n) => n.zIndex));
+  for (const layer of preset.layers ?? []) {
+    if (rig.nodes[layer.id]) continue;
+    const copy = structuredClone(layer);
+    if (copy.parentId !== null && !rig.nodes[copy.parentId] && !(preset.layers ?? []).some((l) => l.id === copy.parentId)) copy.parentId = rig.rootId;
+    // limbs tuck behind the body; everything else a preset adds sits on top of the rig
+    if (copy.kind !== 'limb') copy.zIndex = top + 1 + copy.zIndex;
+    rig.nodes[copy.id] = copy;
+  }
 }
 
 /**
@@ -511,8 +541,13 @@ export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId:
  */
 export function presetPreviewProject(project: Project, preset: Preset): Project {
   const tl = project.timelines.find((t) => t.id === project.activeTimelineId) ?? project.timelines[0];
+  // a preset that brings its own layers has to preview with them, or "Hii!" is a mascot
+  // moving an arm it does not have
+  let rig = project.rig;
+  if (preset.layers?.length) { rig = structuredClone(project.rig); addPresetLayers(rig, preset); }
   return {
     ...project,
+    rig,
     timelines: [{
       ...tl,
       tracks: preset.tracks,
@@ -521,6 +556,7 @@ export function presetPreviewProject(project: Project, preset: Preset): Project 
       // the preview IS the clip
       modifiers: (preset.modifiers ?? []).map((m, i) => ({ ...m, id: `pm${i}`, blockId: undefined })),
       emitters: (preset.emitters ?? []).map((e, i) => ({ ...e, id: `pe${i}`, blockId: undefined })),
+      appearances: (preset.appearances ?? []).map((a, i) => ({ ...a, id: `pa${i}`, blockId: undefined })),
       timelineDurationMs: Math.max(200, preset.durationMs),
       durationOverrideMs: Math.max(200, preset.durationMs),
     }],
@@ -560,7 +596,7 @@ export function appendPreset(p: Project, presetId: string, timeline: Timeline = 
       keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
     });
   }
-  attachPresetEffects(timeline, preset, blockId);
+  attachPresetEffects(timeline, preset, blockId, p.rig);
   // same formula store.commit() uses after every edit — otherwise a freshly-built
   // project reads a different duration than the very first edit would settle it to.
   timeline.timelineDurationMs = derivedDuration(timeline);
@@ -577,6 +613,7 @@ export function defaultProject(): Project {
     timelines: [idle],
     activeTimelineId: idle.id,
     fps: 30,
+    composition: { ...COMP },
     // stamped at birth so a fresh project never looks like a pre-versioning one and gets
     // needlessly walked through every migration step on its first load
     schemaVersion: SCHEMA_VERSION,
