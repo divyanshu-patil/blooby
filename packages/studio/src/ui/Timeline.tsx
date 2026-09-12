@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor, keyframeTimes, writeKeyframe } from '../core/store';
-import { COMP } from '../core/defaults';
+import { compOf } from '../core/comp';
 import { sceneAt } from '../core/scene';
 import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
@@ -209,7 +209,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
     () => tl.blocks.map((b, i) => {
       const preset = project.presets.find((p) => p.id === b.presetId);
       const rel = preset ? (characteristicTime(preset) / preset.durationMs) * b.durationMs : b.durationMs * 0.45;
-      return sceneAt(project, starts[i] + rel, COMP);
+      return sceneAt(project, starts[i] + rel, compOf(project));
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tl.blocks, tl.tracks, project.rig, tl.modifiers],
@@ -468,7 +468,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                 <input type="color" className="block-color" title="Clip accent color — shows in the strip, track lanes and graph"
                   value={color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
                   onChange={(e) => { e.stopPropagation(); setBlockColor(b.id, e.target.value); }} />
-                <MascotThumb className="thumb" scene={thumbs[i]} view={COMP} />
+                <MascotThumb className="thumb" scene={thumbs[i]} view={compOf(project)} />
                 <span style={{ font: '600 10.5px var(--ui)', width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                 <DurInput ms={b.durationMs} label={`${b.name} duration`} locked={tl.durationMode === 'even'}
                   onCommit={(sec) => setBlockDuration(b.id, sec * 1000)} />

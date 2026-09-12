@@ -1,4 +1,4 @@
-import { COMP } from '../core/defaults';
+import { compOf } from '../core/comp';
 import { sceneAt, type SceneItem } from '../core/scene';
 import { flattenPath, pathFromPoints, primitivePath, splitSubpaths } from '../core/path';
 import { outlinesOf } from '../core/emitters';
@@ -99,6 +99,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
 
   // sample once, keep everything
   const frames: SceneItem[][] = [];
+  const COMP = compOf(project);
   const sample = opts.sampleAt ?? ((ms: number) => sceneAt(project, ms, COMP));
   for (let f = 0; f <= total; f++) frames.push(sample(from + (f / fps) * 1000));
 

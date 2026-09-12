@@ -1,4 +1,4 @@
-import type { Vec2 } from './types';
+import type { ShapeKind, Vec2 } from './types';
 
 /**
  * Shape morphing: turning one SVG path into another over time.
@@ -21,6 +21,7 @@ const dist = (a: Vec2, b: Vec2) => Math.hypot(b.x - a.x, b.y - a.y);
 
 /** Parses the subset this app writes and imports: M L H V C S Q T A Z. */
 function segments(d: string): Seg[] {
+  if (typeof d !== 'string') return [];
   const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? [];
   const segs: Seg[] = [];
   let opensSubpath = true;
@@ -106,13 +107,64 @@ function segments(d: string): Seg[] {
  * export drew the two as a single filled blob.
  */
 export function splitSubpaths(d: string): string[] {
-  const segs = segments(d);
+  return subpathSegs(segments(d)).map(serialise);
+}
+
+function subpathSegs(segs: Seg[]): Seg[][] {
   const out: Seg[][] = [];
   for (const seg of segs) {
     if (seg.head || !out.length) out.push([]);
     out[out.length - 1].push(seg);
   }
-  return out.filter((g) => g.length).map(serialise);
+  return out.filter((g) => g.length);
+}
+
+const finiteSeg = (s: Seg) => finite(s.p0) && finite(s.p1) && (!s.c1 || finite(s.c1)) && (!s.c2 || finite(s.c2));
+
+/**
+ * Every point of a path pushed through `f`, curves kept as curves.
+ *
+ * Exact for an affine `f` — a Bézier's control points transform with it — which is every
+ * use here: an SVG element's own transform, a viewBox re-based into the unit box, a
+ * library shape fitted to a layer. Flattening to points first would throw away the
+ * curves an imported outline is made of, and the anchors the shape editor lets you drag.
+ */
+export function mapPath(d: string, f: (p: Vec2) => Vec2): string {
+  const fp = (p: Vec2 | undefined) => (p ? f(p) : p);
+  return subpathSegs(segments(d).filter(finiteSeg))
+    .map((g) => serialise(g.map((s) => ({ p0: f(s.p0), p1: f(s.p1), c1: fp(s.c1), c2: fp(s.c2) }))))
+    .join(' ');
+}
+
+/** The box a path's outline occupies, or null for a path with nothing in it. */
+export function pathBounds(d: string): { x0: number; y0: number; x1: number; y1: number } | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of segments(d)) {
+    if (!finiteSeg(s)) continue;
+    // a curve can bulge past its end points, so walk it rather than trusting the anchors
+    const steps = s.c1 ? 16 : 1;
+    for (let k = 0; k <= steps; k++) {
+      const p = along(s, k / steps);
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+    }
+  }
+  return Number.isFinite(x0) ? { x0, y0, x1, y1 } : null;
+}
+
+/**
+ * A path fitted into the -0.5..0.5 box, filling it on both axes, plus the box it came from.
+ *
+ * Filling both axes rather than keeping the aspect is deliberate: the layer's own size
+ * carries the aspect, exactly as it does for every generated shape, so a morph between an
+ * imported outline and a circle is a morph between two outlines of the same box.
+ */
+export function normalizePath(d: string): { d: string; bounds: { x: number; y: number; w: number; h: number } } | null {
+  const b = pathBounds(d);
+  if (!b) return null;
+  const w = Math.max(b.x1 - b.x0, 1e-6), h = Math.max(b.y1 - b.y0, 1e-6);
+  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+  const out = mapPath(d, (p) => ({ x: (p.x - cx) / w, y: (p.y - cy) / h }));
+  return out ? { d: out, bounds: { x: cx, y: cy, w, h } } : null;
 }
 
 
@@ -245,11 +297,32 @@ const along = (s: Seg, t: number): Vec2 => {
 
 const finite = (p: Vec2) => Number.isFinite(p.x) && Number.isFinite(p.y);
 
+/**
+ * Recently flattened outlines. A morph resamples both ends on every frame it is drawn, and
+ * the exporter asks for the same outlines again per frame — the answer for a given `d`
+ * never changes, so it is worked out once. Treat what comes back as read-only.
+ *
+ * ponytail: clear-when-full rather than LRU; a scrub touches a handful of outlines, and a
+ * project would need hundreds of distinct shapes in play at once before this thrashed.
+ */
+const flatCache = new Map<string, Vec2[]>();
+const CACHE_MAX = 600;
+
 /** `n` points spaced evenly along the outline by arc length. */
 export function flattenPath(d: string, n = 64): Vec2[] {
+  const key = `${n}|${d}`;
+  const hit = flatCache.get(key);
+  if (hit) return hit;
+  const out = flattenUncached(d, n);
+  if (flatCache.size >= CACHE_MAX) flatCache.clear();
+  flatCache.set(key, out);
+  return out;
+}
+
+function flattenUncached(d: string, n: number): Vec2[] {
   // the shape editor takes pasted text, so a malformed path has to degrade to "nothing"
   // rather than to NaN coordinates the renderer would happily write into the DOM
-  const segs = segments(d).filter((s) => finite(s.p0) && finite(s.p1) && (!s.c1 || finite(s.c1)) && (!s.c2 || finite(s.c2)));
+  const segs = segments(d).filter(finiteSeg);
   if (!segs.length) return [];
 
   // walk each segment finely first, so "evenly spaced" means by distance travelled rather
@@ -314,15 +387,49 @@ function bestOffset(a: Vec2[], b: Vec2[]): number {
   return best;
 }
 
-/** `a` at t=0, `b` at t=1, a real shape in between. */
+/** Signed area (shoelace). Its sign is the winding direction. */
+export function signedArea(pts: Vec2[]): number {
+  let s = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return s / 2;
+}
+
+/** `b`'s points, wound the same way as `a`'s and rotated into their best alignment. */
+const alignCache = new Map<string, Vec2[]>();
+function aligned(a: string, b: string, n: number): { pa: Vec2[]; pb: Vec2[] } | null {
+  const pa = flattenPath(a, n), raw = flattenPath(b, n);
+  if (!pa.length || !raw.length) return null;
+  const key = `${n}|${a} ${b}`;
+  let pb = alignCache.get(key);
+  if (!pb) {
+    // two outlines drawn in opposite directions morph by turning inside out; an imported
+    // SVG is as likely to run anticlockwise as not, so match the direction first
+    const src = Math.sign(signedArea(pa)) !== Math.sign(signedArea(raw)) ? [...raw].reverse() : raw;
+    const o = bestOffset(pa, src);
+    pb = pa.map((_, k) => src[(k + o) % src.length]);
+    if (alignCache.size >= CACHE_MAX) alignCache.clear();
+    alignCache.set(key, pb);
+  }
+  return { pa, pb };
+}
+
+/**
+ * `a` at t=0, `b` at t=1, a real shape in between.
+ *
+ * `t` is allowed past either end: an overshooting or elastic curve eases a morph beyond
+ * its target and back, and the outline carrying on past `b` for a moment is exactly the
+ * squash-and-settle that curve is for. Clamping it made "Elastic Morph" a plain one.
+ */
 export function morphPath(a: string, b: string, t: number, n = 64): string {
-  if (t <= 0) return a;
-  if (t >= 1) return b;
-  const pa = flattenPath(a, n), pb = flattenPath(b, n);
-  if (!pa.length || !pb.length) return t < 0.5 ? a : b;
-  const o = bestOffset(pa, pb);
-  return pathFromPoints(pa.map((p, k) => {
-    const q = pb[(k + o) % pb.length];
+  if (t === 0 || !Number.isFinite(t)) return a;
+  if (t === 1) return b;
+  const al = aligned(a, b, n);
+  if (!al) return t < 0.5 ? a : b;
+  return pathFromPoints(al.pa.map((p, k) => {
+    const q = al.pb[k];
     return { x: lerp(p.x, q.x, t), y: lerp(p.y, q.y, t) };
   }));
 }
@@ -331,9 +438,27 @@ export function morphPath(a: string, b: string, t: number, n = 64): string {
  * All generated in a -0.5..0.5 box, so the renderer scales one to any size and a morph
  * between two of them is about their outlines rather than their dimensions.
  */
-export type PrimitiveShape = 'circle' | 'pill' | 'rect' | 'polygon' | 'star' | 'custom';
-/** `custom` is not generated — it is whatever was typed or dragged, so it is not offered. */
-export const PRIMITIVE_SHAPES: PrimitiveShape[] = ['circle', 'pill', 'rect', 'polygon', 'star'];
+export type PrimitiveShape = ShapeKind | 'custom';
+/**
+ * Every outline this file can generate, in the order the pickers offer them.
+ * `custom` is not generated — it is whatever was typed or dragged, so it is not offered.
+ * The shape library (core/emitters SHAPE_LIBRARY) lists each of these with a name and an
+ * icon; this is the engine it reads.
+ */
+export const PRIMITIVE_SHAPES: ShapeKind[] = ['circle', 'pill', 'rect', 'polygon', 'star', 'pebble', 'capsule', 'roundedRect', 'blob', 'octopus'];
+
+/** What a person calls each one. `pill` is the eyes' stadium; the character pill is `capsule`. */
+export const SHAPE_LABEL: Record<ShapeKind, string> = {
+  circle: 'Circle', pill: 'Stadium', rect: 'Rectangle', polygon: 'Polygon', star: 'Star',
+  pebble: 'Pebble', capsule: 'Pill', roundedRect: 'Rounded rect', blob: 'Cute blob', octopus: 'Octopus',
+};
+
+/** Which generated shapes have dials, and which. The rest are fixed outlines. */
+export const SHAPE_DIALS: Partial<Record<ShapeKind, (keyof ShapeParams)[]>> = {
+  rect: ['cornerRadius', 'rotation'], roundedRect: ['cornerRadius', 'rotation'], pill: ['rotation'],
+  polygon: ['points', 'vertexRadius', 'rotation'], star: ['points', 'innerRatio', 'vertexRadius', 'rotation'],
+  circle: ['rotation'], pebble: ['rotation'], capsule: ['rotation'], blob: ['rotation'], octopus: ['rotation'],
+};
 
 export interface ShapeParams {
   /** polygon: sides. star: points. */
@@ -364,6 +489,35 @@ export function primitivePath(shape: PrimitiveShape, p: ShapeParams = {}): strin
 
   // the eyes' own shape: a stadium, which is a rect with fully rounded ends
   if (shape === 'pill') return primitivePath('rect', { ...p, cornerRadius: 0.5 });
+  if (shape === 'roundedRect') return primitivePath('rect', { ...p, cornerRadius: p.cornerRadius ?? 0.3 });
+
+  // The character outlines. Each is a handful of points through a smooth closed spline,
+  // so they are soft by construction and come with real anchors to drag. They sit inside
+  // the unit box at their own proportions rather than filling it — on the square body a
+  // pill has to read as a pill, not stretch back into a circle.
+  // A spline through points overshoots them between points, so each is drawn plain,
+  // shrunk back inside the box, and only then turned — every generated shape stays in
+  // -0.5..0.5, which is what lets the renderer scale any of them to any layer.
+  const character = (pts: Vec2[]) => {
+    const d = fitBox(smoothClosed(pts, (v) => `${round(v.x)} ${round(v.y)}`));
+    return rot ? mapPath(d, spin) : d;
+  };
+  if (shape === 'pebble') {
+    // wider than tall, heavier at the bottom: a stone that has settled
+    return character(ring(14, (a) => {
+      const r = 0.5 * (1 + 0.06 * Math.sin(a) - 0.035 * Math.cos(2 * a));
+      return { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.84 + 0.02 };
+    }));
+  }
+  if (shape === 'capsule') return capsule(0.34, f);
+  if (shape === 'blob') {
+    // two low lobes on different phases, so it never looks like a flower
+    return character(ring(16, (a) => {
+      const r = 0.47 * (1 + 0.075 * Math.sin(3 * a + 0.6) + 0.05 * Math.sin(2 * a + 1.9));
+      return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+    }));
+  }
+  if (shape === 'octopus') return character(OCTOPUS);
 
   if (shape === 'rect') {
     const r = Math.min(0.5, Math.max(0, p.cornerRadius ?? 0));
@@ -383,6 +537,70 @@ export function primitivePath(shape: PrimitiveShape, p: ShapeParams = {}): strin
   const inner = Math.min(0.9, Math.max(0.05, p.innerRatio ?? 0.42));
   return roundedPolygon(shape === 'star' ? n * 2 : n, 0.5, shape === 'star' ? 0.5 * inner : 0.5,
     Math.min(1, Math.max(0, p.vertexRadius ?? 0)), f);
+}
+
+/** Scale a centred outline down, about the origin, until it fits the -0.5..0.5 box. */
+function fitBox(d: string): string {
+  const b = pathBounds(d);
+  if (!b) return d;
+  // a hair inside, not on, the edge: coordinates are written rounded to 0.001, and a
+  // point fitted to exactly 0.5 can round out past it
+  const reach = Math.max(-b.x0, b.x1, -b.y0, b.y1);
+  if (reach <= 0.498) return d;
+  const k = 0.498 / reach;
+  return mapPath(d, (p) => ({ x: p.x * k, y: p.y * k }));
+}
+
+/** `n` points around the centre, clockwise from the top like every other shape here. */
+function ring(n: number, at: (angle: number) => Vec2): Vec2[] {
+  return Array.from({ length: n }, (_, i) => at(-Math.PI / 2 + (i / n) * Math.PI * 2));
+}
+
+/** A tall capsule inside the unit box: straight sides, round ends, `hw` half-width. */
+function capsule(hw: number, f: (v: Vec2) => string): string {
+  // each round end is two quarter circles of radius hw; k is the circle-through-cubics
+  // handle length for that radius
+  const r = hw, k = r * K, top = -0.5, bot = 0.5;
+  return `M ${f({ x: -hw, y: top + r })}`
+    + ` C ${f({ x: -hw, y: top + r - k })} ${f({ x: -k, y: top })} ${f({ x: 0, y: top })}`
+    + ` C ${f({ x: k, y: top })} ${f({ x: hw, y: top + r - k })} ${f({ x: hw, y: top + r })}`
+    + ` L ${f({ x: hw, y: bot - r })}`
+    + ` C ${f({ x: hw, y: bot - r + k })} ${f({ x: k, y: bot })} ${f({ x: 0, y: bot })}`
+    + ` C ${f({ x: -k, y: bot })} ${f({ x: -hw, y: bot - r + k })} ${f({ x: -hw, y: bot - r })} Z`;
+}
+
+/**
+ * The octopus: a dome over four stubby, rounded tentacles. Clockwise from the right
+ * shoulder, down and along the tentacle tips, up the left side and over the top. The
+ * spline rounds every tip and every gap, so there is no corner anywhere in it.
+ */
+const OCTOPUS: Vec2[] = [
+  { x: 0.5, y: 0.02 },
+  { x: 0.48, y: 0.34 }, { x: 0.43, y: 0.47 }, { x: 0.375, y: 0.5 }, { x: 0.315, y: 0.46 }, { x: 0.27, y: 0.34 },
+  { x: 0.23, y: 0.34 }, { x: 0.19, y: 0.46 }, { x: 0.125, y: 0.5 }, { x: 0.06, y: 0.46 }, { x: 0.02, y: 0.34 },
+  { x: -0.02, y: 0.34 }, { x: -0.06, y: 0.46 }, { x: -0.125, y: 0.5 }, { x: -0.19, y: 0.46 }, { x: -0.23, y: 0.34 },
+  { x: -0.27, y: 0.34 }, { x: -0.315, y: 0.46 }, { x: -0.375, y: 0.5 }, { x: -0.43, y: 0.47 }, { x: -0.48, y: 0.34 },
+  { x: -0.5, y: 0.02 },
+  { x: -0.46, y: -0.24 }, { x: -0.33, y: -0.43 }, { x: 0, y: -0.5 }, { x: 0.33, y: -0.43 }, { x: 0.46, y: -0.24 },
+];
+
+/**
+ * A closed Catmull-Rom spline through `pts`, written as cubics.
+ *
+ * Catmull-Rom because it passes THROUGH its points: the outline is exactly the points it
+ * was designed from, and each one becomes an anchor the shape editor can drag.
+ */
+function smoothClosed(pts: Vec2[], f: (v: Vec2) => string): string {
+  const n = pts.length;
+  const P = (i: number) => pts[((i % n) + n) % n];
+  let d = `M ${f(P(0))}`;
+  for (let i = 0; i < n; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+    const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    d += ` C ${f(c1)} ${f(c2)} ${f(p2)}`;
+  }
+  return `${d} Z`;
 }
 
 /**

@@ -1,13 +1,14 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
-import { morphPath } from './path';
+import { mapPath, morphPath, pathBounds } from './path';
 import { shapeResolver } from './emitters';
 import { noise1d } from './noise';
-import { bodyTurnScale, projectToScreen, silhouetteScale } from './curvature';
-import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, readEffectProp, readProp, setCameraProp, setProp, writeEffectProp, writeProp } from './props';
+import { bodyTurnScale, FLAT, projectToScreen, silhouetteScale, type Projected } from './curvature';
+import { hoseInputOf, rubberHose } from './limb';
+import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, readEffectProp, readProp, setCameraProp, setProp, STROKE_DEFAULT, writeEffectProp, writeProp } from './props';
 import { activeTimeline } from './types';
 import { activeTransitionAt, blockAt, blockStarts } from './timeline';
-import type { Anchor, ColorStop, EasingCurve, Emitter, KeyValue, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2 } from './types';
+import type { Anchor, Appearance, ColorStop, EasingCurve, Emitter, KeyValue, LineCap, LineJoin, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2, VectorPath } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
 const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
@@ -292,7 +293,54 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
     if (local === null) continue;
     applyModifier(rig, effectAt(project, tl, m, timeMs), local / 1000);
   }
+  // Appearance last, as a multiplier on the evaluated opacity: a range decides whether
+  // the layer exists, and its keyframed opacity decides how it looks while it does.
+  // Folding it into `opacity` rather than inventing a render-time flag means everything
+  // downstream — the stage, the blends between states, the Lottie bake — already has it.
+  if (tl.appearances?.length || Object.values(rig.nodes).some((n) => n.ranged)) {
+    for (const node of Object.values(rig.nodes)) {
+      const k = appearanceAt(tl, node, timeMs);
+      if (k < 1) node.opacity = (node.opacity ?? 1) * k;
+    }
+  }
   return rig;
+}
+
+const smooth = (u: number) => { const v = Math.min(1, Math.max(0, u)); return v * v * (3 - 2 * v); };
+
+/**
+ * How present a layer is at `timeMs` by its appearance ranges alone, 0–1.
+ *
+ * A layer with no range on this timeline is simply there (or, if it is `ranged`, simply
+ * not). Inside a range the fades ramp its edges; across several ranges the most present
+ * one wins, so two overlapping clips of the same sticker never dim each other.
+ */
+export function appearanceAt(tl: Timeline, node: RigNode, timeMs: number): number {
+  const mine = (tl.appearances ?? []).filter((a) => a.nodeId === node.id);
+  if (!mine.length) return node.ranged ? 0 : 1;
+  let best = 0;
+  for (const a of mine) {
+    const local = scopeTime(tl, a, timeMs);
+    if (local === null) continue;
+    const [s0, s1] = scopeSpan(tl, a.blockId);
+    const span = Math.max(0, (a.endMs ?? s1 - s0) - (a.startMs ?? 0));
+    const fin = a.fadeInMs ? smooth(local / a.fadeInMs) : 1;
+    const fout = a.fadeOutMs ? smooth((span - local) / a.fadeOutMs) : 1;
+    best = Math.max(best, Math.min(fin, fout));
+    if (best >= 1) break;
+  }
+  return best;
+}
+
+/** Where each of a layer's ranges actually runs, in absolute timeline ms — what the
+ *  timeline draws and drags. */
+export function appearanceSpans(tl: Timeline, nodeId: string): { entry: Appearance; from: number; to: number; origin: number }[] {
+  return (tl.appearances ?? []).filter((a) => a.nodeId === nodeId).map((a) => {
+    const w = a.blockId ? blockWindow(tl, a.blockId) : null;
+    const origin = w ? w[0] : 0;
+    const limit = w ? w[1] - w[0] : tl.timelineDurationMs;
+    return { entry: a, origin, from: origin + Math.max(0, a.startMs ?? 0), to: origin + Math.min(limit, a.endMs ?? limit) };
+  });
 }
 
 /**
@@ -342,6 +390,9 @@ function blendRigInto(to: Rig, from: Rig, amount: number): void {
       setProp(node, path, isAngle(path) ? lerpAngle(a, b, amount) : a + (b - a) * amount);
     }
     if (other.color && node.color) node.color = lerpColor(other.color, node.color, amount);
+    if (other.stroke?.color || node.stroke?.color) {
+      node.stroke = { ...node.stroke, color: lerpColor(other.stroke?.color ?? STROKE_DEFAULT, node.stroke?.color ?? STROKE_DEFAULT, amount) };
+    }
     // a transition across a shape change morphs too, rather than popping at the seam
     if (other.shapePath && node.shapePath && other.shapePath !== node.shapePath) {
       node.shapePath = morphPath(other.shapePath, node.shapePath, amount);
@@ -416,23 +467,120 @@ export interface SceneItem {
   text?: string;
   /** an outline in a -0.5..0.5 box, drawn scaled into the w/h box instead of the primitive */
   path?: string;
+  /**
+   * How present the LAYER is — presence, rim fade, opacity and appearance, before any
+   * paint's own alpha. `color.a` already includes it for the fill; this is what a stroke
+   * and an imported path's own colour are multiplied by. Absent on a particle, whose
+   * `color.a` is the whole story.
+   */
+  alpha?: number;
+  /** an outline around the fill, in screen px (it does not scale with the layer) */
+  stroke?: { color: ColorStop; width: number; cap: LineCap; join: LineJoin };
+  /** imported vector artwork: several paths in the unit box, each with its own paint or the layer's */
+  paths?: VectorPath[];
+  /** a generated limb; its outline is already placed, so rotation is always 0 */
+  limb?: true;
 }
 
 export interface Viewport { width: number; height: number }
 
-function childrenOf(rig: Rig, id: string): RigNode[] {
-  return Object.values(rig.nodes).filter((n) => n.parentId === id);
+/**
+ * Where a layer's children live on screen: its origin, its accumulated roll, and how a
+ * local offset scales into it. The body's frame squashes with it; a group's scales
+ * uniformly; the world's is the composition centre at 1:1.
+ *
+ * Exported so everything that turns a screen point back into a layer's own numbers — the
+ * stage's drags, re-parenting that keeps an object where it is — uses the frame the
+ * renderer actually used, rather than a reconstruction that drifts the moment the body
+ * squashes.
+ */
+export interface LayerFrame {
+  x: number; y: number;
+  /** degrees */
+  rot: number;
+  /** local offset → screen px, per axis */
+  kx: number; ky: number;
+  /** the uniform scale a child's own size is multiplied by */
+  cum: number;
+  /** the sphere radius a mapped child is placed on; 0 when there is no sphere here */
+  R: number;
+  head: Vec2;
+  /** the body's ry/rx, applied to a mapped child's projected y */
+  squash: number;
+  /** the layer opacity children inherit */
+  alpha: number;
+  /** the frame this one's own size was scaled by — its parent's cum */
+  parentCum: number;
+}
+
+/** The key `buildScene` files the world frame under — the parent of every WORLD layer. */
+export const WORLD = '';
+
+/** A local offset carried into a frame, and back out. */
+export const toFrame = (f: LayerFrame, v: Vec2): Vec2 => {
+  const r = (f.rot * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  const lx = v.x * f.kx, ly = v.y * f.ky;
+  return { x: f.x + lx * c - ly * s, y: f.y + lx * s + ly * c };
+};
+export const fromFrame = (f: LayerFrame, p: Vec2): Vec2 => {
+  const r = (-f.rot * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  const dx = p.x - f.x, dy = p.y - f.y;
+  return { x: (dx * c - dy * s) / (f.kx || 1), y: (dx * s + dy * c) / (f.ky || 1) };
+};
+
+function childrenOf(rig: Rig, id: string | null): RigNode[] {
+  return Object.values(rig.nodes).filter((n) => n.parentId === id && n.id !== rig.rootId);
 }
 
 function eyeHeight(n: RigNode): number {
   return n.size.y * (n.transform.length ?? 1) * (n.eye ? n.eye.openness : 1);
 }
 
+// a node's own transform.scale used to only ever size *itself* — a parent's scale never
+// reached its children (buildScene's own w/h always came from `node.size` alone), so
+// scaling the body up or down left every eye exactly the same size. `cum` threads the
+// accumulated ancestor scale (geometric mean of x/y, so a non-uniform squash on one
+// node doesn't warp a child's own aspect ratio) down the recursion — each node's actual
+// drawn size is its own size × its own scale × everything above it, same principle the
+// stretch modifier now relies on to affect "a node and all its children" from one dial.
+const scaleOf = (n: RigNode) => Math.sqrt(Math.max(1e-6, n.transform.scale.x * n.transform.scale.y));
+
+/**
+ * A layer's paint at a given presence: fill and stroke, independent, each with its own
+ * opacity, both multiplied by how present the layer is.
+ */
+function paintOf(node: RigNode, a: number): Pick<SceneItem, 'color' | 'stroke' | 'alpha'> {
+  const fillA = node.fill?.enabled === false ? 0 : Math.min(1, Math.max(0, node.fill?.opacity ?? 1));
+  const k = fillA * a;
+  // the same object when nothing dims it, as it always was
+  const color = k < 1 ? { ...node.color, a: node.color.a * k } : node.color;
+  const s = node.stroke;
+  const width = s?.width ?? 2;
+  const stroke = s?.enabled && width > 0
+    ? {
+      color: { ...(s.color ?? STROKE_DEFAULT), a: (s.color ?? STROKE_DEFAULT).a * Math.min(1, Math.max(0, s.opacity ?? 1)) * a },
+      width, cap: s.lineCap ?? 'round', join: s.lineJoin ?? 'round',
+    }
+    : undefined;
+  return { color, alpha: a, ...(stroke ? { stroke } : {}) };
+}
+
+/** An outline in screen px, as an item: its box, and the outline fitted into that box. */
+function outlineItem(d: string): { cx: number; cy: number; w: number; h: number; path: string } | null {
+  const b = pathBounds(d);
+  if (!b) return null;
+  const w = Math.max(b.x1 - b.x0, 0.01), h = Math.max(b.y1 - b.y0, 0.01);
+  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+  return { cx, cy, w, h, path: mapPath(d, (p) => ({ x: (p.x - cx) / w, y: (p.y - cy) / h })) };
+}
+
 /**
  * Flattens the rig to absolute screen shapes. Body roll rotates the whole assembly,
- * body squash carries features with it, mapped children ride the sphere.
+ * body squash carries features with it, mapped children ride the sphere, and a WORLD
+ * layer (no parent) sits in composition coordinates. Pass `frames` to also get every
+ * layer's frame, keyed by id (and the world's under WORLD).
  */
-export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
+export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerFrame>): SceneItem[] {
   const root = rig.nodes[rig.rootId];
   if (!root) return [];
   const out: SceneItem[] = [];
@@ -444,8 +592,6 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   const cx = view.width / 2 + rig.camera.offset.x + off.x;
   const cy = view.height / 2 + rig.camera.offset.y + off.y;
   const roll = root.transform.rotation;
-  const rad = (roll * Math.PI) / 180;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
   const head = { x: root.surface.yaw, y: root.surface.pitch };
   const squash = rx === 0 ? 1 : ry / rx;
 
@@ -453,66 +599,103 @@ export function buildScene(rig: Rig, view: Viewport): SceneItem[] {
   // silhouette, which perspective pushes outward. Keep them separate or features escape.
   const limb = silhouetteScale(rig.camera.fov, rig.camera.distance);
   const rootSeen = root.presence ?? 1;
-  if (root.visible && rootSeen > 0.002) {
+  const rootAlpha = Math.min(1, Math.max(0, root.opacity ?? 1));
+  if (root.visible && rootSeen > 0.002 && rootAlpha > 0.002) {
     out.push({
       id: root.id, name: root.name, shape: 'ellipse', cx, cy,
       w: rx * limb * 2 * rootSeen, h: ry * limb * 2 * rootSeen,
       r: Math.min(rx, ry) * limb * rootSeen, rotation: roll,
-      color: rootSeen < 1 ? { ...root.color, a: root.color.a * rootSeen } : root.color,
+      ...paintOf(root, rootSeen * rootAlpha),
       depth: -2, zIndex: root.zIndex,
       ...(root.shapePath ? { path: root.shapePath } : {}),
     });
   }
 
-  // a node's own transform.scale used to only ever size *itself* — a parent's scale never
-  // reached its children (buildScene's own w/h always came from `node.size` alone), so
-  // scaling the body up or down left every eye exactly the same size. `cum` threads the
-  // accumulated ancestor scale (geometric mean of x/y, so a non-uniform squash on one
-  // node doesn't warp a child's own aspect ratio) down the recursion — each node's actual
-  // drawn size is its own size × its own scale × everything above it, same principle the
-  // stretch modifier now relies on to affect "a node and all its children" from one dial.
-  const scaleOf = (n: RigNode) => Math.sqrt(Math.max(1e-6, n.transform.scale.x * n.transform.scale.y));
+  const rootFrame: LayerFrame = {
+    x: cx, y: cy, rot: roll,
+    // a local offset on the body stretches with it, so an attached hat stays put on the
+    // head through a squash rather than sliding off it
+    kx: root.transform.scale.x * turn.sx, ky: root.transform.scale.y * turn.sy,
+    cum: scaleOf(root), R: rx, head, squash, alpha: rootAlpha, parentCum: 1,
+  };
+  const worldFrame: LayerFrame = {
+    x: view.width / 2 + rig.camera.offset.x, y: view.height / 2 + rig.camera.offset.y,
+    rot: 0, kx: 1, ky: 1, cum: 1, R: 0, head: { x: 0, y: 0 }, squash: 1, alpha: 1, parentCum: 1,
+  };
+  frames?.set(root.id, rootFrame);
+  frames?.set(WORLD, worldFrame);
 
-  const walk = (parent: RigNode, px: number, py: number, pr: number, R: number, headAngles: Vec2, cum: number) => {
-    for (const node of childrenOf(rig, parent.id)) {
+  const walk = (parentId: string | null, f: LayerFrame) => {
+    const isRoot = parentId === rig.rootId;
+    const rad = (f.rot * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    for (const node of childrenOf(rig, parentId)) {
       if (!node.visible) continue;
-      const p = projectToScreen(node, rig, R, headAngles);
+      // a mapped layer rides the sphere; anything with no sphere under it is flat
+      const p: Projected = node.surface.mapped && f.R > 0 ? projectToScreen(node, rig, f.R, f.head) : FLAT;
       if (!p.visible) continue;
 
-      // ride the body's squash, then its roll
-      const lx = p.x;
-      const ly = p.y * (parent.id === rig.rootId ? squash : 1);
-      const ax = px + lx * cos - ly * sin;
-      const ay = py + lx * sin + ly * cos;
+      // ride the body's squash, then the parent's roll. The offset is the attachment
+      // nudge on a mapped layer and the whole position on a flat one, in the parent's own
+      // frame either way.
+      const fo = node.surface.flatOffset;
+      const lx = (p === FLAT ? 0 : p.x) + (fo ? fo.x * f.kx : 0);
+      const ly = (p === FLAT ? 0 : p.y * (isRoot ? f.squash : 1)) + (fo ? fo.y * f.ky : 0);
+      const ax = f.x + lx * cos - ly * sin;
+      const ay = f.y + lx * sin + ly * cos;
+      const rot = f.rot + node.transform.rotation;
 
       // presence fades AND shrinks: a feature keyframed out shrinks away rather than
-      // blinking off, which is what makes it usable as a transition into the next clip
+      // blinking off, which is what makes it usable as a transition into the next clip.
+      // Opacity fades only, and carries down to everything this layer holds.
       const seen = node.presence ?? 1;
-      if (seen <= 0.002) { walk(node, px, py, pr, R, { x: 0, y: 0 }, cum); continue; }
+      const alpha = f.alpha * Math.min(1, Math.max(0, node.opacity ?? 1));
+      const w = node.size.x * node.transform.scale.x * p.sx * f.cum * seen;
+      const h = eyeHeight(node) * node.transform.scale.y * p.sy * f.cum * seen;
+      const a = p.alpha * seen * alpha;
 
-      const w = node.size.x * node.transform.scale.x * p.sx * cum * seen;
-      const h = eyeHeight(node) * node.transform.scale.y * p.sy * cum * seen;
-      const rot = pr + node.transform.rotation;
-
-      const a = p.alpha * seen;
-      const color = a < 1 ? { ...node.color, a: node.color.a * a } : node.color;
-      if (node.kind === 'svgLayer' && node.svg) {
-        out.push({ id: node.id, name: node.name, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, color, depth: p.depth, zIndex: node.zIndex, svg: node.svg });
-      } else if (node.kind !== 'group') {
-        const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
-        out.push({
-          id: node.id, name: node.name, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2,
-          rotation: rot, color, depth: p.depth, zIndex: node.zIndex,
-          ...(node.shapePath ? { path: node.shapePath } : {}),
-        });
+      if (seen > 0.002 && a > 0.002) {
+        const base = { id: node.id, name: node.name, depth: p.depth, zIndex: node.zIndex, ...paintOf(node, a) };
+        if (node.kind === 'limb' && node.limb) {
+          // placed in the PARENT's frame: the points are where the shoulder, hand, knee
+          // and ankle sit on the body, and they ride it through every move
+          const hose = rubberHose(hoseInputOf(node.limb, (v) => toFrame(f, v), f.cum * seen));
+          const box = hose && outlineItem(hose.d);
+          if (box) out.push({ ...base, shape: 'pill', r: 0, rotation: 0, ...box, limb: true });
+        } else if (node.kind === 'svgLayer' && node.svg?.paths?.length) {
+          out.push({ ...base, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, paths: node.svg.paths });
+        } else if (node.kind === 'svgLayer' && node.svg) {
+          out.push({ ...base, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, svg: node.svg });
+        } else if (node.kind !== 'group') {
+          const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
+          out.push({
+            ...base, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot,
+            ...(node.shapePath ? { path: node.shapePath } : {}),
+          });
+        }
       }
-      walk(node, ax, ay, rot, Math.max(w, h) / 2, { x: 0, y: 0 }, cum * scaleOf(node));
+
+      const cum = f.cum * scaleOf(node);
+      const mine: LayerFrame = {
+        x: ax, y: ay, rot, kx: cum, ky: cum, cum,
+        R: Math.max(Math.abs(w), Math.abs(h)) / 2, head: { x: 0, y: 0 }, squash: 1, alpha, parentCum: f.cum,
+      };
+      frames?.set(node.id, mine);
+      walk(node.id, mine);
     }
   };
 
-  walk(root, cx, cy, roll, rx, head, scaleOf(root));
+  walk(rig.rootId, rootFrame);
+  walk(null, worldFrame);
   out.sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
   return out;
+}
+
+/** Every layer's frame at this pose — the same numbers `buildScene` placed things with. */
+export function sceneFrames(rig: Rig, view: Viewport): Map<string, LayerFrame> {
+  const frames = new Map<string, LayerFrame>();
+  buildScene(rig, view, frames);
+  return frames;
 }
 
 /**

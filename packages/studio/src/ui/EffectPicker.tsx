@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { COMP, effectPreviewProject } from '../core/defaults';
+import { compOf, effectPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { MODIFIER_KINDS, MODIFIERS, type Emitter, type Modifier, type ModifierKind, type Project } from '../core/types';
 import { MascotThumb, sceneBounds, unionBounds, type Bounds } from './Mascot';
@@ -110,20 +110,20 @@ function EffectPreview({ project, choice }: { project: Project; choice: EffectCh
     if (!temp) return null;
     let b: Bounds | null = null;
     for (let i = 0; i < 24; i++) {
-      try { b = unionBounds(b, sceneBounds(sceneAt(temp, (i / 24) * 2000, COMP))); } catch { /* skip */ }
+      try { b = unionBounds(b, sceneBounds(sceneAt(temp, (i / 24) * 2000, compOf(project)))); } catch { /* skip */ }
     }
     return b && {
       x0: Math.max(0, b.x0), y0: Math.max(0, b.y0),
-      x1: Math.min(COMP.width, b.x1), y1: Math.min(COMP.height, b.y1),
+      x1: Math.min(compOf(project).width, b.x1), y1: Math.min(compOf(project).height, b.y1),
     };
-  }, [temp]);
+  }, [temp, project]);
 
   const scene = (() => {
-    try { return temp ? sceneAt(temp, t, COMP) : null; } catch { return null; }
+    try { return temp ? sceneAt(temp, t, compOf(project)) : null; } catch { return null; }
   })();
 
   if (!scene) return <p className="empty-note">No preview.</p>;
-  return <MascotThumb scene={scene} view={COMP} box={box} pad={24} />;
+  return <MascotThumb scene={scene} view={compOf(project)} box={box} pad={24} />;
 }
 
 /** The built-in modifiers, described so the list is readable without hovering. */

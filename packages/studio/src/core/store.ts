@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
 import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
-import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
+import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack, valueAt } from './scene';
+import {
+  duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
+  setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
+  type AppearanceRange, type AttachMode, type ReorderTo,
+} from './layers';
+import { compOf } from './comp';
+import type { MorphMode } from './easing';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
@@ -83,6 +90,30 @@ export interface Editor {
   addNode: (node: RigNode) => void;
   deleteNode: (id: string) => void;
   updateNode: (id: string, fn: (n: RigNode) => void, label?: string) => void;
+
+  /**
+   * Layer operations. Each is one commit — one undo step — over the pure function of the
+   * same name in core/layers.ts, which the copilot's tools call too.
+   */
+  /** on top of everything (a limb keeps its place behind the body); `appearAt` starts it
+   *  there on the timeline, which is what pasting at the playhead means */
+  addLayer: (node: RigNode, opts?: { appearAt?: number }) => void;
+  duplicateLayer: (id: string) => string | null;
+  reorderLayer: (id: string, to: ReorderTo) => void;
+  /** world ↔ mascot, keeping the layer where it is on screen */
+  setAttachment: (id: string, mode: AttachMode, anchorId?: string) => void;
+  groupLayers: (ids: string[]) => void;
+  ungroupLayer: (id: string) => void;
+  /** in absolute ms; `null` removes every range so the layer is simply always there */
+  setAppearance: (nodeId: string, range: AppearanceRange | null, label?: string) => void;
+  setComposition: (patch: Partial<{ width: number; height: number }>) => void;
+  /** how the shape keyframe under the playhead becomes the next one */
+  setShapeMorph: (nodeId: string, mode: MorphMode, durationMs?: number) => void;
+  /**
+   * CURRENT → TARGET for one property: a keyframe holding whatever it reads right now at
+   * the playhead, and one at `target` after `durationMs`. What "Apply transition" does.
+   */
+  tweenProperty: (nodeId: string, property: string, target: KeyValue, durationMs: number, easing: EasingCurve) => void;
 
   loadCatalog: () => Promise<void>;
   addBlock: (presetId: string, index?: number) => void;
@@ -513,27 +544,74 @@ export const useEditor = create<Editor>((set, get) => ({
   },
 
   deleteNode(id) {
-    get().commit((p) => {
-      if (id === p.rig.rootId) return;
-      const doomed = new Set([id]);
-      let grew = true;
-      while (grew) {
-        grew = false;
-        for (const n of Object.values(p.rig.nodes))
-          if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) { doomed.add(n.id); grew = true; }
-      }
-      for (const d of doomed) delete p.rig.nodes[d];
-      for (const n of Object.values(p.rig.nodes)) if (n.eye?.linkedToId && doomed.has(n.eye.linkedToId)) n.eye.linkedToId = null;
-      for (const tl of p.timelines) {
-        tl.tracks = tl.tracks.filter((t) => !doomed.has(t.nodeId));
-        tl.modifiers = tl.modifiers.filter((m) => !doomed.has(m.nodeId));
-      }
-    });
-    set({ selection: [] });
+    get().commit((p) => { removeLayer(p, id); });
+    set({ selection: get().selection.filter((s) => get().project.rig.nodes[s]) });
   },
 
   updateNode(id, fn, label) {
     get().commit((p) => { const n = p.rig.nodes[id]; if (n) fn(n); }, label);
+  },
+
+  addLayer(node, opts) {
+    get().commit((p) => {
+      const n = structuredClone(node);
+      if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
+      if (n.parentId !== null && !p.rig.nodes[n.parentId]) n.parentId = p.rig.rootId;
+      p.rig.nodes[n.id] = n;
+      if (opts?.appearAt && opts.appearAt > 0) setAppearanceIn(p, n.id, { startMs: opts.appearAt }, opts.appearAt);
+    });
+    set({ selection: [node.id], selectedBlockId: null });
+  },
+
+  duplicateLayer(id) {
+    let made: string | null = null;
+    get().commit((p) => { made = duplicateLayerIn(p, id); });
+    if (made) set({ selection: [made] });
+    return made;
+  },
+
+  reorderLayer(id, to) { get().commit((p) => reorderLayerIn(p, id, to)); },
+
+  setAttachment(id, mode, anchorId) {
+    const { playhead } = get();
+    get().commit((p) => { setAttachmentIn(p, id, mode, anchorId, playhead); });
+  },
+
+  groupLayers(ids) {
+    const { playhead } = get();
+    let g: string | null = null;
+    get().commit((p) => { g = groupLayersIn(p, ids, playhead); });
+    if (g) set({ selection: [g] });
+  },
+
+  ungroupLayer(id) {
+    const { playhead } = get();
+    get().commit((p) => ungroupLayerIn(p, id, playhead));
+    set({ selection: [] });
+  },
+
+  setAppearance(nodeId, range, label) {
+    const { playhead } = get();
+    get().commit((p) => setAppearanceIn(p, nodeId, range, playhead), label ?? `appear.${nodeId}`);
+  },
+
+  setComposition(patch) {
+    get().commit((p) => { p.composition = compOf({ composition: { ...compOf(p), ...patch } }); }, 'comp');
+  },
+
+  setShapeMorph(nodeId, mode, durationMs) {
+    const { playhead } = get();
+    get().commit((p) => { setMorph(p, nodeId, playhead, mode, durationMs); }, `morph.${nodeId}`);
+  },
+
+  tweenProperty(nodeId, property, target, durationMs, easing) {
+    const { project, playhead } = get();
+    const from = valueAt(project, nodeId, property, playhead);
+    if (from === undefined) return;
+    get().commit((p) => {
+      writeKeyframe(p, nodeId, property, playhead, from, easing);
+      writeKeyframe(p, nodeId, property, playhead + Math.max(20, durationMs), target, easing);
+    });
   },
 
   async loadCatalog() {

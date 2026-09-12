@@ -1,7 +1,7 @@
 // editor
 export { Editor } from './ui/Editor';
 export { useEditor } from './core/store';
-export { defaultProject, builtinPresets, builtinExpressions, COMP } from './core/defaults';
+export { defaultProject, builtinPresets, builtinExpressions, COMP, compOf } from './core/defaults';
 export { installPublicApi } from './core/publicApi';
 export { fetchCatalog, hasBackend, supabase } from './core/catalog';
 export { sceneAt } from './core/scene';

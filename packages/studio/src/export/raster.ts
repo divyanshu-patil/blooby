@@ -1,15 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import GIF from 'gif.js.optimized';
 import workerUrl from 'gif.js.optimized/dist/gif.worker.js?url';
-import { COMP } from '../core/defaults';
-import { sceneAt, type SceneItem } from '../core/scene';
+import { compOf } from '../core/comp';
+import { sceneAt, type SceneItem, type Viewport } from '../core/scene';
 import { Shapes } from '../ui/Mascot';
 import { activeTimeline } from '../core/types';
 import type { Project } from '../core/types';
 
 export interface RasterOptions {
   fps: number;
-  /** multiplier on the 720×720 composition */
+  /** multiplier on the project's own composition size */
   scale: number;
   background: string | null;
   from?: number;
@@ -17,10 +17,10 @@ export interface RasterOptions {
 }
 
 /** Same <Shapes> the stage draws — one renderer, so an export can't drift from preview. */
-export function sceneToSvg(scene: SceneItem[], background: string | null): string {
+export function sceneToSvg(scene: SceneItem[], background: string | null, view: Viewport): string {
   const body = renderToStaticMarkup(Shapes({ scene }));
-  const bg = background ? `<rect width="${COMP.width}" height="${COMP.height}" fill="${background}"/>` : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${COMP.width}" height="${COMP.height}" viewBox="0 0 ${COMP.width} ${COMP.height}">${bg}${body}</svg>`;
+  const bg = background ? `<rect width="${view.width}" height="${view.height}" fill="${background}"/>` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${view.width}" height="${view.height}" viewBox="0 0 ${view.width} ${view.height}">${bg}${body}</svg>`;
 }
 
 async function svgToImage(svg: string): Promise<HTMLImageElement> {
@@ -30,12 +30,16 @@ async function svgToImage(svg: string): Promise<HTMLImageElement> {
   return img;
 }
 
-function makeCanvas(scale: number) {
+function makeCanvas(view: Viewport, scale: number) {
   const c = document.createElement('canvas');
-  c.width = Math.round(COMP.width * scale);
-  c.height = Math.round(COMP.height * scale);
+  c.width = Math.round(view.width * scale);
+  c.height = Math.round(view.height * scale);
   return c;
 }
+
+/** One frame of the project as an SVG at its own composition size. */
+const frameSvg = (project: Project, ms: number, background: string | null) =>
+  sceneToSvg(sceneAt(project, ms, compOf(project)), background, compOf(project));
 
 /** Walks the timeline frame by frame, handing each rendered canvas to `onFrame`. */
 async function eachFrame(
@@ -46,10 +50,10 @@ async function eachFrame(
   const from = o.from ?? 0;
   const to = o.to ?? activeTimeline(project).timelineDurationMs;
   const total = Math.max(1, Math.round(((to - from) / 1000) * o.fps));
-  const canvas = makeCanvas(o.scale);
+  const canvas = makeCanvas(compOf(project), o.scale);
   const ctx = canvas.getContext('2d')!;
   for (let i = 0; i < total; i++) {
-    const img = await svgToImage(sceneToSvg(sceneAt(project, from + (i / o.fps) * 1000, COMP), o.background));
+    const img = await svgToImage(frameSvg(project, from + (i / o.fps) * 1000, o.background));
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     await onFrame(canvas, i, total);
@@ -58,9 +62,9 @@ async function eachFrame(
 }
 
 export async function exportPng(project: Project, timeMs: number, scale = 2, background: string | null = null): Promise<Blob> {
-  const canvas = makeCanvas(scale);
+  const canvas = makeCanvas(compOf(project), scale);
   const ctx = canvas.getContext('2d')!;
-  const img = await svgToImage(sceneToSvg(sceneAt(project, timeMs, COMP), background));
+  const img = await svgToImage(frameSvg(project, timeMs, background));
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   return new Promise((res) => canvas.toBlob((b) => res(b!), 'image/png'));
 }
@@ -70,8 +74,8 @@ export async function exportGif(project: Project, o: RasterOptions, onProgress?:
     workers: Math.min(4, navigator.hardwareConcurrency || 2),
     quality: 8,
     workerScript: workerUrl,
-    width: Math.round(COMP.width * o.scale),
-    height: Math.round(COMP.height * o.scale),
+    width: Math.round(compOf(project).width * o.scale),
+    height: Math.round(compOf(project).height * o.scale),
     background: o.background ?? '#000000',
     transparent: o.background ? null : '#00000000',
     repeat: 0,
@@ -110,7 +114,7 @@ export async function exportVideo(project: Project, o: RasterOptions, onProgress
   const mime = videoMime();
   if (!mime) throw new Error('This browser cannot record video from a canvas.');
 
-  const canvas = makeCanvas(o.scale);
+  const canvas = makeCanvas(compOf(project), o.scale);
   const ctx = canvas.getContext('2d')!;
   const stream = canvas.captureStream(0);
   const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
@@ -126,7 +130,7 @@ export async function exportVideo(project: Project, o: RasterOptions, onProgress
   // pre-render everything first, so recorder pacing isn't fighting the rasteriser
   const images: HTMLImageElement[] = [];
   for (let i = 0; i < total; i++) {
-    images.push(await svgToImage(sceneToSvg(sceneAt(project, from + i * step, COMP), o.background)));
+    images.push(await svgToImage(frameSvg(project, from + i * step, o.background)));
     onProgress?.((i / total) * 0.5);
   }
 

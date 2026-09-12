@@ -1,4 +1,4 @@
-import { COMP } from '../core/defaults';
+import { compOf } from '../core/comp';
 import { sceneAt, type SceneItem } from '../core/scene';
 import { animationIds } from '../core/stateMachine';
 import type { Project, Timeline } from '../core/types';
@@ -99,7 +99,7 @@ export function layoutStrip(project: Project, timelines: Timeline[], markerOf: (
   const fps = project.fps;
   const frames = (ms: number) => Math.max(1, Math.round((ms / 1000) * fps));
   const poseAt = (tl: Timeline, ms: number) =>
-    sceneAt({ ...project, activeTimelineId: tl.id }, ms, COMP);
+    sceneAt({ ...project, activeTimelineId: tl.id }, ms, compOf(project));
 
   const segments = new Map<string, Segment>();
   const morphs: { start: number; len: number; from: Timeline; to: Timeline }[] = [];

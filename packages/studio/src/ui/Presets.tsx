@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useEditor } from '../core/store';
-import { COMP, presetPreviewProject } from '../core/defaults';
+import { compOf, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { MascotThumb } from './Mascot';
 import { Panel } from './bits';
@@ -16,7 +16,7 @@ import type { Expression, Preset, Project } from '../core/types';
 /** A preset's own pose at its most characteristic moment — the icon *is* the animation. */
 function glyphScene(project: Project, preset: Preset) {
   const temp = presetPreviewProject(project, preset);
-  return sceneAt(temp, characteristicTime(preset), COMP);
+  return sceneAt(temp, characteristicTime(preset), compOf(project));
 }
 
 /** The four places a preset can come from, plus "everything". Official and community
@@ -207,7 +207,7 @@ function PresetChip({ project, preset, onOpen, onRename, onColor, onPublish }: {
       <input type="color" className="chip-color" title="Accent color — shows on this preset's clips"
         value={preset.color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
         onChange={(e) => onColor(e.target.value)} />
-      <MascotThumb className="glyph" scene={glyphScene(project, preset)} view={COMP} />
+      <MascotThumb className="glyph" scene={glyphScene(project, preset)} view={compOf(project)} />
       {preset.name}
       {onPublish && (
         <button className="chip-pub" title={`Publish "${preset.name}" to the community`}
@@ -287,7 +287,7 @@ export function OtherTimelines() {
         {others.map((t) => (
           <button key={t.id} className="chip" title={`Add all of "${t.name}" as one clip · ${(t.timelineDurationMs / 1000).toFixed(1)}s`}
             onClick={() => addClipFrom({ label: t.name, timeline: t })}>
-            <MascotThumb className="glyph" scene={sceneAt({ ...project, activeTimelineId: t.id }, t.timelineDurationMs * 0.45, COMP)} view={COMP} />
+            <MascotThumb className="glyph" scene={sceneAt({ ...project, activeTimelineId: t.id }, t.timelineDurationMs * 0.45, compOf(project))} view={compOf(project)} />
             {t.name}
           </button>
         ))}

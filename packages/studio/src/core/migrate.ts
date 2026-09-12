@@ -23,7 +23,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 interface Migration {
   /** the version this step produces */
@@ -102,6 +102,39 @@ const MIGRATIONS: Migration[] = [
         inputs: [],
         transitions: [],
       };
+    },
+  },
+  {
+    to: 3,
+    label: 'freeform layers',
+    /**
+     * Two things, both about keeping an old project looking exactly as it did.
+     *
+     * The composition is written down. Every project before this rendered at 720×720
+     * because nothing could say otherwise; pinning it means a later change to the default
+     * cannot quietly reframe a file that never chose a size.
+     *
+     * A mapped layer's `flatOffset` is dropped. The renderer used to ignore it on anything
+     * placed on the sphere — the help text promised a nudge that never happened — and it
+     * is now applied, as the attachment offset. A value sitting there from before would
+     * suddenly move a feature that has never moved, so it goes: static value and tracks
+     * alike, on the rig and in presets. What was drawn is unchanged, which is the rule.
+     *
+     * Everything else new (fill, stroke, opacity, appearance, attachment, limbs) is
+     * optional with a default that reads as "what it always was", so it needs no step.
+     */
+    run(p) {
+      if (!p.composition) p.composition = { width: 720, height: 720 };
+      const mapped = new Set<string>();
+      for (const n of Object.values(p.rig?.nodes ?? {})) {
+        if (!n?.surface?.mapped) continue;
+        mapped.add(n.id);
+        delete n.surface.flatOffset;
+      }
+      if (!mapped.size) return;
+      const stale = (t: Track) => mapped.has(t?.nodeId) && (t.property === 'flatOffset.x' || t.property === 'flatOffset.y');
+      for (const tl of p.timelines ?? []) if (Array.isArray(tl?.tracks)) tl.tracks = tl.tracks.filter((t) => !stale(t));
+      for (const pr of p.presets ?? []) if (Array.isArray(pr?.tracks)) pr.tracks = pr.tracks.filter((t) => !stale(t));
     },
   },
 ];
