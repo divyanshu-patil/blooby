@@ -1000,3 +1000,30 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 /* the library is worth two more columns than the rail can give it */
 .drawer.wide { width: min(560px, 96vw); }
 .drawer.wide .chips { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+
+/* ============================================================================
+   Freeform: shapes, layers, limbs, appearance. Same vocabulary as above — hairlines,
+   the three-tone surface stack, ink for the one active thing, red only for delete.
+   ========================================================================= */
+@layer blooby {
+  /* --- shape picker ---------------------------------------------------------- */
+  .shape-pick { position: relative; flex: 1; min-width: 0; }
+  .shape-current { width: 100%; justify-content: flex-start; }
+  .shape-current svg { width: 14px; height: 14px; fill: currentColor; flex: none; }
+  .shape-custom { width: 14px; text-align: center; flex: none; }
+  .shape-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+  .shape-grid {
+    position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; width: 244px;
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; padding: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+  }
+  .shape-grid .shapepick-cell[aria-selected='true'] { border-color: var(--ink); background: var(--field); }
+  .shape-grid .shapepick-cell svg { width: 18px; height: 18px; fill: currentColor; }
+  .shape-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+  .shape-key {
+    font: 500 10.5px var(--ui); padding: 2px 7px; border-radius: 999px;
+    border: 1px solid var(--line-soft); background: var(--field); color: var(--ink-2);
+  }
+  .shape-key b { font: 500 10px var(--mono); color: var(--muted); margin-right: 2px; }
+  .shape-key[aria-pressed='true'] { border-color: var(--ink); }
+}

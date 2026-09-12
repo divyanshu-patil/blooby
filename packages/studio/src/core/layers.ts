@@ -1,6 +1,7 @@
 import { uid } from './id';
 import { compOf } from './comp';
 import { primitivePath, SHAPE_LABEL } from './path';
+import { importSvg, parseSvg } from './svg';
 import { screenToSurface } from './curvature';
 import { setProp } from './props';
 import { activeTrackFor, appearanceSpans, buildScene, evaluateRig, fromFrame, toFrame, WORLD, type LayerFrame } from './scene';
@@ -60,6 +61,61 @@ export function makeLimb(type: 'arm' | 'leg', side: -1 | 1, parentId: string | n
     zIndex: type === 'arm' ? -1 : -2,
     limb, ...over,
   };
+}
+
+/** SVG's own default paint — what an icon that says nothing about colour is drawn in. */
+const SVG_BLACK: ColorStop = { r: 20, g: 19, b: 24, a: 1 };
+
+/**
+ * An SVG as a real layer, never a picture pasted on top.
+ *
+ * One path becomes a normal shape layer whose outline IS that path — editable anchors,
+ * morphable, keyframeable like any other shape. Several become one vector layer that
+ * keeps their arrangement and their own colours. The original markup is kept either way,
+ * and anything that could not be carried over is returned as a warning to show, not
+ * dropped in silence. Null when the text is not an SVG at all.
+ */
+export function makeSvgLayer(text: string, name?: string): { node: RigNode; warnings: string[] } | null {
+  const raw = parseSvg(text);
+  const imp = importSvg(text);
+  if (!raw || !imp) return null;
+  const warnings = [...imp.unsupported];
+  const [, , vw, vh] = raw.viewBox.split(/[\s,]+/).map(Number);
+  const w0 = imp.width || vw || 100, h0 = imp.height || vh || 100;
+  // the longest side at 150px: big enough to grab, small enough to sit beside the mascot
+  const k = 150 / Math.max(w0, h0, 1e-6);
+  const size = { x: Math.round(w0 * k), y: Math.round(h0 * k) };
+  const mean = Math.sqrt(size.x * size.y);
+  // currentColor artwork is meant to be tinted: start it in something the dark stage shows
+  const color = imp.fill ?? (imp.tinted ? LIMB_FILL : SVG_BLACK);
+  const stroke = imp.stroke
+    ? { enabled: true, color: imp.stroke.color ?? color, width: Math.round(imp.stroke.width * mean * 10) / 10, lineCap: 'round' as const, lineJoin: 'round' as const }
+    : undefined;
+  const base: RigNode = {
+    id: uid('svg'), name: (name ?? '').trim().slice(0, 32) || 'SVG Layer', kind: 'svgLayer', parentId: null,
+    surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: 200, y: -160 } },
+    transform: { scale: { x: 1, y: 1 }, rotation: 0, length: 1 },
+    size, color, visible: true, zIndex: 0,
+    svg: { sourceMarkup: raw.markup, viewBox: raw.viewBox },
+    ...(stroke ? { stroke } : {}),
+  };
+  if (!imp.paths.length) {
+    warnings.push('nothing in it could be read as vector shapes — it is shown as the original picture, which the Lottie export cannot carry');
+    return { node: base, warnings };
+  }
+  if (imp.paths.length === 1) {
+    const only = imp.paths[0];
+    return {
+      warnings,
+      node: {
+        ...base, kind: 'primitive', primitive: { shape: 'pill' }, shapePath: only.d,
+        color: only.fill ?? color,
+        ...(only.fill === null ? { fill: { enabled: false } } : {}),
+        ...(only.stroke ? { stroke: { enabled: true, color: only.stroke, width: Math.round((only.strokeWidth ?? 0.02) * mean * 10) / 10, lineCap: 'round', lineJoin: 'round' } } : {}),
+      },
+    };
+  }
+  return { node: { ...base, svg: { ...base.svg!, paths: imp.paths, ...(warnings.length ? { unsupported: warnings } : {}) } }, warnings };
 }
 
 /** A container: draws nothing, carries its children through its own move, turn and scale. */

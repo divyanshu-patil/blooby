@@ -1,5 +1,6 @@
-import { primitivePath } from './path';
-import type { ColorStop, Emitter } from './types';
+import { mapPath, primitivePath, PRIMITIVE_SHAPES, SHAPE_LABEL, type ShapeParams } from './path';
+import { importSvg } from './svg';
+import type { ColorStop, Emitter, ShapeKind } from './types';
 
 /**
  * The built-in things an emitter can throw: real SVG shapes, not typed characters.
@@ -15,7 +16,11 @@ import type { ColorStop, Emitter } from './types';
 export interface ShapeLibraryEntry {
   id: string;
   name: string;
-  group: 'symbols' | 'drops' | 'confetti' | 'notes';
+  /** `outlines` are the layer shapes — the mascot's body, a freeform object — and they
+   *  can be thrown by an emitter like anything else here */
+  group: 'outlines' | 'symbols' | 'drops' | 'confetti' | 'notes';
+  /** set on the generated shapes: which core/path.ts generator draws it, with its dials */
+  outline?: ShapeKind;
   viewBox: string;
   markup: string;
   /** false when the artwork carries colours worth keeping */
@@ -58,7 +63,22 @@ export function outlinesOf(markup: string): { d: string; fill?: string }[] {
   return out;
 }
 
+/** The star an emitter throws is a rounded one; as a layer outline it starts sharp. */
+const LIBRARY_PARAMS: Partial<Record<ShapeKind, ShapeParams>> = { star: { points: 5, innerRatio: 0.45, vertexRadius: 0.25 } };
+
+/**
+ * THE shape library: one list for every shape anything in the editor offers — a layer's
+ * outline, the mascot's body, what an emitter throws. The generated outlines come first,
+ * one per core/path.ts generator, so a new generator is offered everywhere the moment it
+ * is added to PRIMITIVE_SHAPES; after them, drawn artwork.
+ */
 export const SHAPE_LIBRARY: ShapeLibraryEntry[] = [
+  ...PRIMITIVE_SHAPES.map((k): ShapeLibraryEntry => ({
+    id: k, name: SHAPE_LABEL[k], group: 'outlines', viewBox: '-0.6 -0.6 1.2 1.2', tint: true, outline: k,
+    markup: filled(primitivePath(k, LIBRARY_PARAMS[k])),
+    ...(k === 'star' ? { glyphs: ['★', '☆', '⭐'] } : {}),
+  })),
+
   // --- drops: a real teardrop, heavy at the bottom, not a circle -----------------
   {
     id: 'drop', name: 'Teardrop', group: 'drops', viewBox: '0 0 24 32', tint: true,
@@ -118,10 +138,6 @@ export const SHAPE_LIBRARY: ShapeLibraryEntry[] = [
       + ' M9.8 22.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Z'),
   },
   {
-    id: 'star', name: 'Star', group: 'symbols', viewBox: '-0.6 -0.6 1.2 1.2', tint: true, glyphs: ['\u2605', '\u2606', '\u2b50'],
-    markup: filled(primitivePath('star', { points: 5, innerRatio: 0.45, vertexRadius: 0.25 })),
-  },
-  {
     id: 'spark', name: 'Sparkle', group: 'symbols', viewBox: '0 0 24 24', tint: true, glyphs: ['\u2726', '\u2727', '\u2728', '\u2734'],
     markup: filled('M12 0c1.1 6.6 5.3 10.8 12 12-6.7 1.2-10.9 5.4-12 12-1.1-6.6-5.3-10.8-12-12C6.7 10.8 10.9 6.6 12 0Z'),
   },
@@ -137,6 +153,34 @@ export const SHAPE_LIBRARY: ShapeLibraryEntry[] = [
 ];
 
 export const shapeById = (id: string) => SHAPE_LIBRARY.find((s) => s.id === id);
+
+/**
+ * Any library shape as a layer outline in the unit box. A generated one takes its dials;
+ * drawn artwork is read off its own paths, keeping its proportions — a teardrop set on a
+ * square layer should still be a teardrop.
+ */
+export function libraryOutline(id: string, params?: ShapeParams): string | undefined {
+  const s = shapeById(id);
+  if (!s) return undefined;
+  if (s.outline) return primitivePath(s.outline, params ?? {});
+  const imp = importSvg(`<svg viewBox="${s.viewBox}">${s.markup}</svg>`);
+  const closed = imp?.paths.filter((p) => p.fill !== null);
+  if (!imp || !closed?.length) return undefined;
+  const k = Math.max(imp.width, imp.height) || 1;
+  return mapPath(closed.map((p) => p.d).join(' '), (p) => ({ x: (p.x * imp.width) / k, y: (p.y * imp.height) / k }));
+}
+
+let byOutline: Map<string, string> | null = null;
+/**
+ * Which library shape an outline is, if it is exactly one — how "Shape: Pill" can name
+ * whatever the playhead is showing, keyframes included, rather than whatever the layer
+ * was last set to. A hand-edited outline is none of them.
+ */
+export function shapeIdOf(d: string | undefined): string | undefined {
+  if (!d) return undefined;
+  byOutline ??= new Map(SHAPE_LIBRARY.map((s) => [libraryOutline(s.id) ?? '', s.id] as const).filter(([k]) => k));
+  return byOutline.get(d);
+}
 
 /** Confetti colours — paper, not a gradient. Cycled one per particle. */
 export const CONFETTI_COLORS: ColorStop[] = [

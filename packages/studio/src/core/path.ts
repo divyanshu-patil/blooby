@@ -14,7 +14,14 @@ import type { ShapeKind, Vec2 } from './types';
  * preview than in the export is worse than no morph.
  */
 
-type Seg = { p0: Vec2; p1: Vec2; c1?: Vec2; c2?: Vec2; /** first segment of a subpath */ head?: true };
+type Seg = {
+  p0: Vec2; p1: Vec2; c1?: Vec2; c2?: Vec2;
+  /** first segment of a subpath */
+  head?: true;
+  /** on a head: the subpath ended in Z. An imported polyline does not, and closing it
+   *  on the way through would give it an edge it never had. */
+  closed?: true;
+};
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const dist = (a: Vec2, b: Vec2) => Math.hypot(b.x - a.x, b.y - a.y);
@@ -25,6 +32,7 @@ function segments(d: string): Seg[] {
   const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? [];
   const segs: Seg[] = [];
   let opensSubpath = true;
+  let headAt = -1;
   let i = 0, cmd = '';
   let cur: Vec2 = { x: 0, y: 0 };
   let start: Vec2 = { x: 0, y: 0 };
@@ -48,7 +56,7 @@ function segments(d: string): Seg[] {
     const C = cmd.toUpperCase();
     const step = () => { if (i === before) i++; };
     const push = (...ss: Seg[]) => {
-      if (ss.length && opensSubpath) { ss[0].head = true; opensSubpath = false; }
+      if (ss.length && opensSubpath) { ss[0].head = true; opensSubpath = false; headAt = segs.length; }
       segs.push(...ss);
     };
 
@@ -61,6 +69,7 @@ function segments(d: string): Seg[] {
     }
     if (C === 'Z') {
       if (dist(cur, start) > 1e-9) push({ p0: cur, p1: start });
+      if (headAt >= 0 && !opensSubpath) segs[headAt].closed = true;
       cur = { ...start }; lastC = lastQ = null;
       // numbers after a Z are not valid SVG; drop the command so they fall through to the
       // skip below instead of re-entering this branch, which reads nothing
@@ -132,7 +141,7 @@ const finiteSeg = (s: Seg) => finite(s.p0) && finite(s.p1) && (!s.c1 || finite(s
 export function mapPath(d: string, f: (p: Vec2) => Vec2): string {
   const fp = (p: Vec2 | undefined) => (p ? f(p) : p);
   return subpathSegs(segments(d).filter(finiteSeg))
-    .map((g) => serialise(g.map((s) => ({ p0: f(s.p0), p1: f(s.p1), c1: fp(s.c1), c2: fp(s.c2) }))))
+    .map((g) => serialise(g.map((s) => ({ p0: f(s.p0), p1: f(s.p1), c1: fp(s.c1), c2: fp(s.c2), closed: s.closed }))))
     .join(' ');
 }
 
@@ -243,7 +252,7 @@ function serialise(segs: Seg[]): string {
   const f = (v: Vec2) => `${round(v.x)} ${round(v.y)}`;
   let d = `M ${f(segs[0].p0)}`;
   for (const s of segs) d += s.c1 && s.c2 ? ` C ${f(s.c1)} ${f(s.c2)} ${f(s.p1)}` : ` L ${f(s.p1)}`;
-  return `${d} Z`;
+  return segs[0].closed ? `${d} Z` : d;
 }
 
 /**
@@ -675,3 +684,8 @@ export function naturalShape(kind: string, primitive?: { shape: string }): Primi
   if (primitive?.shape === 'circle') return 'circle';
   return 'pill';
 }
+
+/** The outline a layer draws right now: its own, or the one its plain primitive is. What
+ *  a first shape keyframe holds, so keying a layer that never had an outline works. */
+export const naturalOutline = (n: { kind: string; primitive?: { shape: string }; shapePath?: string }) =>
+  n.shapePath ?? primitivePath(naturalShape(n.kind, n.primitive));

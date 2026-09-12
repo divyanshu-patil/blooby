@@ -14,8 +14,11 @@ export interface VectorPath {
   d: string;
   fill?: ColorStop | null;
   stroke?: ColorStop | null;
-  /** in the SVG's own units, scaled with the layer like the geometry is */
+  /** as a fraction of the layer's size (geometric mean of w and h), so an imported line
+   *  thickens with the artwork like it did in the file */
   strokeWidth?: number;
+  /** `fill-rule="evenodd"`, which is how a lot of icon art cuts its holes */
+  evenOdd?: true;
 }
 
 export type LineCap = 'butt' | 'round' | 'square';
@@ -136,7 +139,8 @@ export interface RigNode {
   shapePath?: string;
   /** what generated `shapePath`, so the parameter editor can keep offering its dials.
    *  Absent once the path is hand-edited — the dials no longer describe it. */
-  shape?: { kind: ShapeKind; points?: number; innerRatio?: number; cornerRadius?: number; vertexRadius?: number; rotation?: number };
+  /** `kind` is a SHAPE_LIBRARY id — a generated outline (a ShapeKind) or library artwork */
+  shape?: { kind: string; points?: number; innerRatio?: number; cornerRadius?: number; vertexRadius?: number; rotation?: number };
 
   /**
    * An imported SVG. `sourceMarkup` is the original, always kept. `paths` is its geometry

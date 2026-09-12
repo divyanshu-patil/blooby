@@ -8,6 +8,7 @@ import {
   type AppearanceRange, type AttachMode, type ReorderTo,
 } from './layers';
 import { compOf } from './comp';
+import { naturalOutline } from './path';
 import type { MorphMode } from './easing';
 import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
@@ -43,6 +44,10 @@ export interface Editor {
   selectedBlockId: string | null;
   /** the emitter whose trajectory handles are on the stage, if any */
   selectedEmitterId: string | null;
+  /** shape-edit mode: the selected outline's anchors are draggable on the stage. Off, the
+   *  stage shows the box and its handles instead — two sets of handles at once fight. */
+  editPoints: boolean;
+  setEditPoints: (v: boolean) => void;
   playhead: number;
   playing: boolean;
   loop: boolean;
@@ -345,6 +350,8 @@ export const useEditor = create<Editor>((set, get) => ({
   selectedTrackId: null,
   selectedBlockId: null,
   selectedEmitterId: null,
+  editPoints: false,
+  setEditPoints: (editPoints) => set({ editPoints }),
   playhead: 0,
   playing: false,
   loop: true,
@@ -390,7 +397,8 @@ export const useEditor = create<Editor>((set, get) => ({
     set({ project: future[0], past: [...past, project], future: future.slice(1), lastLabel: '' });
   },
 
-  select: (selection) => set({ selection }),
+  // a new selection starts out of point-edit mode: the anchors belong to one outline
+  select: (selection) => set({ selection, editPoints: false }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
   setPlaying: (playing) => set({ playing }),
   setLoop: (loop) => set({ loop }),
@@ -470,7 +478,12 @@ export const useEditor = create<Editor>((set, get) => ({
 
   addKeyframeNow(nodeId, property) {
     const { playhead, project } = get();
-    const v = read(project, evaluateRig(project, playhead), nodeId, property);
+    const rig = evaluateRig(project, playhead);
+    // a layer still drawing its plain ellipse or stadium has no outline to key yet — key
+    // the one it is visibly drawing, so its first keyframe is its real resting shape
+    const node = rig.nodes[nodeId];
+    const v = read(project, rig, nodeId, property)
+      ?? (property === 'shape.path' && node && node.kind !== 'limb' && !node.svg?.paths ? naturalOutline(node) : undefined);
     if (v === undefined) return;
     // writeKeyframe rather than a hand-rolled push: it scopes the new track to whichever
     // clip the playhead is in, and that is the scope activeTrackFor — and therefore the
