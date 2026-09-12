@@ -15,6 +15,8 @@ import { TimelineTabs } from './TimelineTabs';
 import { Gallery, openGallery } from './Gallery';
 import { importDotLottie } from '../export/dotlottie';
 import { StateMachine } from './StateMachine';
+import { looksLikeSvg } from '../core/svg';
+import { makeSvgLayer } from '../core/layers';
 import { activeTimeline } from '../core/types';
 import { startTourWhenReady } from '../kit/tour';
 import { TourMenu } from '../kit/TourMenu';
@@ -45,6 +47,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
   const selection = useEditor((s) => s.selection);
   const selectedBlockId = useEditor((s) => s.selectedBlockId);
   const deleteNode = useEditor((s) => s.deleteNode);
+  const duplicateLayer = useEditor((s) => s.duplicateLayer);
   const commit = useEditor((s) => s.commit);
   const loadProject = useEditor((s) => s.loadProject);
   const resetProject = useEditor((s) => s.resetProject);
@@ -82,17 +85,49 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+      if (mod && e.key.toLowerCase() === 'd' && selection[0]) { e.preventDefault(); duplicateLayer(selection[0]); return; }
       if (e.key === ' ') { e.preventDefault(); setPlaying(!useEditor.getState().playing); }
       if (e.key === 'Home') setPlayhead(0);
-      if ((e.key === 'Backspace' || e.key === 'Delete') && selection[0]) deleteNode(selection[0]);
+      if (e.key === 'Escape') useEditor.getState().setEditPoints(false);
+      if ((e.key === 'Backspace' || e.key === 'Delete') && selection.length) {
+        const rig = useEditor.getState().project.rig;
+        for (const id of selection) if (!rig.nodes[id]?.locked) deleteNode(id);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, setPlaying, setPlayhead, selection, deleteNode]);
+  }, [undo, redo, setPlaying, setPlayhead, selection, deleteNode, duplicateLayer]);
+
+  /**
+   * Paste an SVG anywhere — the stage, the timeline, the rails — and it becomes a layer,
+   * starting at the playhead. Text fields keep their own paste (the shape editor's path
+   * field turns an SVG into an outline instead), and anything that is not SVG markup is
+   * left for the timeline's keyframe paste.
+   */
+  const [pasteNote, setPasteNote] = useState<string | null>(null);
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const text = e.clipboardData?.getData('text/plain') || e.clipboardData?.getData('text/html') || '';
+      if (!looksLikeSvg(text)) return;
+      const made = makeSvgLayer(text);
+      if (!made) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const { addLayer: add, playhead } = useEditor.getState();
+      add(made.node, { appearAt: playhead });
+      setPasteNote(made.warnings.length ? `Pasted "${made.node.name}". Not carried over: ${made.warnings.join('; ')}.` : `Pasted "${made.node.name}".`);
+      setTimeout(() => setPasteNote(null), 4000);
+    };
+    // capture, so it is decided here before the timeline's keyframe paste sees it
+    window.addEventListener('paste', onPaste, true);
+    return () => window.removeEventListener('paste', onPaste, true);
+  }, []);
 
   const importProject = async (f: File) => {
     // §12: a .lottie brings its state machine in — inputs, states, transitions,
@@ -170,12 +205,16 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
                     ))}
                   </div>
                   <div className="rail-tab-body">
+                    {/* folds rather than a split, for the same reason as the Effects tab:
+                        the inspector is the section you are working in, so it gets the height */}
                     {tab === 'node' && (
                       selectedBlockId ? <ClipInspector /> : (
-                        <Split direction="column" storageKey="rail-node" panes={[
-                          { min: 160, content: <NodeInspector /> },
-                          { min: 140, content: <CameraPanel /> },
-                        ]} />
+                        <>
+                          <NodeInspector />
+                          <Collapsible title="Camera" storageKey="node-camera" defaultOpen={false}>
+                            <CameraPanel bare />
+                          </Collapsible>
+                        </>
                       )
                     )}
                     {tab === 'eyes' && <EyePanel />}
@@ -206,6 +245,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
         ]} />
       </div>
       <Gallery />
+      {pasteNote && <div className="toast" role="status">{pasteNote}</div>}
     </div>
   );
 }

@@ -413,14 +413,15 @@ export interface AppearanceRange { startMs?: number; endMs?: number; fadeInMs?: 
  * moving the clip still moves the sticker with it. With none, a timeline-wide one is
  * made. `null` removes them all: the layer is simply always there again.
  */
-export function setAppearance(p: Project, nodeId: string, range: AppearanceRange | null, atMs: number): void {
+export function setAppearance(p: Project, nodeId: string, range: AppearanceRange | null, atMs: number, entryId?: string): void {
   const tl = activeTimeline(p);
   if (range === null) {
-    if (tl.appearances) tl.appearances = tl.appearances.filter((a) => a.nodeId !== nodeId);
+    if (tl.appearances) tl.appearances = tl.appearances.filter((a) => a.nodeId !== nodeId || (entryId !== undefined && a.id !== entryId));
     return;
   }
   const spans = appearanceSpans(tl, nodeId);
-  const hit = spans.find((s) => atMs >= s.from && atMs <= s.to) ?? spans[0];
+  // the one being dragged, when the caller knows; else the one under the playhead
+  const hit = spans.find((s) => s.entry.id === entryId) ?? spans.find((s) => atMs >= s.from && atMs <= s.to) ?? spans[0];
   let entry = hit?.entry;
   const origin = hit?.origin ?? 0;
   if (!entry) { entry = { id: uid('ap'), nodeId }; (tl.appearances ??= []).push(entry); }

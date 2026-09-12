@@ -102,7 +102,7 @@ export interface Editor {
    */
   /** on top of everything (a limb keeps its place behind the body); `appearAt` starts it
    *  there on the timeline, which is what pasting at the playhead means */
-  addLayer: (node: RigNode, opts?: { appearAt?: number }) => void;
+  addLayer: (node: RigNode | RigNode[], opts?: { appearAt?: number }) => void;
   duplicateLayer: (id: string) => string | null;
   reorderLayer: (id: string, to: ReorderTo) => void;
   /** world ↔ mascot, keeping the layer where it is on screen */
@@ -110,7 +110,7 @@ export interface Editor {
   groupLayers: (ids: string[]) => void;
   ungroupLayer: (id: string) => void;
   /** in absolute ms; `null` removes every range so the layer is simply always there */
-  setAppearance: (nodeId: string, range: AppearanceRange | null, label?: string) => void;
+  setAppearance: (nodeId: string, range: AppearanceRange | null, label?: string, entryId?: string) => void;
   setComposition: (patch: Partial<{ width: number; height: number }>) => void;
   /** how the shape keyframe under the playhead becomes the next one */
   setShapeMorph: (nodeId: string, mode: MorphMode, durationMs?: number) => void;
@@ -566,14 +566,18 @@ export const useEditor = create<Editor>((set, get) => ({
   },
 
   addLayer(node, opts) {
+    const nodes = Array.isArray(node) ? node : [node];
+    if (!nodes.length) return;
     get().commit((p) => {
-      const n = structuredClone(node);
-      if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
-      if (n.parentId !== null && !p.rig.nodes[n.parentId]) n.parentId = p.rig.rootId;
-      p.rig.nodes[n.id] = n;
-      if (opts?.appearAt && opts.appearAt > 0) setAppearanceIn(p, n.id, { startMs: opts.appearAt }, opts.appearAt);
+      for (const src of nodes) {
+        const n = structuredClone(src);
+        if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
+        if (n.parentId !== null && !p.rig.nodes[n.parentId]) n.parentId = p.rig.rootId;
+        p.rig.nodes[n.id] = n;
+        if (opts?.appearAt && opts.appearAt > 0) setAppearanceIn(p, n.id, { startMs: opts.appearAt }, opts.appearAt);
+      }
     });
-    set({ selection: [node.id], selectedBlockId: null });
+    set({ selection: nodes.map((n) => n.id), selectedBlockId: null });
   },
 
   duplicateLayer(id) {
@@ -603,9 +607,9 @@ export const useEditor = create<Editor>((set, get) => ({
     set({ selection: [] });
   },
 
-  setAppearance(nodeId, range, label) {
+  setAppearance(nodeId, range, label, entryId) {
     const { playhead } = get();
-    get().commit((p) => setAppearanceIn(p, nodeId, range, playhead), label ?? `appear.${nodeId}`);
+    get().commit((p) => setAppearanceIn(p, nodeId, range, playhead, entryId), label ?? `appear.${nodeId}`);
   },
 
   setComposition(patch) {
