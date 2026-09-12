@@ -77,18 +77,33 @@ function reduce(frames: Vec[], eps: number): number[] {
 const same = (frames: Vec[]) =>
   frames.every((f) => f.every((v, d) => Math.abs(v - frames[0][d]) < 1e-6));
 
-/** A Lottie animated (or static) property, with linear temporal tangents. */
-function prop(frames: Vec[], eps: number, startFrame: number) {
+/**
+ * A Lottie animated (or static) property, with linear temporal tangents.
+ *
+ * `cuts` are frames whose value HOLDS until the next frame instead of ramping into it.
+ * Players draw between frames — a 30fps file on a 120Hz screen is mostly in-betweens — so
+ * a layer that vanishes on one frame and comes back somewhere else was drawn sliding from
+ * the old spot to the new one, half faded in, for a split second.
+ */
+function prop(frames: Vec[], eps: number, startFrame: number, cuts: number[] = []) {
   if (!frames.length) return { a: 0, k: [0] };
   if (same(frames)) return { a: 0, k: frames[0].length === 1 ? frames[0][0] : frames[0] };
-  const keep = reduce(frames, eps);
+  const hold = new Set(cuts);
+  const keep = [...new Set([...reduce(frames, eps), ...cuts.flatMap((i) => [i, i + 1])])].sort((a, b) => a - b);
   const k = keep.map((i, n) => {
     const key: Record<string, unknown> = { t: startFrame + i, s: frames[i] };
-    if (n < keep.length - 1) { key.i = { x: [1], y: [1] }; key.o = { x: [0], y: [0] }; }
+    if (n < keep.length - 1) {
+      if (hold.has(i)) key.h = 1;
+      else { key.i = { x: [1], y: [1] }; key.o = { x: [0], y: [0] }; }
+    }
     return key;
   });
   return { a: 1, k };
 }
+
+/** The frames after which a layer appears or disappears — where its opacity must cut. */
+const cutsOf = (present: boolean[]) =>
+  present.flatMap((v, f) => (f + 1 < present.length && v !== present[f + 1] ? [f] : []));
 
 export interface BakeResult {
   json: Record<string, unknown>;
@@ -184,6 +199,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     const pill = !outlines && first.shape !== 'ellipse';
 
     const ch: Chan = { p: [], s: [], r: [], o: [], c: [], fo: [], sc: [], so: [], sw: [], wh: [], rr: [] };
+    const present: boolean[] = [];
     let last: SceneItem = first;
     // seeded with the FIRST stroke it ever has, so the frames before it appears hold that
     // paint rather than ramping in from an invented black
@@ -208,6 +224,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       const alpha = cur.alpha ?? cur.color.a;
       const paint = (a: number) => (cur.alpha === undefined ? 1 : Math.min(1, a / Math.max(alpha, 1e-6)));
       ch.o.push([it ? round(alpha * 100, 2) : 0]);
+      present.push(!!it);
       ch.c.push([round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4), 1]);
       ch.fo.push([round(paint(cur.color.a) * 100, 2)]);
       const st = it?.stroke;
@@ -236,7 +253,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     }
 
     const ks = {
-      o: prop(ch.o, EPS.o, 0),
+      o: prop(ch.o, EPS.o, 0, cutsOf(present)),
       r: prop(ch.r, EPS.r, 0),
       p: prop(ch.p, EPS.p, 0),
       a: { a: 0, k: [0, 0] },
@@ -382,6 +399,7 @@ function textLayer(
   const pos: Vec[] = [];
   const op: Vec[] = [];
   const rot: Vec[] = [];
+  const present: boolean[] = [];
   let last: SceneItem = first;
   frames.forEach((scene, f) => {
     const it = scene.find((s) => s.id === id);
@@ -390,6 +408,7 @@ function textLayer(
     const size = Math.max(0.01, cur.h);
     pos.push([round(cur.cx, 2), round(cur.cy + size * BASELINE, 2)]);
     op.push([it ? round(cur.color.a * 100, 2) : 0]);
+    present.push(!!it);
     rot.push([round(cur.rotation, 3)]);
     const doc = {
       s: round(size, 2), f: FONT, t: cur.text ?? '', j: 2, tr: 0,
@@ -402,7 +421,7 @@ function textLayer(
   countKeys(docs.length);
 
   const ks = {
-    o: prop(op, EPS.o, 0),
+    o: prop(op, EPS.o, 0, cutsOf(present)),
     r: prop(rot, EPS.r, 0),
     p: prop(pos, EPS.p, 0),
     a: { a: 0, k: [0, 0] },

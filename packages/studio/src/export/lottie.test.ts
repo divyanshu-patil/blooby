@@ -1,6 +1,6 @@
 import { it } from 'vitest';
 import { check } from '../core/testkit';
-import { buildScene, evaluateRig } from '../core/scene';
+import { buildScene, evaluateRig, type SceneItem } from '../core/scene';
 import { builtinPresets, defaultProject } from '../core/defaults';
 import { primitivePath } from '../core/path';
 import { derivedDuration } from '../core/timeline';
@@ -72,7 +72,7 @@ import { activeTimeline } from '../core/types';
       const times = pr.k.map((x: any) => x.t);
       it('keyframe times strictly ascending', check(times.every((t: number, i: number) => i === 0 || t > times[i - 1])));
       it('every keyframe value is finite', check(pr.k.every((x: any) => x.s.every((v: number) => Number.isFinite(v)))));
-      it('non-final keys carry tangents', check(pr.k.slice(0, -1).every((x: any) => x.i && x.o)));
+      it('non-final keys carry tangents, or hold', check(pr.k.slice(0, -1).every((x: any) => (x.i && x.o) || x.h === 1)));
       it('final key carries none', check(pr.k[pr.k.length - 1].i === undefined));
     }
   }
@@ -191,4 +191,30 @@ import { activeTimeline } from '../core/types';
       && !!(typed.json as any).fonts, `skipped ${typed.skipped.join()} / ${textLayers.length} text layers`));
 
   ed().loadProject(defaultProject());
+}
+
+// --- a layer that leaves and comes back elsewhere must not streak across ----------------
+/**
+ * Players draw between frames — a 30fps file on a 120Hz screen is mostly in-betweens. A
+ * layer absent on frame 19 and back somewhere else on frame 20 had its opacity ramp 0 → 100
+ * across that gap while its position slid from where it was last seen, so for a split
+ * second a half-faded copy streaked across the canvas. Its opacity has to cut instead.
+ */
+{
+  const fps = 30;
+  const star = (cx: number) => ({
+    id: 'star', name: 'Star', shape: 'ellipse', cx, cy: 360, w: 40, h: 40, r: 20, rotation: 0,
+    color: { r: 255, g: 255, b: 255, a: 1 }, alpha: 1, depth: 0, zIndex: 1,
+  }) as SceneItem;
+  const sampleAt = (ms: number) => {
+    const f = Math.round((ms / 1000) * fps);
+    return f < 10 ? [star(100)] : f < 20 ? [] : [star(500)];
+  };
+  const j = bakeLottie({ ...defaultProject(), fps }, { background: null, name: 'cut', from: 0, to: 1000, sampleAt }).json as Record<string, any>;
+  const o = j.layers.find((l: any) => l.nm === 'Star').ks.o.k as { t: number; s: number[]; h?: number }[];
+  const key = (t: number) => o.find((k) => k.t === t);
+  it('a layer that vanishes holds its opacity until the frame it is gone', check(
+    key(9)?.h === 1 && key(9)?.s[0] === 100 && key(10)?.s[0] === 0, JSON.stringify(o)));
+  it('and one that comes back stays invisible until the frame it is back', check(
+    key(19)?.h === 1 && key(19)?.s[0] === 0 && key(20)?.s[0] === 100, JSON.stringify(o)));
 }
