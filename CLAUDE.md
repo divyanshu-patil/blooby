@@ -37,6 +37,13 @@ Everything else reads a `Project`.
 | the character | `Rig` / `RigNode` | features are placed by **angle** on a sphere, not pixels |
 | one animation | `Timeline` | a project has several; each is one **state** |
 | a placed preset | `Block` | clip on the strip |
+| a freeform object | `RigNode` (`primitive` / `svgLayer` / `limb` / `group`) | `parentId: null` = world, child of the body = attached |
+| a mascot | a `body` `RigNode` + parts with a `role` | several per project; `rig.rootId` is the first, and keeps the legacy ids |
+| a mascot's clips | `Block.mascotId` | its lane; no id is the first mascot's lane |
+| words | `RigNode.text` (`TextStyle`) | a layer; on an arc or along another layer's outline via `text.path` |
+| a drawn curve | `RigNode.curve` + `shapePath` | a shape layer; `guide: true` keeps it out of exports |
+| draw order | `RigNode.zIndex` | the ONLY ordering — `layerOrder()`, `reorderLayer()` |
+| when it is on screen | `Appearance` | on the timeline, scoped like an effect |
 | keyframes | `Track` / `Keyframe` | |
 | procedural motion | `Modifier` | shake, float, stretch, pendulum |
 | particles | `Emitter` / `EmitterPart` | zzz, tears, confetti |
@@ -54,6 +61,16 @@ Everything else reads a `Project`.
 | `core/stateMachine.ts` | dotLottie conversion both ways, evaluation, validation |
 | `core/migrate.ts` | **every old document shape.** Read it before changing `Project` |
 | `core/defaults.ts` | the default mascot, builtin presets, `makeTimeline` |
+| `core/showcase.ts` | the showcase presets, several-mascot ones included (they bring their own layers + ranges) |
+| `core/textPresets.ts` | curved-text and letters-arriving presets; `textPresetOnto` plays one on the selected text |
+| `core/layers.ts` | **every layer operation** — order, attach, group, duplicate, appearance, SVG/shape/limb/text/curve makers, `addMascot`. Store and copilot both call it |
+| `core/mascot.ts` | what a mascot is: `makeMascot`, roles, `mascotOf`, lanes, `retargetId` (a preset onto another mascot) |
+| `core/text.ts` | text layout and glyph placement — lines, arcs, along a path, per-letter motion |
+| `core/fonts.ts` | Google Fonts via Fontsource: catalogue, lazy loading, opentype.js metrics and outlines |
+| `core/curve.ts` | anchor editing for drawn curves — insert, move, remove, close, reverse |
+| `core/limb.ts` | the rubber-hose engine: points + length → outline (Cavalry-style, length is kept) |
+| `core/svg.ts` | SVG → vector paths (and the sanitised markup kept alongside) |
+| `core/comp.ts` | `compOf(project)` — the canvas size. Never hard-code 720 |
 | `core/publicApi.ts` | `window.blooby.*` — the host-page surface |
 
 ### Export
@@ -71,7 +88,12 @@ Everything else reads a `Project`.
 
 `ui/Editor.tsx` is the frame — read it first to see how the panels fit together.
 Right-rail tabs: `Inspector` (node), `EyePanel`, `Effects`, `StateMachine`, `Copilot`.
-`ui/Stage.tsx` is the canvas, `ui/Timeline.tsx` the strip and keyframe lanes.
+`ui/Stage.tsx` is the canvas and its tools (select, hand, shape, pen, text, turn), with
+`ui/CurveHandles.tsx` and `ui/TextPathHandles.tsx` for direct manipulation;
+`ui/Timeline.tsx` the strip, its per-mascot lanes and the keyframe lanes. The inspector's
+sections for text, curves and mascots are `ui/TextSections.tsx`, `ui/CurveSection.tsx`,
+`ui/MascotSections.tsx`; `ui/FontPicker.tsx` is the font browser and
+`ui/CompositionDialog.tsx` the canvas-settings modal.
 
 `ui/bits.tsx` has the shared controls (`PropRow`, `NumberField`, `Panel`) — use them
 rather than a new one-off input.

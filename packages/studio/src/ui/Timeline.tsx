@@ -1,13 +1,16 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor, keyframeTimes, writeKeyframe } from '../core/store';
-import { COMP } from '../core/defaults';
-import { sceneAt } from '../core/scene';
+import { compOf } from '../core/comp';
+import { appearanceSpans, sceneAt } from '../core/scene';
+import { shapeById, shapeIdOf } from '../core/emitters';
 import { blockStarts, blocksEnd, characteristicTime, DEFAULT_TRANSITION_EASING, DEFAULT_TRANSITION_MS, explicitTransitionFor, fmtSec } from '../core/timeline';
 import { applyEasing, easingLabel, easingShape } from '../core/easing';
 import { activeTimeline, MODIFIERS, type Block, type EasingCurve, type Keyframe, type KeyValue, type Project, type Timeline, type Track, type Transition } from '../core/types';
 import { findEffect, PROP_LABEL } from '../core/props';
 import { MascotThumb } from './Mascot';
+import { mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
+import { textName } from '../core/layers';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
 import { NumberField } from './bits';
@@ -57,6 +60,16 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const savePreset = useEditor((s) => s.savePreset);
   const setBlockColor = useEditor((s) => s.setBlockColor);
   const commit = useEditor((s) => s.commit);
+  const setAppearance = useEditor((s) => s.setAppearance);
+  // one lane of clips per mascot; the strip shows the one being worked on
+  const activeLane = useEditor((s) => s.activeLane);
+  const setActiveLane = useEditor((s) => s.setActiveLane);
+  const mascots = mascotsOf(project.rig);
+  const lane = activeLane && activeLane !== project.rig.rootId && project.rig.nodes[activeLane]?.kind === 'body' ? activeLane : '';
+  const laneMascot = lane || undefined;
+  const inLane = tl.blocks.map((b, i) => ({ b, i })).filter(({ b }) => (b.mascotId ?? '') === lane);
+  /** a position in this lane's clips, as the index in the timeline's one list of them */
+  const globalAt = (k: number) => (k < inLane.length ? inLane[k].i : inLane.length ? inLane[inLane.length - 1].i + 1 : tl.blocks.length);
 
   const [view, setView] = useState<'tracks' | 'graph'>('tracks');
   const [zoom, setZoom] = useState(1);
@@ -141,6 +154,8 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
     [tl.tracks, selection, selectedEmitterId, isolatedBlockId],
   );
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
+  // the lanes grouped by whose they are: each mascot, then each text, curve and layer
+  const grouped = useMemo(() => groupTracks(project, visible), [project, visible]);
   const starts = blockStarts(tl);
   const selectEmitter = useEditor((s) => s.selectEmitter);
   const [showBands, setShowBands] = useState(true);
@@ -209,7 +224,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
     () => tl.blocks.map((b, i) => {
       const preset = project.presets.find((p) => p.id === b.presetId);
       const rel = preset ? (characteristicTime(preset) / preset.durationMs) * b.durationMs : b.durationMs * 0.45;
-      return sceneAt(project, starts[i] + rel, COMP);
+      return sceneAt(project, starts[i] + rel, compOf(project));
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tl.blocks, tl.tracks, project.rig, tl.modifiers],
@@ -318,14 +333,24 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
       const mod = e.metaKey || e.ctrlKey;
 
       if (mod && e.key === 'c') { copyKeys(); }
-      else if (mod && e.key === 'v') { e.preventDefault(); pasteKeys(); }
       else if (mod && e.key === 'a') {
         e.preventDefault();
         setSelKeys(new Set(tl.tracks.flatMap((t) => t.keyframes.map((k) => kfKey(t.id, k.id)))));
       } else if (e.key === 'Escape') setSelKeys(new Set());
     };
+    // Paste is a paste EVENT, not a ⌘V keydown: cancelling the keydown killed every paste
+    // in the app, which is how an SVG copied from Figma could never reach the editor. An
+    // SVG on the clipboard is taken first (capture, in Editor.tsx); this sees the rest.
+    const onPaste = (e: ClipboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (!clipboard.current.length) return;
+      e.preventDefault();
+      pasteKeys();
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('paste', onPaste);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('paste', onPaste); };
   });
 
   const selKf = sel && tl.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
@@ -333,6 +358,35 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const colorForBlockId = (id: string | undefined) => (id ? clipColor(project, tl.blocks.find((b) => b.id === id)) : undefined);
 
   const tickStep = duration > 12000 ? 2000 : duration > 5000 ? 1000 : 500;
+
+  // When the selected layer is on screen: its own lane, above the property lanes, with
+  // the range as a bar you drag by either end or by the middle.
+  const appearNode = selection.length === 1 && selection[0] !== project.rig.rootId ? project.rig.nodes[selection[0]] : undefined;
+  const appearSpans = appearNode ? appearanceSpans(tl, appearNode.id) : [];
+  const appearSnaps = [...jumps, playhead, ...starts, duration];
+  const dragAppear = (entryId: string, grab: 'a' | 'b' | 'both', from: number, to: number) => (down: React.PointerEvent) => {
+    if (!appearNode) return;
+    down.preventDefault();
+    down.stopPropagation();
+    const x0 = down.clientX;
+    const reach = 6 / pxPerMs;
+    const snap = (v: number, free: boolean) => {
+      if (free) return v;
+      const hit = appearSnaps.reduce((best, s2) => (Math.abs(s2 - v) < Math.abs(best - v) ? s2 : best), appearSnaps[0]);
+      return Math.abs(hit - v) <= reach ? hit : v;
+    };
+    const move = (e: PointerEvent) => {
+      const d = (e.clientX - x0) / pxPerMs;
+      let a = from, b = to;
+      if (grab === 'a') a = Math.max(0, Math.min(to - 40, snap(from + d, e.shiftKey)));
+      else if (grab === 'b') b = Math.min(duration, Math.max(from + 40, snap(to + d, e.shiftKey)));
+      else { const w = to - from; a = Math.max(0, Math.min(duration - w, snap(from + d, e.shiftKey))); b = a + w; }
+      setAppearance(appearNode.id, { startMs: Math.round(a), endMs: Math.round(b) }, `appear.${appearNode.id}`, entryId);
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const activeBlock = starts.findIndex((s, i) => playhead >= s && playhead < s + tl.blocks[i].durationMs);
 
   return (
@@ -415,7 +469,21 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
             Editing "{isolatedBlock.name}" only · show all
           </button>
         )}
-        <div ref={stripRef} className={tl.blocks.length ? 'strip' : 'strip empty'}
+        {mascots.length > 1 && (
+          <div className="lane-chips" role="tablist" aria-label="Whose clips">
+            {mascots.slice().reverse().map((m) => {
+              const key = m.id === project.rig.rootId ? '' : m.id;
+              const n = tl.blocks.filter((b) => (b.mascotId ?? '') === key).length;
+              return (
+                <button key={m.id} role="tab" className="lane-chip" aria-selected={lane === key}
+                  title={`${mascotLabel(project.rig, m)}'s clips — they play alongside the other mascots'`} onClick={() => setActiveLane(key)}>
+                  <span className="lane-chip-name">{mascotLabel(project.rig, m)}</span><span className="lane-chip-n">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div ref={stripRef} className={inLane.length ? 'strip' : 'strip empty'}
           onDragOver={(e) => {
             if (e.dataTransfer.types.includes('text/blooby-preset') || e.dataTransfer.types.includes('text/blooby-block-reorder')) {
               e.preventDefault();
@@ -425,7 +493,8 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
           onDrop={(e) => {
             const kids = [...e.currentTarget.querySelectorAll('.block')];
             const idx = kids.findIndex((k) => e.clientX < k.getBoundingClientRect().left + k.getBoundingClientRect().width / 2);
-            const target = idx < 0 ? kids.length : idx;
+            // a place among THIS lane's clips, turned into the timeline's own index
+            const target = globalAt(idx < 0 ? kids.length : idx);
 
             const reorderId = e.dataTransfer.getData('text/blooby-block-reorder');
             if (reorderId) {
@@ -435,10 +504,10 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
               return;
             }
             const presetId = e.dataTransfer.getData('text/blooby-preset');
-            if (presetId) { e.preventDefault(); addBlock(presetId, target); }
+            if (presetId) { e.preventDefault(); addBlock(presetId, target, laneMascot); }
           }}>
-          {!tl.blocks.length && 'Drag a preset here, or click one to append it.'}
-          {tl.blocks.map((b, i) => {
+          {!inLane.length && (mascots.length > 1 ? `No clips for ${mascotLabel(project.rig, project.rig.nodes[lane || project.rig.rootId])} yet — drag a preset here, or click one.` : 'Drag a preset here, or click one to append it.')}
+          {inLane.map(({ b, i }, li) => {
             const start = starts[i];
             const within = playhead >= start && playhead < start + b.durationMs;
             const color = clipColor(project, b);
@@ -468,7 +537,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                 <input type="color" className="block-color" title="Clip accent color — shows in the strip, track lanes and graph"
                   value={color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
                   onChange={(e) => { e.stopPropagation(); setBlockColor(b.id, e.target.value); }} />
-                <MascotThumb className="thumb" scene={thumbs[i]} view={COMP} />
+                <MascotThumb className="thumb" scene={thumbs[i]} view={compOf(project)} />
                 <span style={{ font: '600 10.5px var(--ui)', width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                 <DurInput ms={b.durationMs} label={`${b.name} duration`} locked={tl.durationMode === 'even'}
                   onCommit={(sec) => setBlockDuration(b.id, sec * 1000)} />
@@ -490,7 +559,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                     onPointerCancel={() => { resize.current = null; resizing.current = false; }} />
                 )}
               </div>
-              {i < tl.blocks.length - 1 && (
+              {li < inLane.length - 1 && (
                 <TransitionConnector
                   transition={explicitTransitionFor(tl, b.id)}
                   onChange={(patch) => setTransition(b.id, patch)}
@@ -500,7 +569,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
             );
           })}
           <button className="btn icon add-blank-clip" title="Add a blank clip — the rig's own rest pose, ready to animate from scratch"
-            onClick={() => addBlock('p_neutral')}>+</button>
+            onClick={() => addBlock('p_neutral', undefined, laneMascot)}>+</button>
         </div>
       </div>
 
@@ -535,7 +604,14 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                   {effectSpans.length} effect{effectSpans.length === 1 ? '' : 's'}
                 </button>
               )}
-              {visible.map((t) => {
+              {appearNode && (
+                <div className="appear-name" title="When this layer is on screen — drag the bar's ends">
+                  <span>On screen</span><span className="node">{appearNode.name}</span>
+                </div>
+              )}
+              {grouped.map((row) => {
+                if (!row.track) return <div key={row.key} className="tgroup"><span className="tgroup-name">{row.group}</span><span className="tgroup-tag">{row.tag}</span></div>;
+                const t = row.track;
                 const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                 return (
                   <div key={t.id} style={{ display: 'contents' }}>
@@ -567,7 +643,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
               {box && <div className="marquee" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
               <div style={{ position: 'relative' }}>
                 <div className="ruler" onPointerDown={scrub} onPointerMove={scrub}>
-                  {tl.blocks.map((b, i) => (
+                  {inLane.map(({ b, i }) => (
                     <div key={b.id} className="blockband" title={b.name}
                       style={{ left: starts[i] * pxPerMs, width: b.durationMs * pxPerMs, borderLeftColor: clipColor(project, b) || undefined }}>
                       {b.name}
@@ -603,7 +679,29 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                     ))}
                   </div>
                 )}
-                {visible.map((t) => {
+                {appearNode && (
+                  <div className="appear-lane" onPointerDown={(e) => e.stopPropagation()}>
+                    {appearSpans.length ? appearSpans.map(({ entry, from, to }) => (
+                      <div key={entry.id} className="appear-bar" style={{ left: from * pxPerMs, width: Math.max(4, (to - from) * pxPerMs) }}
+                        title={`${appearNode.name} on screen ${fmtSec(from)} → ${fmtSec(to)} — drag to move, drag an end to trim (shift: no snapping)`}
+                        onPointerDown={dragAppear(entry.id, 'both', from, to)}>
+                        {!!entry.fadeInMs && <span className="appear-fade in" style={{ width: Math.min(entry.fadeInMs * pxPerMs, (to - from) * pxPerMs) }} />}
+                        {!!entry.fadeOutMs && <span className="appear-fade out" style={{ width: Math.min(entry.fadeOutMs * pxPerMs, (to - from) * pxPerMs) }} />}
+                        <span className="appear-grip a" onPointerDown={dragAppear(entry.id, 'a', from, to)} />
+                        <span className="appear-grip b" onPointerDown={dragAppear(entry.id, 'b', from, to)} />
+                      </div>
+                    )) : (
+                      <button className="appear-add" style={{ left: playhead * pxPerMs }}
+                        title="Always on screen. Click to make it appear from the playhead to the end."
+                        onClick={() => setAppearance(appearNode.id, { startMs: Math.round(playhead), endMs: Math.round(duration) })}>
+                        always · set range from here
+                      </button>
+                    )}
+                  </div>
+                )}
+                {grouped.map((row) => {
+                  if (!row.track) return <div key={row.key} className="tgroup-lane" />;
+                  const t = row.track;
                   const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                   return (
                     <div key={t.id} style={{ display: 'contents' }}>
@@ -615,7 +713,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                           <span key={k.id} className="kfd" data-k={kfKey(t.id, k.id)}
                             data-sel={selKeys.has(kfKey(t.id, k.id))} data-shape={easingShape(k.easingOut)}
                             style={{ left: k.time * pxPerMs }}
-                            title={`${(k.time / 1000).toFixed(2)}s · ${easingLabel(k.easingOut)} — shift/cmd-click to select several`}
+                            title={`${(k.time / 1000).toFixed(2)}s · ${typeof k.value === 'string' ? `${shapeById(shapeIdOf(k.value) ?? '')?.name ?? 'custom shape'} · ` : ''}${easingLabel(k.easingOut)} — shift/cmd-click to select several`}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -857,6 +955,33 @@ export function DurationField() {
       </select>
     </div>
   );
+}
+
+/**
+ * The track rows under headings: one per mascot (its body, eyes, limbs and anything hung
+ * on it), then one per text, curve and other layer, then the effects. With a single owner
+ * there are no headings — a heading over the only group says nothing.
+ */
+function groupTracks(project: Project, tracks: Track[]): { key: string; group?: string; tag?: string; track?: Track }[] {
+  const rig = project.rig;
+  const owner = (id: string) => {
+    const m = mascotOf(rig, id);
+    if (m) return { key: `m:${m.id}`, rank: [0, -m.zIndex], group: mascotLabel(rig, m), tag: 'Mascot' };
+    const n = rig.nodes[id];
+    if (!n) return { key: 'fx', rank: [4, 0], group: 'Effects', tag: 'Effect' };
+    if (n.kind === 'text') return { key: `n:${id}`, rank: [1, -n.zIndex], group: `“${textName(n.text?.content ?? '')}”`, tag: 'Text' };
+    return { key: `n:${id}`, rank: [n.curve ? 2 : 3, -n.zIndex], group: n.name, tag: n.curve ? 'Curve' : n.kind === 'svgLayer' ? 'SVG' : n.kind === 'group' ? 'Group' : 'Shape' };
+  };
+  const buckets = new Map<string, ReturnType<typeof owner> & { tracks: Track[] }>();
+  for (const t of tracks) {
+    const o = owner(t.nodeId);
+    const b = buckets.get(o.key) ?? { ...o, tracks: [] };
+    b.tracks.push(t);
+    buckets.set(o.key, b);
+  }
+  const sorted = [...buckets.values()].sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1]);
+  if (sorted.length <= 1) return tracks.map((t) => ({ key: t.id, track: t }));
+  return sorted.flatMap((b) => [{ key: `g:${b.key}`, group: b.group, tag: b.tag }, ...b.tracks.map((t) => ({ key: t.id, track: t }))]);
 }
 
 /** What a lane belongs to: a layer, or an effect addressed by its own id. */

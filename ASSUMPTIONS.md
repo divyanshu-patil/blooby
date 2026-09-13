@@ -57,8 +57,112 @@ distance is the rig setting, and the left eye simply holds a negative value.
 instances with per-instance durations. A track that came from a preset remembers its
 block and is retimed with it; a hand-authored track is free.
 
-**Composition is a fixed 720×720.** Nothing in the spec parameterises it, and a fixed
-size makes exports deterministic.
+**The composition size is the project's own** (`Project.composition`, read through
+`compOf()` in `core/comp.ts`), 64–4096px a side, presets 720², 1080², 1920×1080 and
+1080×1920. It used to be a fixed 720×720; migration v3 writes that size into every older
+project, so no default change can ever reframe a file that never chose one. The mascot is
+placed at the canvas centre at its own pixel size — a wider canvas gives it room, it never
+stretches it. Every render and export (stage, thumbnails, GIF/MP4/PNG, Lottie, dotLottie)
+reads the same `compOf(project)`.
+
+## Freeform layers
+
+**One draw order.** `RigNode.zIndex` is the only ordering there is; the layer panel, the
+stage, the timeline and the exporter all read it (`layerOrder()` in `core/layers.ts`), and
+`reorderLayer` keeps it dense and unique so "forward one" is always one layer. There is no
+separate z-index for world layers or for attachments.
+
+**World vs mascot is the parent.** `parentId: null` on anything but the root is a WORLD
+layer, placed by `flatOffset` from the composition centre; a child of the body is
+ATTACHED and rides its moves, roll and squash. Switching is `placeUnder()`, which reads the
+layer's frame off the same walk `buildScene` draws with and re-expresses its position,
+size and angle in the new parent's frame — so it never jumps. Attached over the silhouette,
+it lands on the sphere (yaw/pitch); off the rim it attaches as a flat offset.
+*Not animatable:* which frame a layer lives in is structural, not a value. "Star moves off
+into world space" in the Magical Reveal preset is the attachment offset carrying it away.
+
+**`flatOffset` on a mapped layer now does something.** It is the attachment nudge, in the
+body's own frame. Before, the renderer ignored it on anything placed on the sphere (the
+help text promised a nudge that never happened). Migration v3 drops any such value, and
+its tracks, from older projects so nothing that never moved starts moving.
+
+**Appearance ranges are scoped like effects** (`Timeline.appearances`): the clip when
+`blockId` is set, the timeline otherwise, `startMs`/`endMs` relative to the scope. They
+fold into the evaluated `opacity` in `evaluateRig`, so the stage, the state blends and the
+Lottie bake all get them for free. A layer with no range is always there — unless it is
+`ranged` (a preset's own sticker), in which case it only exists where some range says so.
+A preset never gives a range to a layer the user already had and is not `ranged`.
+
+**Fill and stroke are separate tracks.** `color` stays the fill (every old keyframe keeps
+driving it); `fill.opacity`, `fill.enabled`, `stroke.color`, `stroke.width`,
+`stroke.opacity`, `stroke.enabled` are PROPS rows. On/off are 0/1 numbers so they key;
+between keys they switch at the halfway mark. Line cap and join are static — Lottie's
+`lc`/`lj` are too. Stroke width is screen px (non-scaling in the preview; divided by the
+layer's scale in the Lottie, where strokes scale).
+
+**Imported SVG is parsed, not pasted.** `core/svg.ts` turns path, rect (rounded), circle,
+ellipse, line, polyline, polygon, groups and transforms into vector paths, regex over tags
+so it runs identically in node and the browser. One path becomes an ordinary shape layer
+(editable anchors, morphable); several become one vector layer that keeps each path's own
+paint. Text, bitmaps, `<use>`, masks, filters and gradients are named in a warning; the
+original markup is kept on the layer either way. A colour every path shares is promoted to
+the layer's own fill/stroke, so the Fill row recolours an icon.
+
+**Limbs keep their length, the way Cavalry's rubber hose does.** The points are exactly
+where the shoulder and hand (hip, knee, ankle) sit; `length` is the hose's real length
+along its curve. Bring the hand closer and it bends — a circular arc exactly that long —
+pull it away and it straightens and stops short rather than stretch. `bend`'s sign picks
+the side and its size the shape (1 an arc, 0 a sharp elbow). Rubber hose off is the plain
+rigid limb, straight between the points. Legs pass through the knee, each half taking its
+share of the length. It is all a pure function of the points and dials (`core/limb.ts`),
+cached by input, so `sceneAt(t)` stays scrubbable in any order.
+*Residual:* a leg's in-between length (just gone slack) is matched by bisection over a
+blend of the taut and bent curves, exact to the sampling, not to the float.
+
+**Shape morph modes are easings**, not a second interpolation path: Cut is a `hold`
+easing, Overshoot and Elastic are curves that pass 1 — and `morphPath` extrapolates past
+its ends rather than clamping, which is the only reason those two read as morphs.
+
+## Several mascots, text and curves
+
+**A mascot is a body and what rides it** (`core/mascot.ts`). There is one definition,
+`makeMascot`; every mascot is an instance with its own ids, tracks and lane of clips. The
+first mascot is `rig.rootId` and keeps the ids every older file and preset use (`body`,
+`eyeL`, `eyeR`); any other names its parts `<body>.eyeL` and tags them with a `role`, which
+is how a preset written for `eyeL` finds the second mascot's left eye (`retargetId`).
+A mascot following another is a body parented to a body; a loop is refused.
+
+**Lanes are `Block.mascotId`.** Blocks tile within their lane; the first mascot's lane has
+no id. A layer plays in its mascot's lane, but a block may also drive another mascot's parts
+while it runs — which is how "Two Friends", placed on one lane, animates the friend it brought.
+
+**A body draws at twice its `size`.** The default mascot is ~296px across on a 720 canvas;
+`flatOffset`s are composition px and arc radii are unscaled. Presets that place things
+round a mascot are written against that (they were first written against 148 and put words
+inside the head).
+
+**Text is outlines, not `<text>`, wherever the font has loaded.** Fonts come from the
+Fontsource CDN (Google Fonts, **latin subset only**) and are parsed with opentype.js for
+metrics and glyph outlines, so the stage, the raster export and Lottie draw the same shapes.
+Until a face arrives the stage uses deterministic fallback metrics and a `<text>` element;
+a Lottie baked without the face falls back to live text layers and says so in its warnings.
+A **fixed text height is not implemented** — a box wraps to a width and grows downward.
+The letter motions (pop, fade, drop, rise, scatter, wave) are one keyed `progress`, and
+which motion plays is a discrete `text.chars.kind` track, so a preset can switch it.
+
+**Curves are ordinary shape layers** with an open or closed `shapePath` and a `curve.type`
+— smooth, polyline or Bézier; a quadratic is covered by Bézier. Two keys of the same
+structure interpolate anchor by anchor (`lerpPath`), so path keyframes move a curve and the
+text on it. A `guide` curve shows in the editor and is left out of every export.
+
+**Text presets on a selected text.** A text preset whose own words are straight plays on
+the selected text layer instead (`textPresetOnto`): tracks move to it, the typewriter's
+count scales to its length, and the closing keys that let the preset's own caption loop are
+dropped, so the user's words stay once they have arrived. Presets with words on a curve of
+their own, or with another mascot, always bring their layers.
+
+**The view is not the camera.** Pan and zoom on the stage move the editor's view only;
+Recentre resets that view. The preview and every export frame the composition.
 
 ## Timeline
 
@@ -101,12 +205,18 @@ compares it against the canvas frame by frame — worst case under a pixel.
 own dimensions halves the animated properties and is what every Lottie player optimises
 for. A non-uniformly scaled rounded rect keeps elliptical corners, which is still smooth.
 
-**Only `el` (ellipse) and `rc` (rounded rect) are emitted**, never `sh` paths, and the
-rect radius is always `min(w,h)/2`. There is no way for the output to contain a sharp
-corner.
+**Plain features export as `el`/`rc`; everything with an outline as `sh` beziers.** An
+eye or the round body is still an ellipse or a rounded rect (radius `min(w,h)/2`). A layer
+with an outline — a morph, a library shape, an imported SVG, a limb — is bezier data: a
+static outline written EXACTLY (its real vertices and tangents, `pathToBezier`), an
+animated one resampled per frame and then thinned by the same line-fit reduction as every
+other channel. Several subpaths are several `sh`, so a leg's foot and the dot of an "i" are
+never joined by a stray edge.
 
-**SVG layers are skipped by the Lottie exporter** and named in the result message.
-Lottie has no way to embed arbitrary SVG markup. They still render in GIF, MP4 and PNG.
+**Nothing the editor draws is silently dropped.** Imported SVG exports as native vector
+paths with their own fills and strokes. The one exception is an SVG with no readable
+geometry at all, which is named in `skipped` — never faked as a rounded rectangle — and
+still renders in GIF, MP4 and PNG from its preserved markup.
 
 **`.lottie` is written by a hand-rolled store-only ZIP** (`export/zip.ts`, ~45 lines).
 The payload is already-minified JSON going straight into a player, so deflate would save

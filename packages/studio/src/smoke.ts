@@ -10,7 +10,7 @@
 import { sceneToSvg, videoMime } from './export/raster';
 import { buildDotLottie } from './export/dotlottie';
 import { sceneAt } from './core/scene';
-import { COMP } from './core/defaults';
+import { compOf } from './core/defaults';
 import { useEditor } from './core/store';
 
 const step = (m: string) => { document.title = 'SMOKE ' + m; };
@@ -19,7 +19,7 @@ export async function smoke() {
   step('start');
   const p = useEditor.getState().project;
   step('got project');
-  const svg = sceneToSvg(sceneAt(p, 500, COMP), '#17161b');
+  const svg = sceneToSvg(sceneAt(p, 500, compOf(p)), '#17161b', compOf(p));
   const img = new Image();
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   step('svg ' + svg.length);

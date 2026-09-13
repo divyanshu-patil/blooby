@@ -1,21 +1,23 @@
-import type { EasingCurve, Emitter, EmitterPart, Expression, Keyframe, Modifier, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
+import type { Anchor, EasingCurve, Emitter, EmitterPart, Expression, Keyframe, Modifier, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
 import { derivedDuration } from './timeline';
 import { primitivePath } from './path';
 import { CONFETTI_COLORS } from './emitters';
 import { SCHEMA_VERSION } from './migrate';
+import { uid } from './id';
+import { COMP } from './comp';
+import { showcasePresets } from './showcase';
+import { textPresets } from './textPresets';
+import { BONE, INK, makeBody, makeEye, retargetId, roleOf } from './mascot';
 
-export const uid = (p = 'n') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
-
-export const COMP = { width: 720, height: 720 };
-
-export const BONE = { r: 242, g: 239, b: 233, a: 1 };
+export { uid } from './id';
+export { COMP, compOf } from './comp';
+export { BONE, INK, makeBody, makeEye } from './mascot';
 /** Mood colours the built-in presets animate the body into and back out of. */
 export const ANGRY_RED = { r: 214, g: 74, b: 58, a: 1 };
 export const COLD_BLUE = { r: 150, g: 203, b: 232, a: 1 };
 export const SAD_BLUE = { r: 176, g: 192, b: 214, a: 1 };
 export const TEAR_BLUE = { r: 96, g: 160, b: 225, a: 1 };
 export const DROWSY = { r: 108, g: 106, b: 128, a: 1 };
-export const INK = { r: 20, g: 19, b: 24, a: 1 };
 
 const ease = (name: string): EasingCurve =>
   name === 'linear' ? { type: 'linear' } : { type: 'preset', name: name as 'easeInOut' };
@@ -27,27 +29,6 @@ export const kf = (time: number, value: KeyValue, easing = 'easeInOut'): Keyfram
 const track = (nodeId: string, property: string, keyframes: Keyframe[]): Track => ({
   id: uid('t'), nodeId, property, keyframes,
 });
-
-export function makeBody(): RigNode {
-  return {
-    id: 'body', name: 'Body', kind: 'body', parentId: null,
-    surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: 0, y: 0 } },
-    transform: { scale: { x: 1, y: 1 }, rotation: 0 },
-    size: { x: 148, y: 148 },
-    color: BONE, visible: true, zIndex: 0,
-  };
-}
-
-export function makeEye(id: string, distance: number): RigNode {
-  return {
-    id, name: distance < 0 ? 'Left eye' : 'Right eye', kind: 'eye', parentId: 'body',
-    surface: { yaw: 0, pitch: -4, mapped: true },
-    transform: { scale: { x: 1, y: 1 }, rotation: 0, length: 1.55 },
-    size: { x: 38, y: 38 },
-    color: INK, visible: true, zIndex: 1,
-    eye: { linkedToId: null, openness: 1, distanceFromCenter: distance },
-  };
-}
 
 export function defaultRig(): Rig {
   const nodes: Record<string, RigNode> = {};
@@ -111,6 +92,11 @@ const bothEyes = (property: string, keys: Keyframe[]): Track[] => [
 
 export function builtinPresets(): Preset[] {
   return [
+    // first, so the rail's first rows show what the editor can do now: hands, legs,
+    // stickers, morphs — see core/showcase.ts
+    ...showcasePresets(),
+    // then words: curved text, and letters arriving — see core/textPresets.ts
+    ...textPresets(),
     {
       // no tracks at all — dropped into a sequence it just holds whatever pose already
       // precedes it (the rig's own rest pose if it's first). The "base state" clip §8
@@ -495,10 +481,62 @@ export function makeTimeline(name: string): Timeline {
  * Shared by every path that places a preset — the Presets panel, `appendPreset` below and
  * the copilot's add_preset_to_timeline — because three copies of "and also copy the
  * effects" is three places to forget one.
+ *
+ * `rig` receives the layers the preset brings — the "Hi!" bubble, the waving arm — unless
+ * a layer by that id is already there, in which case the preset animates the one you have.
  */
-export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId: string): void {
-  for (const m of preset.modifiers ?? []) timeline.modifiers.push({ ...m, id: uid('m'), blockId });
-  for (const e of preset.emitters ?? []) (timeline.emitters ??= []).push({ ...e, id: uid('e'), blockId });
+export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId: string, rig?: Rig, mascotId?: string): void {
+  // placed on another mascot, everything the preset names moves onto that mascot's parts
+  const to = rig ? presetTargets(rig, preset, mascotId) : (id: string) => id;
+  const onOther = !!rig && !!mascotId && mascotId !== rig.rootId && !!rig.nodes[mascotId];
+  for (const m of preset.modifiers ?? []) timeline.modifiers.push({ ...m, nodeId: to(m.nodeId), id: uid('m'), blockId });
+  for (const e of preset.emitters ?? []) {
+    // a free anchor is measured from the body — which body is the mascot it was placed on
+    const anchor = (a: Anchor): Anchor => (a.nodeId ? { ...a, nodeId: to(a.nodeId) } : onOther ? { ...a, nodeId: mascotId } : a);
+    (timeline.emitters ??= []).push({ ...e, from: anchor(e.from), to: anchor(e.to), id: uid('e'), blockId });
+  }
+  if (rig) addPresetLayers(rig, preset, mascotId);
+  for (const a of preset.appearances ?? []) {
+    // a range narrows a layer to it — so never give one to a layer the user already had
+    // that is always there: placing "Hii!" must not hide their own arm everywhere else
+    const nodeId = to(a.nodeId);
+    const n = rig?.nodes[nodeId];
+    if (n && !n.ranged) continue;
+    (timeline.appearances ??= []).push({ ...a, nodeId, id: uid('ap'), blockId });
+  }
+}
+
+/** Where each id a preset names lands when it is placed on `mascotId` — see retargetId. */
+export function presetTargets(rig: Rig, preset: Preset, mascotId?: string): (id: string) => string {
+  const own = new Set((preset.layers ?? []).map((l) => l.id));
+  return (id) => retargetId(rig, mascotId, id, own.has(id));
+}
+
+/** A preset's own layers into a rig, reusing any already there. A parent the rig does not
+ *  have (a gallery mascot with no `body`) falls back to the mascot it is placed on. */
+export function addPresetLayers(rig: Rig, preset: Preset, mascotId?: string): void {
+  const to = presetTargets(rig, preset, mascotId);
+  const own = new Set((preset.layers ?? []).map((l) => l.id));
+  const body = mascotId && rig.nodes[mascotId] ? mascotId : rig.rootId;
+  const top = Math.max(0, ...Object.values(rig.nodes).map((n) => n.zIndex));
+  for (const layer of preset.layers ?? []) {
+    const id = to(layer.id);
+    if (rig.nodes[id]) continue;
+    const copy = structuredClone(layer);
+    copy.id = id;
+    // a copy on another mascot still says which part it plays, so the next preset finds it
+    const role = roleOf(layer);
+    if (role) copy.role = role;
+    if (copy.parentId !== null) {
+      const parent = to(copy.parentId);
+      copy.parentId = rig.nodes[parent] || own.has(copy.parentId) ? parent : body;
+    }
+    // words round "the body" go round the body of the mascot it was placed on
+    if (copy.text?.path?.nodeId) copy.text.path = { ...copy.text.path, nodeId: to(copy.text.path.nodeId) };
+    // limbs tuck behind the body; everything else a preset adds sits on top of the rig
+    if (copy.kind !== 'limb') copy.zIndex = top + 1 + copy.zIndex;
+    rig.nodes[copy.id] = copy;
+  }
 }
 
 /**
@@ -511,8 +549,13 @@ export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId:
  */
 export function presetPreviewProject(project: Project, preset: Preset): Project {
   const tl = project.timelines.find((t) => t.id === project.activeTimelineId) ?? project.timelines[0];
+  // a preset that brings its own layers has to preview with them, or "Hii!" is a mascot
+  // moving an arm it does not have
+  let rig = project.rig;
+  if (preset.layers?.length) { rig = structuredClone(project.rig); addPresetLayers(rig, preset); }
   return {
     ...project,
+    rig,
     timelines: [{
       ...tl,
       tracks: preset.tracks,
@@ -521,6 +564,7 @@ export function presetPreviewProject(project: Project, preset: Preset): Project 
       // the preview IS the clip
       modifiers: (preset.modifiers ?? []).map((m, i) => ({ ...m, id: `pm${i}`, blockId: undefined })),
       emitters: (preset.emitters ?? []).map((e, i) => ({ ...e, id: `pe${i}`, blockId: undefined })),
+      appearances: (preset.appearances ?? []).map((a, i) => ({ ...a, id: `pa${i}`, blockId: undefined })),
       timelineDurationMs: Math.max(200, preset.durationMs),
       durationOverrideMs: Math.max(200, preset.durationMs),
     }],
@@ -560,7 +604,7 @@ export function appendPreset(p: Project, presetId: string, timeline: Timeline = 
       keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
     });
   }
-  attachPresetEffects(timeline, preset, blockId);
+  attachPresetEffects(timeline, preset, blockId, p.rig);
   // same formula store.commit() uses after every edit — otherwise a freshly-built
   // project reads a different duration than the very first edit would settle it to.
   timeline.timelineDurationMs = derivedDuration(timeline);
@@ -577,6 +621,7 @@ export function defaultProject(): Project {
     timelines: [idle],
     activeTimelineId: idle.id,
     fps: 30,
+    composition: { ...COMP },
     // stamped at birth so a fresh project never looks like a pre-versioning one and gets
     // needlessly walked through every migration step on its first load
     schemaVersion: SCHEMA_VERSION,

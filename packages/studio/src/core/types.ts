@@ -1,12 +1,144 @@
 export type Vec2 = { x: number; y: number };
 export type ColorStop = { r: number; g: number; b: number; a: number };
 
-export type NodeKind = 'body' | 'eye' | 'group' | 'svgLayer' | 'primitive';
+export type NodeKind = 'body' | 'eye' | 'group' | 'svgLayer' | 'primitive' | 'limb' | 'text';
+
+/**
+ * Which font a text layer asks for. The project keeps the NAME, never a file: the family is
+ * loaded on demand (core/fonts.ts) and the exporter writes it out as outlines, so a file
+ * opens anywhere and only the glyphs it actually uses are ever fetched.
+ */
+export interface FontRef { family: string; weight: number; style: 'normal' | 'italic' }
+
+/** How each character of a text layer moves on its own. `progress` 0 → 1 runs it once. */
+export type TextCharAnim = 'none' | 'pop' | 'fade' | 'drop' | 'rise' | 'scatter' | 'wave';
+
+/**
+ * What a text layer's line of type sits on.
+ *
+ * `straight` is an ordinary text box. `arc` bends it round a circle of `radius`, between
+ * `start` and `end` degrees clockwise from 12 o'clock. `path` lays it along another layer's
+ * outline — a drawn curve, a shape, a star — live: move or animate that layer and the words
+ * follow, because the relationship is stored, not the positions.
+ */
+export interface TextPathSpec {
+  mode: 'straight' | 'arc' | 'path';
+  /** path mode: the layer whose outline the text follows */
+  nodeId?: string;
+  radius?: number;
+  start?: number;
+  end?: number;
+  /** px along the path before the text begins, after alignment */
+  offset?: number;
+  /** px off the path along its normal — positive lifts the text away from it */
+  baseline?: number;
+  /** run the other way along the path */
+  reverse?: boolean;
+  /** turn every glyph over and read it backwards — text round the bottom of a circle */
+  flip?: boolean;
+  /** glyphs turn with the path (the default); false keeps every one upright */
+  rotate?: boolean;
+}
+
+/**
+ * A text layer's typography. The words stay words: nothing about it is converted to
+ * outlines in the project — the renderer lays the glyphs out every frame, and only an
+ * export turns them into vector shapes.
+ */
+export interface TextStyle {
+  content: string;
+  font: FontRef;
+  /** px */
+  size: number;
+  /** a multiple of the size */
+  lineHeight: number;
+  /** px added after every character */
+  letterSpacing: number;
+  align: 'left' | 'center' | 'right';
+  valign: 'top' | 'middle' | 'bottom';
+  /** the box width, px, that lines wrap at. Undefined: lines break only where you break them */
+  width?: number;
+  path?: TextPathSpec;
+  /** the typewriter: only characters from `start` up to (not including) `end` are drawn */
+  reveal?: { start: number; end?: number };
+  /** per-character motion, driven by a keyframable 0 → 1 `progress` */
+  chars?: { kind: TextCharAnim; progress: number; stagger: number };
+}
+
+/**
+ * A drawn curve's own setting. Its geometry is `shapePath`, exactly like any other outline,
+ * so it morphs, keyframes, fills and strokes through the same code; this only says how its
+ * handles are made when an anchor moves. `smooth` works them out (Catmull-Rom), `polyline`
+ * has none, `bezier` keeps whatever handles were dragged.
+ */
+export type CurveType = 'smooth' | 'polyline' | 'bezier';
+
+/** A mascot kept for reuse — "+ Mascot → my saved one". Its nodes, body first. */
+export interface MascotTemplate { id: string; name: string; nodes: RigNode[] }
+
+/**
+ * One path of an imported SVG, re-based into the layer's -0.5..0.5 box.
+ *
+ * `fill`/`stroke` undefined means "the layer's own paint" — which is what makes the
+ * layer's Fill and Stroke rows (and their keyframes) recolour a one-colour icon. `null`
+ * means none. A colour means the artwork painted this path itself and keeps it.
+ */
+export interface VectorPath {
+  d: string;
+  fill?: ColorStop | null;
+  stroke?: ColorStop | null;
+  /** as a fraction of the layer's size (geometric mean of w and h), so an imported line
+   *  thickens with the artwork like it did in the file */
+  strokeWidth?: number;
+  /** `fill-rule="evenodd"`, which is how a lot of icon art cuts its holes */
+  evenOdd?: true;
+}
+
+export type LineCap = 'butt' | 'round' | 'square';
+export type LineJoin = 'miter' | 'round' | 'bevel';
+
+/**
+ * A hand or a leg: two or three points the user drags, and a few dials.
+ *
+ * Points are in the parent's own frame, in rig pixels from its centre — the body's, for a
+ * limb on the mascot — so a limb rides the body through every move, roll and squash
+ * without a single keyframe of its own. The outline is generated from these by
+ * core/limb.ts; nothing about it is stored, so there is no Bézier for anyone to edit.
+ */
+export interface LimbRig {
+  type: 'arm' | 'leg';
+  /** shoulder / hip — where the limb meets the body */
+  a: Vec2;
+  /** hand (arm) or knee (leg) */
+  b: Vec2;
+  /** ankle — legs only */
+  c?: Vec2;
+  /** 0 = a rigid limb of straight segments, 1 = a smooth rubber hose. Animatable, so a
+   *  limb can go floppy mid-clip; the toggle writes 0 or 1. */
+  hose: number;
+  /** px across at the shoulder */
+  thickness: number;
+  /** -1..1 — how far the hose bows sideways off the straight line between its points */
+  bend: number;
+  /** 0 = flat ends, 1 = fully round */
+  roundness: number;
+  /** 0 = even thickness, 1 = tapers to nothing at the far end */
+  taper: number;
+  /** multiplies the reach from the shoulder; 1 = exactly to the points */
+  length: number;
+  /** legs: the foot at the ankle */
+  foot?: { angle: number; length: number; width: number };
+}
 
 export interface RigNode {
   id: string;
   name: string;
   kind: NodeKind;
+  /**
+   * The layer this one rides on. The body is the mascot: a child of it is ATTACHED and
+   * follows every move, turn and squash. `null` on anything but the root is a WORLD layer,
+   * placed in composition coordinates by `flatOffset` from the centre.
+   */
   parentId: string | null;
 
   /** Placement on the parent's sphere. Angles, not pixels — see core/curvature.ts */
@@ -36,7 +168,31 @@ export interface RigNode {
    * is how a shape leaves the scene rather than popping out of it. Undefined means 1.
    */
   presence?: number;
+  /**
+   * The ONE draw order. Higher paints later, on top. Every layer's position in the list,
+   * the stage, the timeline lanes and the exported Lottie comes from this number and
+   * nothing else — `reorderLayer` in core/layers.ts keeps it dense and unique.
+   */
   zIndex: number;
+  /** Layer opacity, 0–1, animatable. Fades without shrinking — unlike `presence`, which
+   *  does both. Cascades to children. Undefined means 1. */
+  opacity?: number;
+  /** the layer-list padlock: not selectable or draggable on the stage. Never exported. */
+  locked?: boolean;
+  /**
+   * When true the layer exists only where the active timeline gives it an appearance
+   * range — a preset's "Hi!" bubble should not hang around in every other clip. Undefined
+   * means always present unless a range narrows it, which is every layer before this.
+   */
+  ranged?: boolean;
+
+  /** Fill paint beyond its colour (which stays `color`, so every old keyframe still
+   *  drives it). Undefined means on, fully opaque. */
+  fill?: { enabled?: boolean; opacity?: number };
+  /** Stroke paint. Undefined means no stroke — which is every layer before this existed. */
+  stroke?: { enabled?: boolean; color?: ColorStop; opacity?: number; width?: number; lineCap?: LineCap; lineJoin?: LineJoin };
+
+  limb?: LimbRig;
 
   eye?: {
     linkedToId: string | null;
@@ -56,10 +212,34 @@ export interface RigNode {
   shapePath?: string;
   /** what generated `shapePath`, so the parameter editor can keep offering its dials.
    *  Absent once the path is hand-edited — the dials no longer describe it. */
-  shape?: { kind: 'circle' | 'pill' | 'rect' | 'polygon' | 'star'; points?: number; innerRatio?: number; cornerRadius?: number; vertexRadius?: number; rotation?: number };
+  /** `kind` is a SHAPE_LIBRARY id — a generated outline (a ShapeKind) or library artwork */
+  shape?: { kind: string; points?: number; innerRatio?: number; cornerRadius?: number; vertexRadius?: number; rotation?: number };
 
-  svg?: { sourceMarkup: string; viewBox: string };
+  /**
+   * An imported SVG. `sourceMarkup` is the original, always kept. `paths` is its geometry
+   * parsed into the layer's unit box — what the stage draws and the exporter writes as
+   * native Lottie shapes. Absent when nothing in it could be parsed, in which case the
+   * markup is drawn as-is and the exporter says it could not carry it.
+   */
+  svg?: { sourceMarkup: string; viewBox: string; paths?: VectorPath[]; unsupported?: string[] };
+
+  /**
+   * The part of a mascot this layer plays — 'body', 'eyeL', 'armR'. A `body` node IS a
+   * mascot (its layers ride it), and roles are how one preset animates any of them: a
+   * preset keyed to 'eyeL' lands on the second mascot's left eye because that eye says
+   * so. Undefined on the first mascot of an older file, whose ids are the roles.
+   */
+  role?: string;
+  /** kind 'text' */
+  text?: TextStyle;
+  /** a drawn curve (its outline is `shapePath`) */
+  curve?: { type: CurveType };
+  /** drawn in the editor as a guide, left out of every export — a path text follows */
+  guide?: boolean;
 }
+
+/** Every outline core/path.ts can generate. `custom` is what hand-editing produces. */
+export type ShapeKind = 'circle' | 'pill' | 'rect' | 'polygon' | 'star' | 'pebble' | 'capsule' | 'roundedRect' | 'blob' | 'octopus';
 
 export interface Rig {
   id: string;
@@ -76,7 +256,8 @@ export interface Rig {
 
 export type EasingCurve =
   | { type: 'linear' }
-  | { type: 'preset'; name: 'easeIn' | 'easeOut' | 'easeInOut' | 'bounce' | 'elastic' }
+  /** `hold` keeps the value until the next keyframe and then cuts — a shape switch */
+  | { type: 'preset'; name: 'easeIn' | 'easeOut' | 'easeInOut' | 'bounce' | 'elastic' | 'hold' }
   | { type: 'bezier'; p1: Vec2; p2: Vec2 };
 
 /** A string value is an SVG path `d` — see core/path.ts, which morphs between two. */
@@ -281,6 +462,23 @@ export interface Emitter {
   endMs?: number;
 }
 
+/**
+ * When a layer is on screen, scoped exactly like an emitter: the clip when `blockId` is
+ * set, the timeline otherwise, with `startMs`/`endMs` measured from the start of that
+ * scope. A range decides whether the layer EXISTS; its opacity keyframes decide how it
+ * looks while it does. The fades are the one bit of "how it looks" that belongs here,
+ * because they are about the range's own edges.
+ */
+export interface Appearance {
+  id: string;
+  nodeId: string;
+  blockId?: string;
+  startMs?: number;
+  endMs?: number;
+  fadeInMs?: number;
+  fadeOutMs?: number;
+}
+
 export interface Expression {
   id: string;
   name: string;
@@ -306,6 +504,16 @@ export interface Preset {
    */
   modifiers?: Omit<Modifier, 'id' | 'blockId'>[];
   emitters?: Omit<Emitter, 'id' | 'blockId'>[];
+  /**
+   * Layers a preset needs that the rig may not have — the "Hi!" bubble, the arm that
+   * waves. Added to the rig when the preset is placed, unless a layer with that id is
+   * already there (then the preset animates it, which is how a user's own arm gets used).
+   */
+  layers?: RigNode[];
+  /** when those layers are on screen, scoped to the clip like the effects above */
+  appearances?: Omit<Appearance, 'id' | 'blockId'>[];
+  /** what it shows off, for the preset browser — "Hand + SVG + Rubber Hose" */
+  tagline?: string;
   thumbnail?: string;
   /** Library metadata, present only on presets that came from the shared catalogue.
    *  Local builtin/custom presets have no publish date or usage count to sort on. */
@@ -342,6 +550,13 @@ export interface Block {
   /** overrides the source preset's own color for this instance — unset means "use the
    * preset's color", same fallback a gallery/blank clip (no preset color to inherit) needs. */
   color?: string;
+  /**
+   * The mascot whose lane this clip plays in — a body id. Every mascot has its own row of
+   * clips, tiled end to end and running alongside the others, so the first can be Happy
+   * while the second Talks. Undefined is the first mascot's lane, which is where every clip
+   * made before there was more than one mascot already is.
+   */
+  mascotId?: string;
 }
 
 /** How one clip blends into the next. Lives on the *incoming* clip's side of the seam —
@@ -368,6 +583,8 @@ export interface Timeline {
   modifiers: Modifier[];
   /** optional, so every project saved before emitters existed loads with no migration */
   emitters?: Emitter[];
+  /** when each layer is on screen in THIS state — see Appearance */
+  appearances?: Appearance[];
   blocks: Block[];
   /**
    * The marker naming this state's frames inside its animation, when that animation holds
@@ -495,6 +712,12 @@ export interface Project {
   activeTimelineId: string;
   fps: number;
   /**
+   * The canvas every render and export uses, in px. The mascot is placed at its centre at
+   * its own pixel size, so changing this reframes rather than distorts. Read it through
+   * `compOf()` in core/defaults.ts; absent means the 720×720 every older project used.
+   */
+  composition?: { width: number; height: number };
+  /**
    * Which document shape this project was written in — see core/migrate.ts, which is the
    * only thing that reads or writes it. Optional because every project saved before
    * versioning existed has no value here, and that absence is exactly what identifies it.
@@ -506,6 +729,8 @@ export interface Project {
   /** animation id → Lottie JSON, for animations that came in from an imported `.lottie`
    *  and are re-exported verbatim. Never populated by anything authored here. */
   importedAnimations?: Record<string, unknown>;
+  /** mascots saved for reuse from "+ Mascot" */
+  mascotTemplates?: MascotTemplate[];
 }
 
 export const CAMERA_ID = '__camera';

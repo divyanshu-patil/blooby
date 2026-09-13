@@ -1,8 +1,20 @@
-import type { ColorStop, Emitter, KeyValue, Modifier, Rig, RigNode, Timeline } from './types';
+import type { ColorStop, Emitter, KeyValue, Modifier, Rig, RigNode, Timeline, Vec2 } from './types';
 import { CAMERA_ID } from './types';
+
+/** What a stroke is drawn in before anyone picks a colour — the eyes' own ink. */
+export const STROKE_DEFAULT: ColorStop = { r: 20, g: 19, b: 24, a: 1 };
+
+/** A limb point, or undefined when this node is not a limb or has no such point. */
+function limbPoint(node: RigNode, which: string): Vec2 | undefined {
+  const l = node.limb;
+  if (!l) return undefined;
+  return which === 'a' ? l.a : which === 'b' ? l.b : l.c;
+}
 
 /** One place that knows how a property path maps onto the rig. */
 export function getProp(node: RigNode, path: string): KeyValue | undefined {
+  if (path.startsWith('limb.')) return getLimbProp(node, path);
+  if (path.startsWith('text.')) return getTextProp(node, path);
   switch (path) {
     case 'surface.yaw': return node.surface.yaw;
     case 'surface.pitch': return node.surface.pitch;
@@ -19,12 +31,123 @@ export function getProp(node: RigNode, path: string): KeyValue | undefined {
     case 'color': return node.color;
     case 'shape.path': return node.shapePath;
     case 'visible': return node.presence ?? 1;
+    case 'opacity': return node.opacity ?? 1;
+    case 'fill.enabled': return node.fill?.enabled === false ? 0 : 1;
+    case 'fill.opacity': return node.fill?.opacity ?? 1;
+    case 'stroke.enabled': return node.stroke?.enabled ? 1 : 0;
+    case 'stroke.color': return node.stroke?.color ?? STROKE_DEFAULT;
+    case 'stroke.opacity': return node.stroke?.opacity ?? 1;
+    case 'stroke.width': return node.stroke?.width ?? 2;
     default: return undefined;
+  }
+}
+
+function getLimbProp(node: RigNode, path: string): number | undefined {
+  const l = node.limb;
+  if (!l) return undefined;
+  // limb.a.x / limb.b.y / limb.c.x — a point's coordinate
+  const pt = /^limb\.([abc])\.([xy])$/.exec(path);
+  if (pt) return limbPoint(node, pt[1])?.[pt[2] as 'x' | 'y'];
+  switch (path) {
+    case 'limb.hose': return l.hose;
+    case 'limb.thickness': return l.thickness;
+    case 'limb.bend': return l.bend;
+    case 'limb.roundness': return l.roundness;
+    case 'limb.taper': return l.taper;
+    case 'limb.length': return l.length;
+    case 'limb.foot.angle': return l.foot?.angle;
+    case 'limb.foot.length': return l.foot?.length;
+    case 'limb.foot.width': return l.foot?.width;
+    default: return undefined;
+  }
+}
+
+function setLimbProp(node: RigNode, path: string, n: number): void {
+  const l = node.limb;
+  if (!l || !Number.isFinite(n)) return;
+  const pt = /^limb\.([abc])\.([xy])$/.exec(path);
+  if (pt) {
+    const p = limbPoint(node, pt[1]);
+    if (p) p[pt[2] as 'x' | 'y'] = n;
+    return;
+  }
+  switch (path) {
+    case 'limb.hose': l.hose = Math.min(1, Math.max(0, n)); break;
+    case 'limb.thickness': l.thickness = Math.max(0, n); break;
+    case 'limb.bend': l.bend = n; break;
+    case 'limb.roundness': l.roundness = Math.min(1, Math.max(0, n)); break;
+    case 'limb.taper': l.taper = Math.min(1, Math.max(0, n)); break;
+    case 'limb.length': l.length = Math.max(0, n); break;
+    case 'limb.foot.angle': if (l.foot) l.foot.angle = n; break;
+    case 'limb.foot.length': if (l.foot) l.foot.length = Math.max(0, n); break;
+    case 'limb.foot.width': if (l.foot) l.foot.width = Math.max(0, n); break;
+  }
+}
+
+/** Where a text layer's arc sits before anyone bends it. */
+const ARC = { radius: 180, start: -70, end: 70 };
+const CHAR_KINDS = ['none', 'pop', 'fade', 'drop', 'rise', 'scatter', 'wave'] as const;
+
+function getTextProp(node: RigNode, path: string): KeyValue | undefined {
+  const t = node.text;
+  if (!t) return undefined;
+  switch (path) {
+    case 'text.content': return t.content;
+    case 'text.font.family': return t.font.family;
+    case 'text.font.weight': return t.font.weight;
+    case 'text.size': return t.size;
+    case 'text.lineHeight': return t.lineHeight;
+    case 'text.letterSpacing': return t.letterSpacing;
+    case 'text.width': return t.width ?? 0;
+    case 'text.path.offset': return t.path?.offset ?? 0;
+    case 'text.path.baseline': return t.path?.baseline ?? 0;
+    case 'text.arc.radius': return t.path?.radius ?? ARC.radius;
+    case 'text.arc.start': return t.path?.start ?? ARC.start;
+    case 'text.arc.end': return t.path?.end ?? ARC.end;
+    case 'text.reveal.start': return t.reveal?.start ?? 0;
+    case 'text.reveal.end': return t.reveal?.end ?? [...t.content.replace(/\n/g, '')].length;
+    case 'text.chars.progress': return t.chars?.progress ?? 1;
+    case 'text.chars.stagger': return t.chars?.stagger ?? 0.5;
+    case 'text.chars.kind': return t.chars?.kind ?? 'none';
+    default: return undefined;
+  }
+}
+
+function setTextProp(node: RigNode, path: string, v: KeyValue): void {
+  const t = node.text;
+  if (!t) return;
+  if (path === 'text.content') { if (typeof v === 'string') t.content = v; return; }
+  if (path === 'text.font.family') { if (typeof v === 'string' && v.trim()) t.font = { ...t.font, family: v.trim() }; return; }
+  if (path === 'text.chars.kind') {
+    const kind = CHAR_KINDS.find((k) => k === v);
+    if (kind) t.chars = { progress: t.chars?.progress ?? 1, stagger: t.chars?.stagger ?? 0.5, kind };
+    return;
+  }
+  const n = v as number;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return;
+  const path2 = { mode: 'straight' as const, ...t.path };
+  switch (path) {
+    case 'text.font.weight': t.font = { ...t.font, weight: Math.min(900, Math.max(100, n)) }; break;
+    case 'text.size': t.size = Math.max(1, n); break;
+    case 'text.lineHeight': t.lineHeight = Math.max(0.3, n); break;
+    case 'text.letterSpacing': t.letterSpacing = n; break;
+    case 'text.width': t.width = n > 0 ? n : undefined; break;
+    case 'text.path.offset': t.path = { ...path2, offset: n }; break;
+    case 'text.path.baseline': t.path = { ...path2, baseline: n }; break;
+    case 'text.arc.radius': t.path = { ...path2, radius: Math.max(1, n) }; break;
+    case 'text.arc.start': t.path = { ...path2, start: n }; break;
+    case 'text.arc.end': t.path = { ...path2, end: n }; break;
+    case 'text.reveal.start': t.reveal = { ...t.reveal, start: Math.max(0, n) }; break;
+    case 'text.reveal.end': t.reveal = { start: t.reveal?.start ?? 0, end: Math.max(0, n) }; break;
+    case 'text.chars.progress': t.chars = { kind: t.chars?.kind ?? 'none', stagger: t.chars?.stagger ?? 0.5, progress: n }; break;
+    case 'text.chars.stagger': t.chars = { kind: t.chars?.kind ?? 'none', progress: t.chars?.progress ?? 1, stagger: Math.min(1, Math.max(0, n)) }; break;
   }
 }
 
 export function setProp(node: RigNode, path: string, v: KeyValue): void {
   const n = v as number;
+  if (path.startsWith('limb.')) { setLimbProp(node, path, n); return; }
+  if (path.startsWith('text.')) { setTextProp(node, path, v); return; }
   switch (path) {
     case 'surface.yaw': node.surface.yaw = n; break;
     case 'surface.pitch': node.surface.pitch = n; break;
@@ -41,6 +164,15 @@ export function setProp(node: RigNode, path: string, v: KeyValue): void {
     case 'color': node.color = v as ColorStop; break;
     case 'shape.path': node.shapePath = typeof v === 'string' ? v : undefined; break;
     case 'visible': node.presence = Math.min(1, Math.max(0, n)); break;
+    case 'opacity': node.opacity = Math.min(1, Math.max(0, n)); break;
+    // on/off is a number so it can be keyframed; a keyframe between 0 and 1 switches at
+    // the halfway mark rather than inventing a half-on paint
+    case 'fill.enabled': node.fill = { ...node.fill, enabled: n >= 0.5 }; break;
+    case 'fill.opacity': node.fill = { ...node.fill, opacity: Math.min(1, Math.max(0, n)) }; break;
+    case 'stroke.enabled': node.stroke = { ...node.stroke, enabled: n >= 0.5 }; break;
+    case 'stroke.color': node.stroke = { ...node.stroke, color: v as ColorStop }; break;
+    case 'stroke.opacity': node.stroke = { ...node.stroke, opacity: Math.min(1, Math.max(0, n)) }; break;
+    case 'stroke.width': node.stroke = { ...node.stroke, width: Math.max(0, n) }; break;
   }
 }
 
@@ -148,6 +280,9 @@ export interface PropSpec {
   /** One line, written for someone who has never seen the editor. Say which way is
    *  positive and what a typical value looks like — this goes straight into the prompt. */
   help: string;
+  /** Switches at each keyframe rather than interpolating between them — words and font
+   *  names have no halfway. */
+  discrete?: true;
 }
 
 export const PROPS: Record<string, PropSpec> = {
@@ -183,8 +318,91 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'How present the layer is. 1 is normal, 0 is gone — it fades AND shrinks to nothing, so keyframing it to 0 is how a feature leaves rather than pops out. Use it to retire a shape before the next clip.' },
   'shape.path': { on: 'node', label: 'Shape',
     help: 'An SVG path outline. Keyframe it and the shape morphs from one to the next. Not a number, so the copilot cannot set it.' },
-  color: { on: 'node', label: 'Color',
-    help: 'Fill colour. Keyframeable in the editor, but it is not a number, so the copilot cannot set it.' },
+  color: { on: 'node', label: 'Fill',
+    help: 'Fill colour. Keyframeable, interpolated in OKLCH. Not a number, so set it with set_svg_fill rather than set_property.' },
+
+  opacity: { on: 'node', label: 'Opacity', range: [0, 1, 0.01, ''],
+    help: 'Layer opacity. 1 is solid, 0 is invisible. Fades WITHOUT shrinking (unlike visible), and fades every child with it. 0 → 1 over 150-250ms is a clean fade in.' },
+  'fill.enabled': { on: 'node', label: 'Fill on', range: [0, 1, 1, ''],
+    help: '1 paints the fill, 0 leaves only the stroke. A switch, not a fade — keyframes change it at the halfway mark; fade with fill.opacity.' },
+  'fill.opacity': { on: 'node', label: 'Fill opacity', range: [0, 1, 0.01, ''],
+    help: 'Opacity of the fill alone, leaving the stroke as it is. 1 is solid.' },
+  'stroke.enabled': { on: 'node', label: 'Stroke on', range: [0, 1, 1, ''],
+    help: '1 draws an outline around the shape, 0 has none. Off by default.' },
+  'stroke.color': { on: 'node', label: 'Stroke',
+    help: 'Outline colour, independent of the fill and keyframed on its own track. Set it with set_svg_stroke.' },
+  'stroke.opacity': { on: 'node', label: 'Stroke opacity', range: [0, 1, 0.01, ''],
+    help: 'Opacity of the outline alone. 1 is solid.' },
+  'stroke.width': { on: 'node', label: 'Stroke width', range: [0, 40, 0.5, 'px'],
+    help: 'Outline thickness in screen pixels. 2-4 is a clean line, 8+ is a cartoon outline.' },
+
+  // limbs: points are in the body's own frame, px from its centre — +x right, +y DOWN
+  'limb.a.x': { on: 'node', label: 'Shoulder X', range: [-400, 400, 1, 'px'],
+    help: 'Limbs only. Where the limb meets the body (shoulder or hip), px right of the body centre. Negative is the left side.' },
+  'limb.a.y': { on: 'node', label: 'Shoulder Y', range: [-400, 400, 1, 'px'],
+    help: 'Limbs only. The same, px DOWN from the body centre. Arms sit around 20-60, hips around 100-130.' },
+  'limb.b.x': { on: 'node', label: 'Hand X', range: [-400, 400, 1, 'px'],
+    help: 'Limbs only. The hand (arm) or knee (leg), px right of the body centre. A raised hand for a wave is out past the shoulder, e.g. ±190.' },
+  'limb.b.y': { on: 'node', label: 'Hand Y', range: [-400, 400, 1, 'px'],
+    help: 'Limbs only. The hand or knee, px DOWN from the body centre — negative is above it, so -120 is a hand raised over the head.' },
+  'limb.c.x': { on: 'node', label: 'Ankle X', range: [-400, 400, 1, 'px'],
+    help: 'Legs only. The ankle, px right of the body centre. The foot sits here.' },
+  'limb.c.y': { on: 'node', label: 'Ankle Y', range: [-400, 400, 1, 'px'],
+    help: 'Legs only. The ankle, px DOWN from the body centre — about 200-230 stands the mascot on its feet.' },
+  'limb.hose': { on: 'node', label: 'Rubber hose', range: [0, 1, 0.01, ''],
+    help: 'Limbs only. 1 is a Cavalry-style rubber hose that keeps its length: bring the hand closer and it bends, pull it away and it straightens but never stretches. 0 is a plain rigid limb drawn straight between its points. In between blends the two.' },
+  'limb.thickness': { on: 'node', label: 'Thickness', range: [2, 80, 0.5, 'px'],
+    help: 'Limbs only. How thick the limb is at the shoulder, px. 18-28 reads as a chunky cartoon limb.' },
+  'limb.bend': { on: 'node', label: 'Bend', range: [-1, 1, 0.01, ''],
+    help: 'Limbs only. Which way the limb bends (the sign — flip it to bend the other way) and how: ±1 is one smooth rubber-hose arc, 0 folds at a sharp elbow. HOW MUCH it bends comes from its length and how close its points are.' },
+  'limb.roundness': { on: 'node', label: 'Roundness', range: [0, 1, 0.01, ''],
+    help: 'Limbs only. 1 gives fully round ends (the hand and shoulder are balls), 0 cuts them flat.' },
+  'limb.taper': { on: 'node', label: 'Taper', range: [0, 1, 0.01, ''],
+    help: 'Limbs only. 0 is the same thickness all along; 0.3 narrows toward the hand; 1 comes to a point.' },
+  'limb.length': { on: 'node', label: 'Length', range: [20, 600, 1, 'px'],
+    help: 'Limbs only. The hose\'s own length along its curve, px, and it is kept — the way Cavalry\'s rubber hose works. With the hand closer than this the limb bends to keep its length; pulled further it straightens and stops short, never stretching. About 1.1× the shoulder-to-hand distance is relaxed; +30% is clearly longer and bendier.' },
+  'limb.foot.angle': { on: 'node', label: 'Foot angle', range: [-90, 90, 1, '°'],
+    help: 'Legs only. Turns the foot at the ankle. 0 points it outward, away from the body; positive tips the toe up.' },
+  'limb.foot.length': { on: 'node', label: 'Foot length', range: [0, 80, 0.5, 'px'],
+    help: 'Legs only. How long the foot is, px. 0 hides it.' },
+  'limb.foot.width': { on: 'node', label: 'Foot width', range: [0, 60, 0.5, 'px'],
+    help: 'Legs only. How tall the foot is, px — about the limb thickness reads right.' },
+
+  // text layers. Sizes and offsets are px at the layer's own scale.
+  'text.content': { on: 'node', label: 'Text', discrete: true,
+    help: 'Text layers only. What it says. Keyframes switch the words at each keyframe \u2014 "Hello" at 0 ms, "Welcome" at 500 ms. Set it with set_text.' },
+  'text.font.family': { on: 'node', label: 'Font', discrete: true,
+    help: 'Text layers only. A Google Fonts family name, e.g. "Poppins". Keyframes switch fonts at each keyframe. Set it with set_text_font.' },
+  'text.font.weight': { on: 'node', label: 'Weight', range: [100, 900, 100, ''],
+    help: 'Text layers only. 400 is regular, 600 semibold, 700 bold, 900 black. Snaps to the weights the font has.' },
+  'text.size': { on: 'node', label: 'Size', range: [4, 400, 1, 'px'],
+    help: 'Text layers only. Font size in px. 36-64 reads as a title on a 720px canvas.' },
+  'text.lineHeight': { on: 'node', label: 'Line height', range: [0.6, 3, 0.01, '\u00d7'],
+    help: 'Text layers only. Space between lines as a multiple of the size. 1.1-1.3 is normal.' },
+  'text.letterSpacing': { on: 'node', label: 'Letter spacing', range: [-20, 100, 0.5, 'px'],
+    help: 'Text layers only. Extra px after every character. 0 is the font\u2019s own spacing; 4-12 spreads a title out.' },
+  'text.width': { on: 'node', label: 'Box width', range: [0, 2000, 1, 'px'],
+    help: 'Text layers only. The width lines wrap at, px. 0 means no wrapping \u2014 lines break only at line breaks.' },
+  'text.path.offset': { on: 'node', label: 'Path offset', range: [-2000, 2000, 1, 'px'],
+    help: 'Text on an arc or a path only. Slides the words along it, px. Animating it makes text travel along the path.' },
+  'text.path.baseline': { on: 'node', label: 'Baseline', range: [-200, 200, 1, 'px'],
+    help: 'Text on an arc or a path only. Lifts the words off the path, px. Positive is away from it.' },
+  'text.arc.radius': { on: 'node', label: 'Radius', range: [20, 2000, 1, 'px'],
+    help: 'Arc text only. The circle the words bend round, px. Smaller bends more; 120-300 is a gentle curve.' },
+  'text.arc.start': { on: 'node', label: 'Start angle', range: [-360, 360, 1, '\u00b0'],
+    help: 'Arc text only. Where the arc begins, degrees clockwise from 12 o\u2019clock. Left-aligned text starts here.' },
+  'text.arc.end': { on: 'node', label: 'End angle', range: [-360, 360, 1, '\u00b0'],
+    help: 'Arc text only. Where the arc ends. Right-aligned text ends here; centred text is centred between the two.' },
+  'text.reveal.start': { on: 'node', label: 'Reveal from', range: [0, 500, 1, ''],
+    help: 'Text layers only. Characters before this one are not drawn. With reveal.end, a typewriter.' },
+  'text.reveal.end': { on: 'node', label: 'Reveal to', range: [0, 500, 1, ''],
+    help: 'Text layers only. Characters from this one on are not drawn yet. Keyframe it from 0 up to the length for a typewriter.' },
+  'text.chars.progress': { on: 'node', label: 'Letters', range: [0, 10, 0.01, ''],
+    help: 'Text layers only. Drives the per-letter animation (pop, fade, drop, rise, scatter): 0 is before, 1 is done. For a wave it is the phase, one cycle per unit.' },
+  'text.chars.stagger': { on: 'node', label: 'Stagger', range: [0, 1, 0.01, ''],
+    help: 'Text layers only. 0 moves every letter together, 1 moves them one after another.' },
+  'text.chars.kind': { on: 'node', label: 'Letter motion', discrete: true,
+    help: 'Text layers only. Which per-letter animation text.chars.progress plays: none, pop, fade, drop, rise, scatter or wave. Keyframes switch it. Set it with animate_text.' },
 
   'camera.fov': { on: 'camera', label: 'Perspective', range: [0, 89, 1, '\u00b0'],
     help: 'Perspective, as a field-of-view angle. 0 is flat/orthographic; higher makes the sphere bulge and features near the rim fall away faster.' },

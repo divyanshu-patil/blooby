@@ -1,13 +1,28 @@
 import { create } from 'zustand';
 import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
 import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
-import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack } from './scene';
-import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
+import { activeTrackFor, evaluateRig, fromFrame, lerpAngle, lerpValue, sampleTrack, sceneFrames, valueAt, WORLD } from './scene';
+import { makeCurveLayer, makeTextLayer, nextName, writeValue } from './layers';
+import { bakeHandles, curveFromPath, curveToPath, type Curve, type CurvePoint } from './curve';
+import { onFonts } from './fonts';
+import {
+  addMascot as addMascotIn, duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
+  saveMascotTemplate as saveMascotTemplateIn,
+  setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
+  type AppearanceRange, type AttachMode, type ReorderTo,
+} from './layers';
+import { laneOf, laneOfMascot, mascotOf, type MascotKind } from './mascot';
+import { presetTargets } from './defaults';
+import { textPresetOnto } from './textPresets';
+import { compOf } from './comp';
+import { naturalOutline } from './path';
+import type { MorphMode } from './easing';
+import { blockAt, blocksEnd, blockStarts, derivedDuration, insertBlock, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
-import { defaultValues, machineOf, nextTransition, slug } from './stateMachine';
+import { defaultValues, directTransition, machineOf, nextTransition, slug, type DirectOptions } from './stateMachine';
 import { migrateProject, SCHEMA_VERSION } from './migrate';
-import type { Block, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, Timeline, Track, Transition } from './types';
+import type { Block, CurveType, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, TextStyle, Timeline, Track, Transition, Vec2 } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
@@ -16,6 +31,10 @@ const HISTORY_LIMIT = 80;
 // opt into an instant cut instead, not the other way around.
 const DEFAULT_STATE_TRANSITION_MS = 300;
 const DEFAULT_STATE_EASING: EasingCurve = { type: 'preset', name: 'easeInOut' };
+
+/** What a click on the stage does: select and move, pan the view, place a shape, draw a
+ *  curve point by point, place text, or turn a mascot's head. */
+export type Tool = 'select' | 'hand' | 'shape' | 'pen' | 'text' | 'turn';
 
 /** The active timeline — every editor action reads/writes through this, never `p.timelines[i]` directly. */
 const at = (p: Project): Timeline => activeTimeline(p);
@@ -36,6 +55,10 @@ export interface Editor {
   selectedBlockId: string | null;
   /** the emitter whose trajectory handles are on the stage, if any */
   selectedEmitterId: string | null;
+  /** shape-edit mode: the selected outline's anchors are draggable on the stage. Off, the
+   *  stage shows the box and its handles instead — two sets of handles at once fight. */
+  editPoints: boolean;
+  setEditPoints: (v: boolean) => void;
   playhead: number;
   playing: boolean;
   loop: boolean;
@@ -84,8 +107,57 @@ export interface Editor {
   deleteNode: (id: string) => void;
   updateNode: (id: string, fn: (n: RigNode) => void, label?: string) => void;
 
+  /**
+   * Layer operations. Each is one commit — one undo step — over the pure function of the
+   * same name in core/layers.ts, which the copilot's tools call too.
+   */
+  /** on top of everything (a limb keeps its place behind the body); `appearAt` starts it
+   *  there on the timeline, which is what pasting at the playhead means */
+  addLayer: (node: RigNode | RigNode[], opts?: { appearAt?: number }) => void;
+  duplicateLayer: (id: string) => string | null;
+  reorderLayer: (id: string, to: ReorderTo) => void;
+  /** world ↔ mascot, keeping the layer where it is on screen */
+  setAttachment: (id: string, mode: AttachMode, anchorId?: string) => void;
+  groupLayers: (ids: string[]) => void;
+  ungroupLayer: (id: string) => void;
+  /** in absolute ms; `null` removes every range so the layer is simply always there */
+  setAppearance: (nodeId: string, range: AppearanceRange | null, label?: string, entryId?: string) => void;
+  setComposition: (patch: Partial<{ width: number; height: number }>) => void;
+  /** how the shape keyframe under the playhead becomes the next one */
+  setShapeMorph: (nodeId: string, mode: MorphMode, durationMs?: number) => void;
+  /**
+   * CURRENT → TARGET for one property: a keyframe holding whatever it reads right now at
+   * the playhead, and one at `target` after `durationMs`. What "Apply transition" does.
+   */
+  tweenProperty: (nodeId: string, property: string, target: KeyValue, durationMs: number, easing: EasingCurve) => void;
+
+  /** A new mascot — a look, or a saved one by template id — selected. Returns its body id. */
+  addMascot: (kind: MascotKind | { templateId: string }, opts?: { name?: string; x?: number; y?: number }) => string;
+  saveMascotTemplate: (bodyId: string, name?: string) => void;
+
+  /** A text layer, selected. `at` is a composition point (where the Text tool was clicked). */
+  addText: (content?: string, opts?: { at?: Vec2; parentId?: string | null; style?: Partial<TextStyle> }) => string;
+  /** A drawn curve from composition points — a pen stroke — selected. Null for under two points. */
+  addCurve: (points: CurvePoint[], opts?: { closed?: boolean; type?: CurveType; guide?: boolean }) => string | null;
+  /** Typography that is not a keyframable number: the font, alignment, what it follows. */
+  setText: (nodeId: string, fn: (t: TextStyle) => void, label?: string) => void;
+  /** Reshape a curve by its anchors, written where it shows — a keyframe under autokey. */
+  editCurve: (nodeId: string, fn: (c: Curve, type: CurveType) => Curve | null, label?: string) => void;
+  /** Smooth, polyline or hand-edited Bézier — switching to Bézier keeps the shape it had. */
+  setCurveType: (nodeId: string, type: CurveType) => void;
+  /** Bumped whenever a font face arrives, so text is laid out again with its real metrics. */
+  fontsVersion: number;
+  /** The clip lane the strip shows and presets land in: '' for the first mascot, else a body
+   *  id. Selecting a mascot (or any part of one) switches to its lane. */
+  activeLane: string;
+  setActiveLane: (lane: string) => void;
+  /** The stage tool. In the store so the Layers panel's "Curve" can arm the pen. */
+  tool: Tool;
+  setTool: (tool: Tool) => void;
+
   loadCatalog: () => Promise<void>;
-  addBlock: (presetId: string, index?: number) => void;
+  /** `mascotId` puts the clip in that mascot's lane, the preset animating that mascot */
+  addBlock: (presetId: string, index?: number, mascotId?: string) => void;
   /** the shared engine behind "another timeline from this project" and "a gallery
    * animation" as a clip source (§8/§12/§13) — one copy-tracks-in-as-a-block routine.
    * Only tracks whose nodeId exists in *this* project's rig are ever copied in, which is
@@ -158,6 +230,11 @@ export interface Editor {
   updateStateTransition: (id: string, patch: Partial<Omit<SmTransition, 'id'>>) => void;
   removeStateTransition: (id: string) => void;
   setInitialState: (timelineId: string) => void;
+  /**
+   * CURRENT → TARGET: a direct transition from the active state (or every state) to the
+   * target, on the `state` input, then played straight away in the preview.
+   */
+  goToState: (targetId: string, opts: DirectOptions) => void;
   setMachineId: (id: string) => void;
   /** Clear the machine — every input and every transition — leaving the states and their
    *  animation work untouched. Undoable, like any other document edit. */
@@ -314,6 +391,8 @@ export const useEditor = create<Editor>((set, get) => ({
   selectedTrackId: null,
   selectedBlockId: null,
   selectedEmitterId: null,
+  editPoints: false,
+  setEditPoints: (editPoints) => set({ editPoints }),
   playhead: 0,
   playing: false,
   loop: true,
@@ -359,7 +438,16 @@ export const useEditor = create<Editor>((set, get) => ({
     set({ project: future[0], past: [...past, project], future: future.slice(1), lastLabel: '' });
   },
 
-  select: (selection) => set({ selection }),
+  // a new selection starts out of point-edit mode: the anchors belong to one outline — and
+  // on the lane of the mascot it belongs to, so the next preset lands on that mascot
+  select: (selection) => set((s) => {
+    const m = mascotOf(s.project.rig, selection[0]);
+    return { selection, editPoints: false, ...(m ? { activeLane: laneOfMascot(s.project.rig, m.id) } : {}) };
+  }),
+  activeLane: '',
+  setActiveLane: (activeLane) => set({ activeLane }),
+  tool: 'select',
+  setTool: (tool) => set({ tool, editPoints: false }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
   setPlaying: (playing) => set({ playing }),
   setLoop: (loop) => set({ loop }),
@@ -369,7 +457,7 @@ export const useEditor = create<Editor>((set, get) => ({
 
   trackFor(nodeId, property) {
     const { project, playhead } = get();
-    return activeTrackFor(at(project), nodeId, property, playhead);
+    return activeTrackFor(at(project), nodeId, property, playhead, project.rig);
   },
 
   setValue(nodeId, property, value, label) {
@@ -383,7 +471,7 @@ export const useEditor = create<Editor>((set, get) => ({
         // scoped to whichever clip the playhead is in (a proper clip override, per spec
         // §15) — never a global track, or it would leak into every other clip that
         // doesn't animate this property, including a brand-new one added later.
-        const t: Track = { id: uid('t'), nodeId, property, keyframes: [], blockId: blockAt(at(p), playhead)?.id };
+        const t: Track = { id: uid('t'), nodeId, property, keyframes: [], blockId: blockAt(at(p), playhead, laneOf(p.rig, at(p), nodeId))?.id };
         upsertKeyframe(t, playhead, value);
         at(p).tracks.push(t);
       } else {
@@ -401,7 +489,7 @@ export const useEditor = create<Editor>((set, get) => ({
    */
   toggleKeyframe(nodeId, property) {
     const { playhead, project } = get();
-    const track = activeTrackFor(activeTimeline(project), nodeId, property, playhead);
+    const track = activeTrackFor(activeTimeline(project), nodeId, property, playhead, project.rig);
     // 1ms, matching writeKeyframe's own idea of "the same keyframe"
     const here = track?.keyframes.find((k) => Math.abs(k.time - playhead) < 1);
     if (!track || !here) { get().addKeyframeNow(nodeId, property); return; }
@@ -432,14 +520,19 @@ export const useEditor = create<Editor>((set, get) => ({
         const v = read(p, p.rig, nodeId, property);
         if (v === undefined) return;
         // same clip-scoping as setValue's autoKey branch — see its comment
-        at(p).tracks.push({ id: uid('t'), nodeId, property, blockId: blockAt(at(p), playhead)?.id, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
+        at(p).tracks.push({ id: uid('t'), nodeId, property, blockId: blockAt(at(p), playhead, laneOf(p.rig, at(p), nodeId))?.id, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
       }
     });
   },
 
   addKeyframeNow(nodeId, property) {
     const { playhead, project } = get();
-    const v = read(project, evaluateRig(project, playhead), nodeId, property);
+    const rig = evaluateRig(project, playhead);
+    // a layer still drawing its plain ellipse or stadium has no outline to key yet — key
+    // the one it is visibly drawing, so its first keyframe is its real resting shape
+    const node = rig.nodes[nodeId];
+    const v = read(project, rig, nodeId, property)
+      ?? (property === 'shape.path' && node && node.kind !== 'limb' && !node.svg?.paths ? naturalOutline(node) : undefined);
     if (v === undefined) return;
     // writeKeyframe rather than a hand-rolled push: it scopes the new track to whichever
     // clip the playhead is in, and that is the scope activeTrackFor — and therefore the
@@ -513,27 +606,83 @@ export const useEditor = create<Editor>((set, get) => ({
   },
 
   deleteNode(id) {
-    get().commit((p) => {
-      if (id === p.rig.rootId) return;
-      const doomed = new Set([id]);
-      let grew = true;
-      while (grew) {
-        grew = false;
-        for (const n of Object.values(p.rig.nodes))
-          if (n.parentId && doomed.has(n.parentId) && !doomed.has(n.id)) { doomed.add(n.id); grew = true; }
-      }
-      for (const d of doomed) delete p.rig.nodes[d];
-      for (const n of Object.values(p.rig.nodes)) if (n.eye?.linkedToId && doomed.has(n.eye.linkedToId)) n.eye.linkedToId = null;
-      for (const tl of p.timelines) {
-        tl.tracks = tl.tracks.filter((t) => !doomed.has(t.nodeId));
-        tl.modifiers = tl.modifiers.filter((m) => !doomed.has(m.nodeId));
-      }
-    });
-    set({ selection: [] });
+    const { playhead } = get();
+    get().commit((p) => { removeLayer(p, id, playhead); });
+    set({ selection: get().selection.filter((s) => get().project.rig.nodes[s]) });
   },
 
   updateNode(id, fn, label) {
     get().commit((p) => { const n = p.rig.nodes[id]; if (n) fn(n); }, label);
+  },
+
+  addLayer(node, opts) {
+    const nodes = Array.isArray(node) ? node : [node];
+    if (!nodes.length) return;
+    get().commit((p) => {
+      for (const src of nodes) {
+        const n = structuredClone(src);
+        if (n.parentId !== null && !p.rig.nodes[n.parentId]) n.parentId = p.rig.rootId;
+        // a limb tucks just behind its own mascot's body — behind the first mascot's only
+        // when it belongs to the first mascot
+        const owner = n.kind === 'limb' ? mascotOf(p.rig, n.parentId) : undefined;
+        if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
+        else if (owner && owner.id !== p.rig.rootId) n.zIndex = owner.zIndex - 0.5 + n.zIndex * 0.01;
+        p.rig.nodes[n.id] = n;
+        if (opts?.appearAt && opts.appearAt > 0) setAppearanceIn(p, n.id, { startMs: opts.appearAt }, opts.appearAt);
+      }
+    });
+    set({ selection: nodes.map((n) => n.id), selectedBlockId: null });
+  },
+
+  duplicateLayer(id) {
+    let made: string | null = null;
+    get().commit((p) => { made = duplicateLayerIn(p, id); });
+    if (made) set({ selection: [made] });
+    return made;
+  },
+
+  reorderLayer(id, to) { get().commit((p) => reorderLayerIn(p, id, to)); },
+
+  setAttachment(id, mode, anchorId) {
+    const { playhead } = get();
+    get().commit((p) => { setAttachmentIn(p, id, mode, anchorId, playhead); });
+  },
+
+  groupLayers(ids) {
+    const { playhead } = get();
+    let g: string | null = null;
+    get().commit((p) => { g = groupLayersIn(p, ids, playhead); });
+    if (g) set({ selection: [g] });
+  },
+
+  ungroupLayer(id) {
+    const { playhead } = get();
+    get().commit((p) => ungroupLayerIn(p, id, playhead));
+    set({ selection: [] });
+  },
+
+  setAppearance(nodeId, range, label, entryId) {
+    const { playhead } = get();
+    get().commit((p) => setAppearanceIn(p, nodeId, range, playhead, entryId), label ?? `appear.${nodeId}`);
+  },
+
+  setComposition(patch) {
+    get().commit((p) => { p.composition = compOf({ composition: { ...compOf(p), ...patch } }); }, 'comp');
+  },
+
+  setShapeMorph(nodeId, mode, durationMs) {
+    const { playhead } = get();
+    get().commit((p) => { setMorph(p, nodeId, playhead, mode, durationMs); }, `morph.${nodeId}`);
+  },
+
+  tweenProperty(nodeId, property, target, durationMs, easing) {
+    const { project, playhead } = get();
+    const from = valueAt(project, nodeId, property, playhead);
+    if (from === undefined) return;
+    get().commit((p) => {
+      writeKeyframe(p, nodeId, property, playhead, from, easing);
+      writeKeyframe(p, nodeId, property, playhead + Math.max(20, durationMs), target, easing);
+    });
   },
 
   async loadCatalog() {
@@ -547,37 +696,114 @@ export const useEditor = create<Editor>((set, get) => ({
     }
   },
 
-  addBlock(presetId, index) {
+  addMascot(kind, opts) {
+    let id = '';
+    get().commit((p) => {
+      const tpl = typeof kind === 'string' ? kind : p.mascotTemplates?.find((t) => t.id === kind.templateId);
+      if (tpl) id = addMascotIn(p, tpl, opts);
+    });
+    if (id) set({ selection: [id], selectedBlockId: null });
+    return id;
+  },
+
+  saveMascotTemplate(bodyId, name) {
+    get().commit((p) => { saveMascotTemplateIn(p, bodyId, name); });
+  },
+
+  fontsVersion: 0,
+
+  addText(content = 'Type something', opts = {}) {
+    const { project, playhead } = get();
+    const parentId = opts.parentId ?? null;
+    let over: Partial<RigNode> = parentId ? { parentId } : {};
+    if (opts.at) {
+      // where it was clicked, in the frame it will live in
+      const frame = sceneFrames(evaluateRig(project, playhead), compOf(project)).get(parentId ?? WORLD);
+      const local = frame ? fromFrame(frame, opts.at) : null;
+      if (local) over = { ...over, surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: Math.round(local.x * 100) / 100, y: Math.round(local.y * 100) / 100 } } };
+    }
+    const node = makeTextLayer(content, over, opts.style);
+    get().addLayer(node);
+    return node.id;
+  },
+
+  addCurve(points, opts = {}) {
+    const { project, playhead } = get();
+    const world = sceneFrames(evaluateRig(project, playhead), compOf(project)).get(WORLD);
+    if (!world) return null;
+    // handles are offsets, and the world frame is 1:1, so only the anchors move
+    const local = points.map((pt) => ({ ...pt, ...fromFrame(world, pt) }));
+    const node = makeCurveLayer(local, { ...opts, name: nextName(project.rig, 'Curve') });
+    if (!node) return null;
+    get().addLayer(node);
+    return node.id;
+  },
+
+  setText(nodeId, fn, label) {
+    get().commit((p) => { const t = p.rig.nodes[nodeId]?.text; if (t) fn(t); }, label ?? `text.${nodeId}`);
+  },
+
+  editCurve(nodeId, fn, label) {
+    const { project, playhead } = get();
+    const node = project.rig.nodes[nodeId];
+    if (!node) return;
+    // the outline as it stands under the playhead, animated or not
+    const shown = valueAt(project, nodeId, 'shape.path', playhead);
+    const c = curveFromPath(typeof shown === 'string' ? shown : node.shapePath);
+    if (!c) return;
+    const type = node.curve?.type ?? 'bezier';
+    const next = fn(c, type);
+    const d = next && curveToPath(next, type);
+    if (d) get().setValue(nodeId, 'shape.path', d, label ?? `curve.${nodeId}`);
+  },
+
+  setCurveType(nodeId, type) {
+    const { project, playhead } = get();
+    const node = project.rig.nodes[nodeId];
+    const shown = node && valueAt(project, nodeId, 'shape.path', playhead);
+    const c = node && curveFromPath(typeof shown === 'string' ? shown : node.shapePath);
+    if (!node || !c) return;
+    const from = node.curve?.type ?? 'bezier';
+    // into Bézier, the handles it draws with become handles you can drag — nothing moves
+    const kept = type === 'bezier' && from !== 'bezier' ? bakeHandles(c, from) : c;
+    get().commit((p) => {
+      const n = p.rig.nodes[nodeId];
+      if (!n) return;
+      n.curve = { type };
+      writeValue(p, nodeId, 'shape.path', curveToPath(kept, type), playhead);
+    }, `curvetype.${nodeId}`);
+  },
+
+  addBlock(presetId, index, mascotId) {
     const { project, catalog } = get();
     const own = project.presets.find((p) => p.id === presetId);
     const preset = own ?? catalog.find((p) => p.id === presetId);
     if (!preset) return;
     const blockId = uid('b');
+    // the first mascot's lane has no id; any other is named by its body
+    const lane = mascotId && mascotId !== project.rig.rootId && project.rig.nodes[mascotId]?.kind === 'body' ? mascotId : undefined;
     const at0 = index ?? at(project).blocks.length;
+    // a text preset whose words are straight plays on the selected text, not a copy of its own
+    const picked = project.rig.nodes[get().selection[0] ?? ''];
+    const played = (picked && textPresetOnto(preset, picked)) || preset;
     get().commit((p) => {
       const tl = at(p);
       // a catalogue preset becomes part of the file the moment it is used, so the saved
       // project keeps working offline and blockSampleTime can still find its natural span
       if (!own) p.presets = [...p.presets, preset];
-      const block: Block = { id: blockId, presetId, name: preset.name, durationMs: preset.durationMs };
-      const next = [...tl.blocks];
-      next.splice(at0, 0, block);
-      // place tracks at the new block's start, then let relayout settle everything
-      let start = 0;
-      for (let i = 0; i < at0; i++) start += next[i].durationMs;
-      for (const t of preset.tracks) {
+      const block: Block = { id: blockId, presetId, name: preset.name, durationMs: preset.durationMs, ...(lane ? { mascotId: lane } : {}) };
+      // where everything the preset names lands on this mascot — decided before its layers
+      // arrive, so a part the mascot already has is reused rather than doubled
+      const to = presetTargets(p.rig, played, lane);
+      const start = insertBlock(tl, block, at0);
+      for (const t of played.tracks) {
         tl.tracks.push({
-          id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
+          id: uid('t'), nodeId: to(t.nodeId), property: t.property, blockId,
           keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
         });
       }
-      attachPresetEffects(tl, preset, blockId);
-      const shifted = tl.blocks.slice(at0).map((b) => b.id);
-      if (shifted.length) {
-        const set2 = new Set(shifted);
-        for (const t of tl.tracks) if (t.blockId && set2.has(t.blockId)) for (const k of t.keyframes) k.time += preset.durationMs;
-      }
-      tl.blocks = next;
+      // with the rig, so a preset that brings its own layers (an arm, a sticker) adds them
+      attachPresetEffects(tl, played, blockId, p.rig, lane);
       tl.timelineDurationMs = derivedDuration(tl);
     });
   },
@@ -594,17 +820,8 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => {
       const tl = at(p);
       const block: Block = { id: blockId, presetId: '', name: source.label, durationMs, gallerySource: source.gallerySource };
-      const next = [...tl.blocks];
-      next.splice(at0, 0, block);
-      let start = 0;
-      for (let i = 0; i < at0; i++) start += next[i].durationMs;
+      const start = insertBlock(tl, block, at0);
       tl.tracks.push(...mergeTracksForClip(source.timeline.tracks, validIds, blockId, start, () => uid('t')));
-      const shifted = tl.blocks.slice(at0).map((b) => b.id);
-      if (shifted.length) {
-        const set2 = new Set(shifted);
-        for (const t of tl.tracks) if (t.blockId && set2.has(t.blockId)) for (const k of t.keyframes) k.time += durationMs;
-      }
-      tl.blocks = next;
       tl.timelineDurationMs = derivedDuration(tl);
     });
     set({ selectedBlockId: blockId });
@@ -641,11 +858,8 @@ export const useEditor = create<Editor>((set, get) => ({
     const newId = uid('b');
     get().commit((p) => {
       const tl2 = at(p);
-      const next = [...tl2.blocks];
-      next.splice(idx + 1, 0, { ...original, id: newId });
-      // open a duration-sized gap right after the original for the copy to sit in
-      const shiftAfter = new Set(tl2.blocks.slice(idx + 1).map((b) => b.id));
-      for (const t of tl2.tracks) if (t.blockId && shiftAfter.has(t.blockId)) for (const k of t.keyframes) k.time += original.durationMs;
+      // open a duration-sized gap right after the original, in its own lane, for the copy
+      insertBlock(tl2, { ...original, id: newId }, idx + 1);
       // the copy's own keyframes land exactly one clip-duration after the original's —
       // same offset-within-block, translated forward by durationMs (no window lookup
       // needed since it's landing immediately adjacent, not somewhere arbitrary)
@@ -656,7 +870,6 @@ export const useEditor = create<Editor>((set, get) => ({
         });
       }
       for (const m of ownMods) tl2.modifiers.push({ ...m, id: uid('m'), blockId: newId });
-      tl2.blocks = next;
       tl2.timelineDurationMs = derivedDuration(tl2);
     });
     set({ selectedBlockId: newId });
@@ -987,6 +1200,15 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => { (p.stateMachine ??= machineOf(p)).initialStateId = timelineId; });
   },
 
+  goToState(targetId, opts) {
+    const from = get().project.activeTimelineId;
+    let fired: { input: string; value: InputValue } | null = null;
+    get().commit((p) => { fired = directTransition(p, from, targetId, opts); });
+    // drive it: set the input and let the machine take the edge it now has, exactly as the
+    // player would — so what the button does IS what the exported file does
+    if (fired) get().setInput((fired as { input: string }).input, (fired as { value: InputValue }).value);
+  },
+
   setMachineId(id) {
     get().commit((p) => { (p.stateMachine ??= machineOf(p)).id = slug(id) || 'blooby'; }, 'smid');
   },
@@ -1183,10 +1405,13 @@ export const useEditor = create<Editor>((set, get) => ({
     const next = { ...defaultProject(), ...migrate(p) };
     setActiveId(galleryId ?? uidGallery());
     autosave(next);
-    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null, inputs: {}, previousTimelineId: null, pendingStateChange: null, stateTransition: null });
+    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null, inputs: {}, previousTimelineId: null, pendingStateChange: null, stateTransition: null, activeLane: '' });
   },
   resetProject() { get().loadProject(defaultProject()); },
 }));
+
+// a face arriving changes how text is laid out, and nothing else would tell React
+onFonts(() => useEditor.setState((s) => ({ fontsVersion: s.fontsVersion + 1 })));
 
 function upsertKeyframe(track: Track, time: number, value: KeyValue) {
   const existing = track.keyframes.find((k) => Math.abs(k.time - time) < 1);
@@ -1210,12 +1435,12 @@ function boundToStrip<T extends { blockId?: string; endMs?: number }>(tl: Timeli
 
 export function writeKeyframe(p: Project, nodeId: string, property: string, time: number, value: KeyValue, easing: EasingCurve) {
   const tl = at(p);
-  let track = activeTrackFor(tl, nodeId, property, time);
+  let track = activeTrackFor(tl, nodeId, property, time, p.rig);
   if (!track) {
-    // scoped to whichever clip `time` falls in (a clip override, not a global track that
-    // would leak into every other clip) — undefined blockId (global) only when this
-    // timeline has no blocks at all, the pre-clip free-keyframe workflow.
-    const owner = blockAt(tl, time);
+    // scoped to whichever clip of this layer's lane `time` falls in (a clip override, not
+    // a global track that would leak into every other clip) — undefined blockId (global)
+    // only when that lane has no blocks at all, the pre-clip free-keyframe workflow.
+    const owner = blockAt(tl, time, laneOf(p.rig, tl, nodeId));
     track = { id: uid('t'), nodeId, property, keyframes: [], blockId: owner?.id };
     tl.tracks.push(track);
     // A brand-new track with one keyframe is constant *everywhere within its own scope*

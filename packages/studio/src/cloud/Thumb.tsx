@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { sceneAt } from '../core/scene';
-import { COMP, defaultProject } from '../core/defaults';
+import { compOf, defaultProject } from '../core/defaults';
 import { MascotThumb } from '../ui/Mascot';
 import { activeTimeline } from '../core/types';
 import type { Preset, Project } from '../core/types';
@@ -15,11 +15,11 @@ import type { Preset, Project } from '../core/types';
 export function ProjectThumb({ project, at = 0 }: { project: Project | null; at?: number }) {
   const scene = useMemo(() => {
     if (!project) return null;
-    try { return sceneAt(project, at, COMP); } catch { return null; }
+    try { return sceneAt(project, at, compOf(project)); } catch { return null; }
   }, [project, at]);
 
   if (!scene) return <Placeholder />;
-  return <MascotThumb scene={scene} view={COMP} />;
+  return <MascotThumb scene={scene} view={compOf(project)} />;
 }
 
 /** An asset holds only its tracks, so it is previewed on the default rig — the same way
@@ -35,12 +35,12 @@ export function AssetThumb({ preset, at = 0 }: { preset: Preset | null; at?: num
         timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }],
         activeTimelineId: tl.id,
       };
-      return sceneAt(temp, at, COMP);
+      return sceneAt(temp, at, compOf(temp));
     } catch { return null; }
   }, [preset, at]);
 
   if (!scene) return <Placeholder />;
-  return <MascotThumb scene={scene} view={COMP} />;
+  return <MascotThumb scene={scene} view={compOf(null)} />;
 }
 
 const Placeholder = () => (

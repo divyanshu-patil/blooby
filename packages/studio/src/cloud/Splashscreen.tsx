@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { splashApi } from './api';
 import type { SplashscreenRow as SplashRow } from './types';
 import { sceneAt } from '../core/scene';
-import { COMP } from '../core/defaults';
+import { compOf } from '../core/defaults';
 import { MascotThumb } from '../ui/Mascot';
 import type { Project } from '../core/types';
 
@@ -64,7 +64,7 @@ export function Splashscreen({ onDone }: { onDone?: () => void }) {
 
   const scene = (() => {
     try {
-      return sceneAt(splash.data as Project, t, COMP);
+      return sceneAt(splash.data as Project, t, compOf(splash.data as Project));
     } catch {
       // a payload the renderer rejects must not take the app down with it
       return null;
@@ -86,7 +86,7 @@ export function Splashscreen({ onDone }: { onDone?: () => void }) {
       }}
     >
       <div style={{ width: 'min(52vmin, 380px)', aspectRatio: '1' }}>
-        <MascotThumb scene={scene} view={COMP} />
+        <MascotThumb scene={scene} view={compOf(splash?.data as Project)} />
       </div>
     </div>
   );

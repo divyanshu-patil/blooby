@@ -94,7 +94,7 @@ export function Copilot() {
       // something the model said, and replaying it just teaches it to say that
       // Capped, because the system prompt now carries the whole timeline — an unbounded
       // thread on top of that is how a reply gets cut off mid-JSON.
-      { role: 'system', content: systemPrompt(project, made(turns)) },
+      { role: 'system', content: systemPrompt(project, made(turns), useEditor.getState().playhead) },
       ...turns.filter((t) => t.role === 'user' || t.role === 'bot').slice(-12)
         .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: asHistory(t) })),
       { role: 'user', content: text },

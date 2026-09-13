@@ -128,7 +128,7 @@ export function PartEditor({ emitter }: { emitter: Emitter }) {
             </div>
             <div className="shapepick-name">{preview?.name ?? ''}</div>
 
-            {(['symbols', 'drops', 'confetti', 'notes'] as const).map((group) => (
+            {(['outlines', 'symbols', 'drops', 'confetti', 'notes'] as const).map((group) => (
               <div key={group}>
                 <span className="panel-title">{group}</span>
                 <div className="shapepick-grid">

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { defaultProject } from '../core/defaults';
 import { deleteEntry, getActiveId, listEntries, putEntry, uidGallery, type GalleryEntry } from '../core/gallery';
-import { COMP } from '../core/defaults';
+import { compOf } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 import { MascotThumb } from './Mascot';
 import type { Project } from '../core/types';
@@ -113,12 +113,12 @@ export function Gallery() {
         <div className="gallery-grid">
           {!entries.length && <p className="empty-note">Nothing saved yet — your current mascot will appear here shortly.</p>}
           {entries.map((e) => {
-            const scene = sceneAt(e.project, 0, COMP);
+            const scene = sceneAt(e.project, 0, compOf(e.project));
             const isActive = e.id === activeId;
             return (
               <div key={e.id} className="gallery-card" data-active={isActive}>
                 <button className="gallery-thumb" onClick={() => openEntry(e)} title={isActive ? 'Currently open' : `Open ${e.name}`}>
-                  <MascotThumb scene={scene} view={COMP} />
+                  <MascotThumb scene={scene} view={compOf(e.project)} />
                 </button>
                 {renaming === e.id ? (
                   <input className="txt" autoFocus value={draft} onChange={(ev) => setDraft(ev.target.value)}

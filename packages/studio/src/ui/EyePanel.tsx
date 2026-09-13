@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useEditor } from '../core/store';
 import { activeTrackFor, valueAt } from '../core/scene';
+import { mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
 import { activeTimeline } from '../core/types';
 import { KeyNav, NumberField, Panel, PropRow } from './bits';
 import type { RigNode } from '../core/types';
@@ -21,8 +22,21 @@ export function EyePanel() {
   const selection = useEditor((s) => s.selection);
   const pad = useRef<HTMLDivElement>(null);
 
-  const eyes = Object.values(project.rig.nodes).filter((n): n is RigNode & { eye: NonNullable<RigNode['eye']> } => n.kind === 'eye' && !!n.eye);
-  if (!eyes.length) return <Panel title="Eyes"><p className="empty-note">This rig has no eye layers.</p></Panel>;
+  // one mascot's eyes: the one being worked on. Every mascot has a gaze of its own.
+  const rig = project.rig;
+  const mascots = mascotsOf(rig);
+  const current = mascotOf(rig, selection[0]) ?? rig.nodes[rig.rootId];
+  const eyes = Object.values(rig.nodes).filter((n): n is RigNode & { eye: NonNullable<RigNode['eye']> } =>
+    n.kind === 'eye' && !!n.eye && mascotOf(rig, n.id)?.id === current?.id);
+  const chooser = mascots.length > 1 && (
+    <div className="seg" role="tablist" aria-label="Whose eyes" style={{ display: 'flex' }}>
+      {mascots.slice().reverse().map((m) => (
+        <button key={m.id} role="tab" style={{ flex: 1 }} aria-selected={m.id === current?.id} aria-pressed={m.id === current?.id}
+          onClick={() => select([m.id])}>{mascotLabel(rig, m)}</button>
+      ))}
+    </div>
+  );
+  if (!eyes.length) return <Panel title="Eyes">{chooser}<p className="empty-note">{current ? mascotLabel(rig, current) : 'This mascot'} has no eyes.</p></Panel>;
 
   const sorted = [...eyes].sort((a, b) => a.eye.distanceFromCenter - b.eye.distanceFromCenter);
   const left = sorted[0], right = sorted[sorted.length - 1];
@@ -41,7 +55,7 @@ export function EyePanel() {
   /** whether there is a keyframe at the playhead — the gaze pad's own stopwatch, which
    *  drives two properties at once and so cannot use KeyNav's single-property version */
   const keyHere = (property: string) => {
-    const track = activeTrackFor(activeTimeline(project), left.id, property, playhead);
+    const track = activeTrackFor(activeTimeline(project), left.id, property, playhead, project.rig);
     return !!track?.keyframes.some((k) => Math.abs(k.time - playhead) < 1);
   };
 
@@ -71,6 +85,7 @@ export function EyePanel() {
           updateNode(right.id, (n) => { if (n.eye) n.eye.linkedToId = linked ? null : left.id; });
         }}>{linked ? 'Linked' : 'Unlinked'}</button>
     }>
+      {chooser}
       <div style={{ position: 'relative' }}>
         <div ref={pad} className="pad" onPointerDown={onPad} onPointerMove={onPad}
           role="slider" aria-label="Eye direction" aria-valuenow={Math.round(gazeYaw)} tabIndex={0}

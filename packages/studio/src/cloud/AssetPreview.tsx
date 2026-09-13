@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { COMP, defaultProject, presetPreviewProject } from '../core/defaults';
+import { compOf, defaultProject, presetPreviewProject } from '../core/defaults';
 import { buildScene, evaluateRig, sceneAt } from '../core/scene';
 import { usePresetScene } from '../ui/PresetPreview';
 import { splitKey } from '../core/store';
@@ -43,7 +43,7 @@ export function AssetPreview({ kind, data, loop = true, className }: {
         if (nodeId === CAMERA_ID || !rig.nodes[nodeId]) continue;
         writeProp(rig, nodeId, property, value);
       }
-      return buildScene(rig, COMP);
+      return buildScene(rig, compOf(base));
     } catch {
       return null;
     }
@@ -52,7 +52,7 @@ export function AssetPreview({ kind, data, loop = true, className }: {
   // a still frame when the caller asked for no motion — the same scene, sampled once
   const stillScene = useMemo(() => {
     if (kind !== 'preset' || loop || !preset) return null;
-    try { return sceneAt(presetPreviewProject(base, preset), 0, COMP); } catch { return null; }
+    try { return sceneAt(presetPreviewProject(base, preset), 0, compOf(base)); } catch { return null; }
   }, [kind, loop, preset, base]);
 
   const scene = kind === 'preset' ? (presetScene ?? stillScene) : poseScene;
@@ -62,5 +62,5 @@ export function AssetPreview({ kind, data, loop = true, className }: {
   if (!scene) {
     return <p className="empty-note">This {kind} can’t be previewed — its data looks malformed.</p>;
   }
-  return <MascotThumb className={className} scene={scene} view={COMP} box={box} />;
+  return <MascotThumb className={className} scene={scene} view={compOf(base)} box={box} />;
 }

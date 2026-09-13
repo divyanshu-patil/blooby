@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { COMP, presetPreviewProject } from '../core/defaults';
+import { compOf, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
 
 import { MascotThumb, sceneBounds, unionBounds, type Bounds } from './Mascot';
@@ -62,11 +62,11 @@ export function usePresetScene(project: Project, preset: Preset | null): {
     const temp = presetPreviewProject(project, preset);
     let b: Bounds | null = null;
     for (let i = 0; i < SAMPLES; i++) {
-      try { b = unionBounds(b, sceneBounds(sceneAt(temp, (i / SAMPLES) * span, COMP))); } catch { /* skip */ }
+      try { b = unionBounds(b, sceneBounds(sceneAt(temp, (i / SAMPLES) * span, compOf(project)))); } catch { /* skip */ }
     }
     return b && {
       x0: Math.max(0, b.x0), y0: Math.max(0, b.y0),
-      x1: Math.min(COMP.width, b.x1), y1: Math.min(COMP.height, b.y1),
+      x1: Math.min(compOf(project).width, b.x1), y1: Math.min(compOf(project).height, b.y1),
     };
   }, [project, preset, span]);
 
@@ -74,7 +74,7 @@ export function usePresetScene(project: Project, preset: Preset | null): {
   // and refusing to preview those was how an effects-only submission looked broken
   if (!preset) return { scene: null, box: null };
   try {
-    return { scene: sceneAt(presetPreviewProject(project, preset), t, COMP), box };
+    return { scene: sceneAt(presetPreviewProject(project, preset), t, compOf(project)), box };
   } catch { return { scene: null, box }; }
 }
 
@@ -110,7 +110,7 @@ export function PresetPreview({ project, preset, onAdd, onEdit, onRename, onDele
         onClick={(e) => e.stopPropagation()}>
         <div className="preview-stage">
           {scene
-            ? <MascotThumb scene={scene} view={COMP} box={box} />
+            ? <MascotThumb scene={scene} view={compOf(project)} box={box} />
             : <p className="empty-note">This preset can’t be previewed.</p>}
         </div>
 

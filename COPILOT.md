@@ -250,16 +250,55 @@ is why every capability added to the editor arrives with a tool in the same comm
 
 | editor feature | tool |
 | --- | --- |
-| shapes and morphing | `set_shape` (with `atMs`, two of them morph) |
+| shapes and morphing | `set_shape` (any SHAPE_LIBRARY id; with `atMs`, two of them morph) |
+| how a shape morphs | `set_shape_morph` (morph, cut, smooth, elastic, overshoot, ease) |
 | what an emitter throws | `set_emitter_parts` |
 | emitters at all | `add_emitter` |
 | effect and emitter ranges | `set_effect_range` |
 | pendulum | `add_modifier` with `kind: "pendulum"` |
-| retiring a feature | `visible`, a plain 0–1 property |
+| retiring a feature | `visible` (fades and shrinks), `opacity` (fades only) |
+| freeform layers | `add_layer`, `add_svg`, `remove_layer`, `duplicate_layer` |
+| the draw order | `reorder_layer` |
+| the layer list's eye and padlock | `set_layer_visibility`, `set_layer_lock` |
+| world ↔ mascot | `set_layer_attachment` |
+| when a layer is on screen | `set_layer_appearance_range` |
+| fill, stroke, stroke width | `set_svg_fill`, `set_svg_stroke`, `set_svg_stroke_width` (separate tracks) |
+| hands and legs | `set_hand_points`, `set_hand_rig`, `set_leg_points`, `set_leg_rig` |
+| the canvas | `set_composition` |
+| which state is current | `set_state` |
+| CURRENT → TARGET | `set_transition` — one direct edge, never a chain |
+| several mascots | `add_mascot`, `remove_mascot`, `duplicate_mascot`, `rename_mascot`, `set_mascot_transform`, `set_mascot_shape`, `set_mascot_parent` |
+| a clip on one mascot | `add_preset_to_timeline` with `mascot` — the clip goes in that mascot's lane |
+| text layers | `add_text`, `set_text`, `set_text_font`, `set_text_style`, `set_text_size`, `set_text_weight`, `set_text_color`, `set_text_stroke` |
+| text on arcs and paths | `set_text_curve`, `set_text_path`, `set_text_path_offset` |
+| letters arriving | `animate_text` (typewriter, pop, fade, drop, rise, scatter, wave) |
+| curves | `add_curve`, `add_curve_point`, `move_curve_point` (with `atMs`, a path keyframe), `remove_curve_point`, `close_curve`, `reverse_curve` |
+| parent and order for any layer | `set_layer_parent`, `set_layer_order` (a mascot moves as one) |
+
+Every freeform tool calls the same pure function the editor does (`core/layers.ts`,
+`directTransition` in `core/stateMachine.ts`, `writeKeyframe`), inside `applyCalls`' one
+commit. The batch validator sees what earlier calls in the turn will have made — a layer
+added then attached by name, a shape keyed then given a morph — the same way it already
+did for presets. `copilot/freeform.test.ts` reads `tools.ts` as source and fails if any
+`TOOL_NAMES` entry lacks its validate, describe or applyCalls case, so the grep in "Adding
+a tool" is now enforced rather than remembered.
+
+The prompt shows each layer in draw order with its attachment (world, on the mascot, on
+its surface at yaw/pitch), its shape by library name, its appearance ranges and a limb's
+points, plus the canvas size, the playhead and the current state — what a follow-up like
+"make the hat follow the head" needs in order to edit the hat rather than add another.
 
 The tool docs list the shape library's ids inline, generated from `SHAPE_LIBRARY`, so a
 new shape is offerable the moment it exists. The selfcheck asserts that: every entry's id
 must appear in `TOOL_DOCS`.
+
+With several mascots the prompt lists them first, numbered, with each one's body id and
+how many clips its lane holds; a `mascot` argument takes the number, the name, the label
+("Mascot 2") or the body id, and `normaliseCall` resolves all four to the body id. Each
+text layer's line gives its words, font, weight and size and what it runs along; each
+curve's gives its type and its points, at the coordinates `move_curve_point` takes back.
+`copilot/mascotText.test.ts` drives every one of these tools through the same
+normalise → validate-batch → apply path the panel uses.
 
 ## Rules the copilot code itself follows
 

@@ -6,6 +6,19 @@ import { buildRuntimePack } from '../export/runtime';
 import { validateMachine } from '../core/stateMachine';
 import { download, exportGif, exportPng, exportVideo, videoMime } from '../export/raster';
 import { useStageBg } from './stageBg';
+import { ensureFonts, missingFonts } from '../core/fonts';
+import { compOf } from '../core/comp';
+
+/**
+ * Every export draws text from its font's outlines, so the faces must be here first —
+ * an export never quietly depends on a font the player would have to fetch. What could
+ * not be loaded is said, by name.
+ */
+async function withFonts(project: Parameters<typeof ensureFonts>[0]): Promise<string> {
+  await ensureFonts(project);
+  const missing = missingFonts(project);
+  return missing.length ? `could not load ${missing.join(', ')} — that text goes out in a fallback font` : '';
+}
 
 export function ExportBar() {
   const project = useEditor((s) => s.project);
@@ -29,7 +42,8 @@ export function ExportBar() {
     finally { setBusy(null); }
   };
 
-  const lottieJson = () => {
+  const lottieJson = async () => {
+    await withFonts(project);
     const baked = bakeLottie(project, { background, name: project.name });
     download(new Blob([JSON.stringify(baked.json)], { type: 'application/json' }), `${base}.json`);
     // Say what it cost and why, before the file size is a surprise. A morphing outline
@@ -45,6 +59,7 @@ export function ExportBar() {
       baked.skipped.length
         ? `no Lottie equivalent, use GIF/MP4 for these: ${[...new Set(baked.skipped)].join(', ')}`
         : '',
+      ...baked.warnings,
     ].filter(Boolean).join(' · '));
   };
 
@@ -54,18 +69,27 @@ export function ExportBar() {
   const errors = validateMachine(project).filter((i) => i.level === 'error');
   const blocked = errors.length ? `${errors.length} state-machine error${errors.length === 1 ? '' : 's'} — ${errors[0].message}` : null;
 
-  const dotLottie = () => {
+  const dotLottie = async () => {
+    const fonts = await withFonts(project);
     const { blob, animations, machine } = buildDotLottie(project, { background });
     download(blob, `${base}.lottie`);
     const edges = machine.json.states.reduce((n, st) => n + st.transitions.length, 0);
-    setNote(`${animations.length} animation${animations.length === 1 ? '' : 's'} · ${machine.json.inputs.length} inputs · ${edges} transitions · state machine "${machine.id}"`);
+    setNote([`${animations.length} animation${animations.length === 1 ? '' : 's'} · ${machine.json.inputs.length} inputs · ${edges} transitions · state machine "${machine.id}"`, fonts].filter(Boolean).join(' · '));
   };
 
   const runtimePack = () => run('React Native pack', async () => {
+    const fonts = await withFonts(project);
     const { blob } = await buildRuntimePack(project, { background });
     download(blob, `${base}-mascot.zip`);
-    setNote('.lottie + Mascot.tsx + blooby.machine.json + README — drop the folder into your app.');
+    setNote(['.lottie + Mascot.tsx + blooby.machine.json + README — drop the folder into your app.', fonts].filter(Boolean).join(' · '));
   });
+  /** a raster export, with the faces loaded first so the letters are the real ones */
+  const raster = (what: string, fn: (p: (n: number) => void) => Promise<void>) => run(what, async (p) => {
+    const fonts = await withFonts(project);
+    await fn(p);
+    if (fonts) setNote(fonts);
+  });
+  const width = compOf(project).width;
 
   return (
     <>
@@ -85,7 +109,7 @@ export function ExportBar() {
               <span className="prop-label" style={{ flex: 1 }}>Size</span>
               <div className="seg">
                 {[0.5, 1, 2].map((s) => (
-                  <button key={s} aria-pressed={scale === s} onClick={() => setScale(s)}>{Math.round(720 * s)}px</button>
+                  <button key={s} aria-pressed={scale === s} onClick={() => setScale(s)}>{Math.round(width * s)}px</button>
                 ))}
               </div>
             </div>
@@ -100,19 +124,19 @@ export function ExportBar() {
             </button>
             {blocked && <p className="hint" style={{ color: 'var(--hot)' }}>{blocked}</p>}
             <button className="btn" disabled={!!busy}
-              onClick={() => run('GIF', async (p) => download(await exportGif(project, { fps: Math.min(project.fps, 25), scale, background }, p), `${base}.gif`))}>
+              onClick={() => raster('GIF', async (p) => download(await exportGif(project, { fps: Math.min(project.fps, 25), scale, background }, p), `${base}.gif`))}>
               Animated GIF
             </button>
             <button className="btn" disabled={!!busy || !mime}
               title={mime ? `Records as ${mime}` : 'This browser cannot record canvas video'}
-              onClick={() => run('Video', async (p) => {
+              onClick={() => raster('Video', async (p) => {
                 const { blob, ext } = await exportVideo(project, { fps: project.fps, scale, background }, p);
                 download(blob, `${base}.${ext}`);
               })}>
               {mime?.startsWith('video/mp4') ? 'MP4 video' : 'WebM video'}
             </button>
             <button className="btn" disabled={!!busy}
-              onClick={() => run('PNG', async () => download(await exportPng(project, playhead, scale * 2, background), `${base}-${Math.round(playhead)}ms.png`))}>
+              onClick={() => raster('PNG', async () => download(await exportPng(project, playhead, scale * 2, background), `${base}-${Math.round(playhead)}ms.png`))}>
               PNG of this frame
             </button>
             {note && <p className="hint">{note}</p>}
