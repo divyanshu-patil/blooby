@@ -5,7 +5,7 @@ import { NUMERIC_PROPS, PROP_ALIAS, PROPS, readEffectProp, readProp, resolveProp
 import { MODIFIER_KINDS, MODIFIERS } from './types';
 import { validate } from '../copilot/tools';
 import { activeTimeline } from './types';
-import { makeLimb } from './layers';
+import { makeLimb, makeTextLayer } from './layers';
 
 // --- the registries: one table, and everything downstream derives from it -------
 {
@@ -15,6 +15,8 @@ import { makeLimb } from './layers';
   const rig = defaultProject().rig;
   // a leg has every limb property there is — the foot and the ankle included
   rig.nodes.legProbe = makeLimb('leg', 1, rig.rootId, { id: 'legProbe' });
+  // and a text layer has every typography property
+  rig.nodes.textProbe = makeTextLayer('probe', { id: 'textProbe' });
   // the same guarantee for an effect's own properties, which live on the timeline rather
   // than in the rig and so have their own read/write pair
   const fxProject = defaultProject();
@@ -34,7 +36,7 @@ import { makeLimb } from './layers';
       return readEffectProp(fxTl, id, path) !== probe;
     }
     const nodeId = spec.on === 'camera' ? '__camera'
-      : path.startsWith('eye.') ? 'eyeL' : path.startsWith('limb.') ? 'legProbe' : rig.rootId;
+      : path.startsWith('eye.') ? 'eyeL' : path.startsWith('limb.') ? 'legProbe' : path.startsWith('text.') ? 'textProbe' : rig.rootId;
     writeProp(rig, nodeId, path, probe);
     return readProp(rig, nodeId, path) !== probe;
   });

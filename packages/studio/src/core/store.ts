@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
 import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
-import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack, valueAt } from './scene';
+import { activeTrackFor, evaluateRig, fromFrame, lerpAngle, lerpValue, sampleTrack, sceneFrames, valueAt, WORLD } from './scene';
+import { makeCurveLayer, makeTextLayer, nextName, writeValue } from './layers';
+import { bakeHandles, curveFromPath, curveToPath, type Curve, type CurvePoint } from './curve';
+import { onFonts } from './fonts';
 import {
   addMascot as addMascotIn, duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
   saveMascotTemplate as saveMascotTemplateIn,
@@ -18,7 +21,7 @@ import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } fro
 import { fetchCatalog } from './catalog';
 import { defaultValues, directTransition, machineOf, nextTransition, slug, type DirectOptions } from './stateMachine';
 import { migrateProject, SCHEMA_VERSION } from './migrate';
-import type { Block, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, Timeline, Track, Transition } from './types';
+import type { Block, CurveType, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, TextStyle, Timeline, Track, Transition, Vec2 } from './types';
 import { activeTimeline, CAMERA_ID } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
@@ -126,6 +129,19 @@ export interface Editor {
   /** A new mascot — a look, or a saved one by template id — selected. Returns its body id. */
   addMascot: (kind: MascotKind | { templateId: string }, opts?: { name?: string; x?: number; y?: number }) => string;
   saveMascotTemplate: (bodyId: string, name?: string) => void;
+
+  /** A text layer, selected. `at` is a composition point (where the Text tool was clicked). */
+  addText: (content?: string, opts?: { at?: Vec2; parentId?: string | null; style?: Partial<TextStyle> }) => string;
+  /** A drawn curve from composition points — a pen stroke — selected. Null for under two points. */
+  addCurve: (points: CurvePoint[], opts?: { closed?: boolean; type?: CurveType; guide?: boolean }) => string | null;
+  /** Typography that is not a keyframable number: the font, alignment, what it follows. */
+  setText: (nodeId: string, fn: (t: TextStyle) => void, label?: string) => void;
+  /** Reshape a curve by its anchors, written where it shows — a keyframe under autokey. */
+  editCurve: (nodeId: string, fn: (c: Curve, type: CurveType) => Curve | null, label?: string) => void;
+  /** Smooth, polyline or hand-edited Bézier — switching to Bézier keeps the shape it had. */
+  setCurveType: (nodeId: string, type: CurveType) => void;
+  /** Bumped whenever a font face arrives, so text is laid out again with its real metrics. */
+  fontsVersion: number;
 
   loadCatalog: () => Promise<void>;
   /** `mascotId` puts the clip in that mascot's lane, the preset animating that mascot */
@@ -672,6 +688,70 @@ export const useEditor = create<Editor>((set, get) => ({
 
   saveMascotTemplate(bodyId, name) {
     get().commit((p) => { saveMascotTemplateIn(p, bodyId, name); });
+  },
+
+  fontsVersion: 0,
+
+  addText(content = 'Type something', opts = {}) {
+    const { project, playhead } = get();
+    const parentId = opts.parentId ?? null;
+    let over: Partial<RigNode> = parentId ? { parentId } : {};
+    if (opts.at) {
+      // where it was clicked, in the frame it will live in
+      const frame = sceneFrames(evaluateRig(project, playhead), compOf(project)).get(parentId ?? WORLD);
+      const local = frame ? fromFrame(frame, opts.at) : null;
+      if (local) over = { ...over, surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: Math.round(local.x * 100) / 100, y: Math.round(local.y * 100) / 100 } } };
+    }
+    const node = makeTextLayer(content, over, opts.style);
+    get().addLayer(node);
+    return node.id;
+  },
+
+  addCurve(points, opts = {}) {
+    const { project, playhead } = get();
+    const world = sceneFrames(evaluateRig(project, playhead), compOf(project)).get(WORLD);
+    if (!world) return null;
+    // handles are offsets, and the world frame is 1:1, so only the anchors move
+    const local = points.map((pt) => ({ ...pt, ...fromFrame(world, pt) }));
+    const node = makeCurveLayer(local, { ...opts, name: nextName(project.rig, 'Curve') });
+    if (!node) return null;
+    get().addLayer(node);
+    return node.id;
+  },
+
+  setText(nodeId, fn, label) {
+    get().commit((p) => { const t = p.rig.nodes[nodeId]?.text; if (t) fn(t); }, label ?? `text.${nodeId}`);
+  },
+
+  editCurve(nodeId, fn, label) {
+    const { project, playhead } = get();
+    const node = project.rig.nodes[nodeId];
+    if (!node) return;
+    // the outline as it stands under the playhead, animated or not
+    const shown = valueAt(project, nodeId, 'shape.path', playhead);
+    const c = curveFromPath(typeof shown === 'string' ? shown : node.shapePath);
+    if (!c) return;
+    const type = node.curve?.type ?? 'bezier';
+    const next = fn(c, type);
+    const d = next && curveToPath(next, type);
+    if (d) get().setValue(nodeId, 'shape.path', d, label ?? `curve.${nodeId}`);
+  },
+
+  setCurveType(nodeId, type) {
+    const { project, playhead } = get();
+    const node = project.rig.nodes[nodeId];
+    const shown = node && valueAt(project, nodeId, 'shape.path', playhead);
+    const c = node && curveFromPath(typeof shown === 'string' ? shown : node.shapePath);
+    if (!node || !c) return;
+    const from = node.curve?.type ?? 'bezier';
+    // into Bézier, the handles it draws with become handles you can drag — nothing moves
+    const kept = type === 'bezier' && from !== 'bezier' ? bakeHandles(c, from) : c;
+    get().commit((p) => {
+      const n = p.rig.nodes[nodeId];
+      if (!n) return;
+      n.curve = { type };
+      writeValue(p, nodeId, 'shape.path', curveToPath(kept, type), playhead);
+    }, `curvetype.${nodeId}`);
   },
 
   addBlock(presetId, index, mascotId) {
@@ -1306,6 +1386,9 @@ export const useEditor = create<Editor>((set, get) => ({
   },
   resetProject() { get().loadProject(defaultProject()); },
 }));
+
+// a face arriving changes how text is laid out, and nothing else would tell React
+onFonts(() => useEditor.setState((s) => ({ fontsVersion: s.fontsVersion + 1 })));
 
 function upsertKeyframe(track: Track, time: number, value: KeyValue) {
   const existing = track.keyframes.find((k) => Math.abs(k.time - time) < 1);

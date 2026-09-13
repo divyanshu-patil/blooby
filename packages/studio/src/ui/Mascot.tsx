@@ -1,17 +1,43 @@
 import type { SceneItem } from '../core/scene';
 import { cssColor } from '../core/color';
+import { cssFamily, glyphOutline } from '../core/fonts';
 
 /** A layer's outline attributes — screen px, so they read the same at any layer size. */
 const strokeOf = (st: SceneItem['stroke']) => (st && st.width > 0
   ? { stroke: cssColor(st.color), strokeWidth: st.width, strokeLinecap: st.cap, strokeLinejoin: st.join }
   : {});
 
-/** The one renderer. Stage, block thumbnails and preset glyphs all draw through it. */
-export function Shapes({ scene }: { scene: SceneItem[] }) {
+/**
+ * The one renderer. Stage, block thumbnails, preset glyphs and every raster export draw
+ * through it. `guides` draws the layers marked as guides — only the stage passes it, so a
+ * guide is never in a thumbnail or an export.
+ */
+export function Shapes({ scene, guides = false }: { scene: SceneItem[]; guides?: boolean }) {
   return (
     <>
       {scene.map((s) => {
+        if (s.guide && !guides) return null;
         const spin = s.rotation ? `rotate(${s.rotation} ${s.cx} ${s.cy})` : undefined;
+        // a text layer: each glyph its real outline from the font file, so what is drawn here
+        // is the vector the export writes. Until the face arrives, the letter as text.
+        if (s.glyphs && s.font) {
+          const f = s.font;
+          const fill = cssColor(s.color);
+          const st = strokeOf(s.stroke);
+          return (
+            <g key={s.id} transform={`translate(${s.cx} ${s.cy})${s.rotation ? ` rotate(${s.rotation})` : ''}`}>
+              {s.glyphs.map((g) => {
+                const d = glyphOutline(f, g.ch);
+                const place = `translate(${g.x} ${g.y})${g.rot ? ` rotate(${g.rot})` : ''}`;
+                const opacity = g.alpha < 0.999 ? g.alpha : undefined;
+                return d
+                  ? <path key={g.index} d={d} transform={`${place} scale(${f.size * g.scale})`} fill={fill} opacity={opacity} vectorEffect="non-scaling-stroke" {...st} />
+                  : <text key={g.index} transform={g.scale !== 1 ? `${place} scale(${g.scale})` : place} fontFamily={cssFamily(f)} fontWeight={f.weight}
+                    fontStyle={f.style} fontSize={f.size} textAnchor="middle" fill={fill} opacity={opacity} {...st} style={{ userSelect: 'none' }}>{g.ch}</text>;
+              })}
+            </g>
+          );
+        }
         // imported vector artwork: every path in the unit box, each painted as the file
         // painted it — or with the layer's own fill and stroke where it deferred to them
         if (s.paths) {
@@ -52,7 +78,9 @@ export function Shapes({ scene }: { scene: SceneItem[] }) {
           const w = Math.max(Math.abs(s.w), 0.001), h = Math.max(Math.abs(s.h), 0.001);
           return (
             <g key={s.id} transform={`${spin ?? ''} translate(${s.cx} ${s.cy}) scale(${w} ${h})`}>
-              <path d={s.path} fill={cssColor(s.color)} vectorEffect="non-scaling-stroke" {...strokeOf(s.stroke)} />
+              {/* a guide is dashed: it is there to work with, and will not be exported */}
+              <path d={s.path} fill={cssColor(s.color)} vectorEffect="non-scaling-stroke" {...strokeOf(s.stroke)}
+                {...(s.guide ? { strokeDasharray: '7 6', opacity: 0.8 } : {})} />
             </g>
           );
         }

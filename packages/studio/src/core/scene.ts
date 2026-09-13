@@ -1,15 +1,21 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
-import { lerpPath, mapPath, morphPath, pathBounds } from './path';
+import { lerpPath, mapPath, morphPath, pathBounds, pathSampler, primitivePath } from './path';
 import { shapeResolver } from './emitters';
 import { noise1d } from './noise';
 import { bodyTurnScale, FLAT, projectToScreen, silhouetteScale, type Projected } from './curvature';
 import { hoseInputOf, rubberHose } from './limb';
-import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, readEffectProp, readProp, setCameraProp, setProp, STROKE_DEFAULT, writeEffectProp, writeProp } from './props';
+import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, PROPS, readEffectProp, readProp, setCameraProp, setProp, STROKE_DEFAULT, writeEffectProp, writeProp } from './props';
+import { arcSampler, glyphBounds, placeGlyphs, TEXT_DEFAULTS, type Glyph } from './text';
+import { metricsFor, snapWeight } from './fonts';
+
+/** The outlines a plain ellipse and a plain stadium offer text that follows them. */
+const CIRCLE = primitivePath('circle');
+const PILL = primitivePath('pill');
 import { activeTimeline } from './types';
 import { activeTransitionAt, blockAt, blockStarts, lanesOf } from './timeline';
 import { laneOf } from './mascot';
-import type { Anchor, Appearance, ColorStop, EasingCurve, Emitter, KeyValue, LineCap, LineJoin, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2, VectorPath } from './types';
+import type { Anchor, Appearance, ColorStop, EasingCurve, Emitter, FontRef, KeyValue, LineCap, LineJoin, Modifier, ModifierAxis, Project, Rig, RigNode, TextStyle, Timeline, Track, Vec2, VectorPath } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
 const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
@@ -44,6 +50,8 @@ export function sampleTrack(track: Track, t: number): KeyValue | undefined {
   const a = ks[i], b = ks[i + 1];
   const span = b.time - a.time;
   const raw = span <= 0 ? 1 : (t - a.time) / span;
+  // words and font names switch at the keyframe: there is nothing halfway between them
+  if (PROPS[track.property]?.discrete) return a.value;
   const e = applyEasing(a.easingOut, raw);
   if (track.property.endsWith('rotation') && typeof a.value === 'number' && typeof b.value === 'number')
     return lerpAngle(a.value, b.value as number, e);
@@ -496,6 +504,86 @@ export interface SceneItem {
   paths?: VectorPath[];
   /** a generated limb; its outline is already placed, so rotation is always 0 */
   limb?: true;
+  /** a text layer's glyphs, relative to cx/cy in the item's own frame (before `rotation`) */
+  glyphs?: Glyph[];
+  /** the face and px size the glyphs are drawn at — the layer's scale already in it */
+  font?: FontRef & { size: number };
+  /** drawn in the editor only, left out of every export */
+  guide?: true;
+}
+
+/** Where a layer's outline is on screen — its box and its unit-box path — for text on it. */
+interface Placement { cx: number; cy: number; w: number; h: number; rot: number; d: string }
+
+/** A layer's outline as world coordinates, measured for text to follow. */
+function worldSampler(pl: Placement) {
+  const a = (pl.rot * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return pathSampler(mapPath(pl.d, (u) => {
+    const x = u.x * pl.w, y = u.y * pl.h;
+    return { x: pl.cx + x * c - y * s, y: pl.cy + x * s + y * c };
+  }));
+}
+
+/**
+ * A text layer as a scene item: its glyphs laid out and placed.
+ *
+ * Built after every other layer, because a text can follow any of them — a curve, a shape,
+ * a mascot's outline — and has to read that layer where it is on THIS frame, animated,
+ * attached, wherever. The glyphs are stored relative to the item's centre, so a blend
+ * between two poses moves the words as one.
+ */
+function textItem(node: RigNode, at: { x: number; y: number; rot: number; k: number; alpha: number },
+  placed: Map<string, Placement>): SceneItem | null {
+  const style = node.text!;
+  const k = at.k;
+  const font: FontRef = { ...style.font, weight: snapWeight(style.font.weight) };
+  const path = style.path;
+  const scaled: TextStyle = {
+    ...style, size: style.size * k, letterSpacing: style.letterSpacing * k,
+    width: style.width ? style.width * k : undefined,
+    path: path && { ...path, offset: (path.offset ?? 0) * k, baseline: (path.baseline ?? 0) * k, radius: (path.radius ?? TEXT_DEFAULTS.arc.radius) * k },
+  };
+  const m = metricsFor(font, scaled.size);
+  const base = {
+    id: node.id, name: node.name, shape: 'pill' as const, r: 0, depth: 0, zIndex: node.zIndex,
+    ...paintOf(node, at.alpha), font: { ...font, size: scaled.size },
+    ...(node.guide ? { guide: true as const } : {}),
+  };
+
+  // on another layer's outline: placed in the world, where that outline is
+  const target = path?.mode === 'path' && path.nodeId ? placed.get(path.nodeId) : undefined;
+  const sampler = target ? worldSampler(target) : null;
+  if (sampler) {
+    const { glyphs } = placeGlyphs(scaled, m, sampler);
+    const b = glyphBounds(glyphs, scaled.size) ?? { x0: at.x, y0: at.y, x1: at.x, y1: at.y };
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    return { ...base, cx, cy, w: b.x1 - b.x0, h: b.y1 - b.y0, rotation: 0, glyphs: glyphs.map((g) => ({ ...g, x: g.x - cx, y: g.y - cy })) };
+  }
+
+  // straight, or round an arc: laid out in the layer's own frame about its anchor
+  const arc = path?.mode === 'arc'
+    ? arcSampler(scaled.path!.radius!, path.start ?? TEXT_DEFAULTS.arc.start, path.end ?? TEXT_DEFAULTS.arc.end, !!path.reverse)
+    : undefined;
+  const { glyphs, lines } = placeGlyphs(arc ? scaled : { ...scaled, path: undefined }, m, arc);
+  let box: { x0: number; y0: number; x1: number; y1: number } | null;
+  if (arc) box = glyphBounds(glyphs, scaled.size);
+  else {
+    const lh = scaled.size * scaled.lineHeight;
+    const w = scaled.width ?? Math.max(0, ...lines.map((l) => l.width));
+    const h = Math.max(lh, lines.length * lh);
+    const x0 = style.align === 'left' ? 0 : style.align === 'center' ? -w / 2 : -w;
+    const y0 = style.valign === 'top' ? 0 : style.valign === 'middle' ? -h / 2 : -h;
+    box = { x0, y0, x1: x0 + w, y1: y0 + h };
+  }
+  const b = box ?? { x0: 0, y0: 0, x1: 0, y1: 0 };
+  const lx = (b.x0 + b.x1) / 2, ly = (b.y0 + b.y1) / 2;
+  const r = (at.rot * Math.PI) / 180;
+  return {
+    ...base,
+    cx: at.x + lx * Math.cos(r) - ly * Math.sin(r), cy: at.y + lx * Math.sin(r) + ly * Math.cos(r),
+    w: b.x1 - b.x0, h: b.y1 - b.y0, rotation: at.rot,
+    glyphs: glyphs.map((g) => ({ ...g, x: g.x - lx, y: g.y - ly })),
+  };
 }
 
 export interface Viewport { width: number; height: number }
@@ -601,6 +689,10 @@ function outlineItem(d: string): { cx: number; cy: number; w: number; h: number;
 export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerFrame>): SceneItem[] {
   if (!rig.nodes[rig.rootId]) return [];
   const out: SceneItem[] = [];
+  // every outline's placement this frame, drawn or not — what text on a path reads
+  const placed = new Map<string, Placement>();
+  // text waits until everything it might follow has been placed
+  const texts: { node: RigNode; at: { x: number; y: number; rot: number; k: number; alpha: number } }[] = [];
 
   // rx is the *sphere* radius that features are placed on; the drawn outline is its
   // silhouette, which perspective pushes outward. Keep them separate or features escape.
@@ -627,6 +719,7 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
     const roll = f.rot + node.transform.rotation;
     const seen = node.presence ?? 1;
     const alpha = f.alpha * Math.min(1, Math.max(0, node.opacity ?? 1));
+    placed.set(node.id, { cx: at.x, cy: at.y, w: rx * limb * 2, h: ry * limb * 2, rot: roll, d: node.shapePath ?? CIRCLE });
     if (seen > 0.002 && alpha > 0.002) {
       out.push({
         id: node.id, name: node.name, shape: 'ellipse', cx: at.x, cy: at.y,
@@ -653,8 +746,8 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
     const rad = (f.rot * Math.PI) / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
     for (const node of childrenOf(rig, parentId)) {
-      if (!node.visible) continue;
-      if (node.kind === 'body') { walk(node.id, mascot(node, f)); continue; }
+      if (node.kind === 'body') { if (node.visible) walk(node.id, mascot(node, f)); continue; }
+      // a hidden layer is still placed — a curve nobody sees can carry text — but not drawn
       // a mapped layer rides the sphere; anything with no sphere under it is flat
       const p: Projected = node.surface.mapped && f.R > 0 ? projectToScreen(node, rig, f.R, f.head) : FLAT;
       if (!p.visible) continue;
@@ -675,18 +768,36 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
       // Opacity fades only, and carries down to everything this layer holds.
       const seen = node.presence ?? 1;
       const alpha = f.alpha * Math.min(1, Math.max(0, node.opacity ?? 1));
-      const w = node.size.x * node.transform.scale.x * p.sx * f.cum * seen;
-      const h = eyeHeight(node) * node.transform.scale.y * p.sy * f.cum * seen;
+      const w0 = node.size.x * node.transform.scale.x * p.sx * f.cum;
+      const h0 = eyeHeight(node) * node.transform.scale.y * p.sy * f.cum;
+      const w = w0 * seen;
+      const h = h0 * seen;
       const a = p.alpha * seen * alpha;
 
-      if (seen > 0.002 && a > 0.002) {
-        const base = { id: node.id, name: node.name, depth: p.depth, zIndex: node.zIndex, ...paintOf(node, a) };
+      // its outline where it is — full size, drawn or not — for text that follows it
+      const outline = node.kind === 'primitive' || node.kind === 'eye'
+        ? node.shapePath ?? (node.primitive?.shape === 'circle' ? CIRCLE : PILL)
+        : node.kind === 'svgLayer' ? node.svg?.paths?.[0]?.d : undefined;
+      if (outline) placed.set(node.id, { cx: ax, cy: ay, w: w0, h: h0, rot, d: outline });
+      if (!node.visible) continue;
+
+      if (node.kind === 'text' && node.text) {
+        // laid out once everything it might follow has been placed; its scale is uniform,
+        // so a glyph is never squashed
+        if (seen > 0.002 && a > 0.002) {
+          texts.push({ node, at: { x: ax, y: ay, rot, alpha: a, k: f.cum * scaleOf(node) * Math.sqrt(Math.abs(p.sx * p.sy)) * seen } });
+        }
+      } else if (seen > 0.002 && a > 0.002) {
+        const base = { id: node.id, name: node.name, depth: p.depth, zIndex: node.zIndex, ...paintOf(node, a), ...(node.guide ? { guide: true as const } : {}) };
         if (node.kind === 'limb' && node.limb) {
           // placed in the PARENT's frame: the points are where the shoulder, hand, knee
           // and ankle sit on the body, and they ride it through every move
           const hose = rubberHose(hoseInputOf(node.limb, (v) => toFrame(f, v), f.cum * seen));
           const box = hose && outlineItem(hose.d);
-          if (box) out.push({ ...base, shape: 'pill', r: 0, rotation: 0, ...box, limb: true });
+          if (box) {
+            placed.set(node.id, { cx: box.cx, cy: box.cy, w: box.w, h: box.h, rot: 0, d: box.path });
+            out.push({ ...base, shape: 'pill', r: 0, rotation: 0, ...box, limb: true });
+          }
         } else if (node.kind === 'svgLayer' && node.svg?.paths?.length) {
           out.push({ ...base, shape: 'pill', cx: ax, cy: ay, w, h, r: 0, rotation: rot, paths: node.svg.paths });
         } else if (node.kind === 'svgLayer' && node.svg) {
@@ -711,6 +822,11 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
   };
 
   walk(null, worldFrame);
+  // curves, shapes and mascots are all where they are this frame; now the words
+  for (const t of texts) {
+    const item = textItem(t.node, t.at, placed);
+    if (item) out.push(t.node.guide ? { ...item, guide: true } : item);
+  }
   out.sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
   return out;
 }

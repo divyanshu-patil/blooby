@@ -14,6 +14,7 @@ function limbPoint(node: RigNode, which: string): Vec2 | undefined {
 /** One place that knows how a property path maps onto the rig. */
 export function getProp(node: RigNode, path: string): KeyValue | undefined {
   if (path.startsWith('limb.')) return getLimbProp(node, path);
+  if (path.startsWith('text.')) return getTextProp(node, path);
   switch (path) {
     case 'surface.yaw': return node.surface.yaw;
     case 'surface.pitch': return node.surface.pitch;
@@ -83,9 +84,63 @@ function setLimbProp(node: RigNode, path: string, n: number): void {
   }
 }
 
+/** Where a text layer's arc sits before anyone bends it. */
+const ARC = { radius: 180, start: -70, end: 70 };
+
+function getTextProp(node: RigNode, path: string): KeyValue | undefined {
+  const t = node.text;
+  if (!t) return undefined;
+  switch (path) {
+    case 'text.content': return t.content;
+    case 'text.font.family': return t.font.family;
+    case 'text.font.weight': return t.font.weight;
+    case 'text.size': return t.size;
+    case 'text.lineHeight': return t.lineHeight;
+    case 'text.letterSpacing': return t.letterSpacing;
+    case 'text.width': return t.width ?? 0;
+    case 'text.path.offset': return t.path?.offset ?? 0;
+    case 'text.path.baseline': return t.path?.baseline ?? 0;
+    case 'text.arc.radius': return t.path?.radius ?? ARC.radius;
+    case 'text.arc.start': return t.path?.start ?? ARC.start;
+    case 'text.arc.end': return t.path?.end ?? ARC.end;
+    case 'text.reveal.start': return t.reveal?.start ?? 0;
+    case 'text.reveal.end': return t.reveal?.end ?? [...t.content.replace(/\n/g, '')].length;
+    case 'text.chars.progress': return t.chars?.progress ?? 1;
+    case 'text.chars.stagger': return t.chars?.stagger ?? 0.5;
+    default: return undefined;
+  }
+}
+
+function setTextProp(node: RigNode, path: string, v: KeyValue): void {
+  const t = node.text;
+  if (!t) return;
+  if (path === 'text.content') { if (typeof v === 'string') t.content = v; return; }
+  if (path === 'text.font.family') { if (typeof v === 'string' && v.trim()) t.font = { ...t.font, family: v.trim() }; return; }
+  const n = v as number;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return;
+  const path2 = { mode: 'straight' as const, ...t.path };
+  switch (path) {
+    case 'text.font.weight': t.font = { ...t.font, weight: Math.min(900, Math.max(100, n)) }; break;
+    case 'text.size': t.size = Math.max(1, n); break;
+    case 'text.lineHeight': t.lineHeight = Math.max(0.3, n); break;
+    case 'text.letterSpacing': t.letterSpacing = n; break;
+    case 'text.width': t.width = n > 0 ? n : undefined; break;
+    case 'text.path.offset': t.path = { ...path2, offset: n }; break;
+    case 'text.path.baseline': t.path = { ...path2, baseline: n }; break;
+    case 'text.arc.radius': t.path = { ...path2, radius: Math.max(1, n) }; break;
+    case 'text.arc.start': t.path = { ...path2, start: n }; break;
+    case 'text.arc.end': t.path = { ...path2, end: n }; break;
+    case 'text.reveal.start': t.reveal = { ...t.reveal, start: Math.max(0, n) }; break;
+    case 'text.reveal.end': t.reveal = { start: t.reveal?.start ?? 0, end: Math.max(0, n) }; break;
+    case 'text.chars.progress': t.chars = { kind: t.chars?.kind ?? 'none', stagger: t.chars?.stagger ?? 0.5, progress: n }; break;
+    case 'text.chars.stagger': t.chars = { kind: t.chars?.kind ?? 'none', progress: t.chars?.progress ?? 1, stagger: Math.min(1, Math.max(0, n)) }; break;
+  }
+}
+
 export function setProp(node: RigNode, path: string, v: KeyValue): void {
   const n = v as number;
   if (path.startsWith('limb.')) { setLimbProp(node, path, n); return; }
+  if (path.startsWith('text.')) { setTextProp(node, path, v); return; }
   switch (path) {
     case 'surface.yaw': node.surface.yaw = n; break;
     case 'surface.pitch': node.surface.pitch = n; break;
@@ -218,6 +273,9 @@ export interface PropSpec {
   /** One line, written for someone who has never seen the editor. Say which way is
    *  positive and what a typical value looks like — this goes straight into the prompt. */
   help: string;
+  /** Switches at each keyframe rather than interpolating between them — words and font
+   *  names have no halfway. */
+  discrete?: true;
 }
 
 export const PROPS: Record<string, PropSpec> = {
@@ -302,6 +360,40 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'Legs only. How long the foot is, px. 0 hides it.' },
   'limb.foot.width': { on: 'node', label: 'Foot width', range: [0, 60, 0.5, 'px'],
     help: 'Legs only. How tall the foot is, px — about the limb thickness reads right.' },
+
+  // text layers. Sizes and offsets are px at the layer's own scale.
+  'text.content': { on: 'node', label: 'Text', discrete: true,
+    help: 'Text layers only. What it says. Keyframes switch the words at each keyframe \u2014 "Hello" at 0 ms, "Welcome" at 500 ms. Set it with set_text.' },
+  'text.font.family': { on: 'node', label: 'Font', discrete: true,
+    help: 'Text layers only. A Google Fonts family name, e.g. "Poppins". Keyframes switch fonts at each keyframe. Set it with set_text_font.' },
+  'text.font.weight': { on: 'node', label: 'Weight', range: [100, 900, 100, ''],
+    help: 'Text layers only. 400 is regular, 600 semibold, 700 bold, 900 black. Snaps to the weights the font has.' },
+  'text.size': { on: 'node', label: 'Size', range: [4, 400, 1, 'px'],
+    help: 'Text layers only. Font size in px. 36-64 reads as a title on a 720px canvas.' },
+  'text.lineHeight': { on: 'node', label: 'Line height', range: [0.6, 3, 0.01, '\u00d7'],
+    help: 'Text layers only. Space between lines as a multiple of the size. 1.1-1.3 is normal.' },
+  'text.letterSpacing': { on: 'node', label: 'Letter spacing', range: [-20, 100, 0.5, 'px'],
+    help: 'Text layers only. Extra px after every character. 0 is the font\u2019s own spacing; 4-12 spreads a title out.' },
+  'text.width': { on: 'node', label: 'Box width', range: [0, 2000, 1, 'px'],
+    help: 'Text layers only. The width lines wrap at, px. 0 means no wrapping \u2014 lines break only at line breaks.' },
+  'text.path.offset': { on: 'node', label: 'Path offset', range: [-2000, 2000, 1, 'px'],
+    help: 'Text on an arc or a path only. Slides the words along it, px. Animating it makes text travel along the path.' },
+  'text.path.baseline': { on: 'node', label: 'Baseline', range: [-200, 200, 1, 'px'],
+    help: 'Text on an arc or a path only. Lifts the words off the path, px. Positive is away from it.' },
+  'text.arc.radius': { on: 'node', label: 'Radius', range: [20, 2000, 1, 'px'],
+    help: 'Arc text only. The circle the words bend round, px. Smaller bends more; 120-300 is a gentle curve.' },
+  'text.arc.start': { on: 'node', label: 'Start angle', range: [-360, 360, 1, '\u00b0'],
+    help: 'Arc text only. Where the arc begins, degrees clockwise from 12 o\u2019clock. Left-aligned text starts here.' },
+  'text.arc.end': { on: 'node', label: 'End angle', range: [-360, 360, 1, '\u00b0'],
+    help: 'Arc text only. Where the arc ends. Right-aligned text ends here; centred text is centred between the two.' },
+  'text.reveal.start': { on: 'node', label: 'Reveal from', range: [0, 500, 1, ''],
+    help: 'Text layers only. Characters before this one are not drawn. With reveal.end, a typewriter.' },
+  'text.reveal.end': { on: 'node', label: 'Reveal to', range: [0, 500, 1, ''],
+    help: 'Text layers only. Characters from this one on are not drawn yet. Keyframe it from 0 up to the length for a typewriter.' },
+  'text.chars.progress': { on: 'node', label: 'Letters', range: [0, 10, 0.01, ''],
+    help: 'Text layers only. Drives the per-letter animation (pop, fade, drop, rise, scatter): 0 is before, 1 is done. For a wave it is the phase, one cycle per unit.' },
+  'text.chars.stagger': { on: 'node', label: 'Stagger', range: [0, 1, 0.01, ''],
+    help: 'Text layers only. 0 moves every letter together, 1 moves them one after another.' },
 
   'camera.fov': { on: 'camera', label: 'Perspective', range: [0, 89, 1, '\u00b0'],
     help: 'Perspective, as a field-of-view angle. 0 is flat/orthographic; higher makes the sphere bulge and features near the rim fall away faster.' },

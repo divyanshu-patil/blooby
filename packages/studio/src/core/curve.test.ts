@@ -9,6 +9,7 @@ import { makeCurveLayer } from './layers';
 import { defaultProject } from './defaults';
 import { sceneAt } from './scene';
 import { compOf } from './comp';
+import { useEditor } from './store';
 import type { Vec2 } from './types';
 
 const near = (a: Vec2, b: Vec2, e = 1e-3) => Math.abs(a.x - b.x) < e && Math.abs(a.y - b.y) < e;
@@ -106,4 +107,43 @@ const c: Curve = { points: wave, closed: false };
   const item = sceneAt(p, 0, compOf(p)).find((s) => s.id === n.id)!;
   it('it draws: its path, its stroke, no fill', check(item.path === n.shapePath && !!item.stroke && item.color.a === 0));
   it('where it was drawn', check(Math.abs(item.cx - (compOf(p).width / 2 + 0)) < 1 && Math.abs(item.cy - (compOf(p).height / 2)) < 1));
+}
+
+// --- through the store: the pen tool, point edits, undo --------------------------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  const view = compOf(ed().project);
+  // a pen stroke in composition px, the way the stage hands it over
+  const id = ed().addCurve([{ x: 160, y: 500 }, { x: 360, y: 420 }, { x: 560, y: 500 }])!;
+  const p = ed().project;
+  const item = sceneAt(p, 0, view).find((s) => s.id === id)!;
+  const drawn = pathAnchors(item.path!).map((a) => ({ x: item.cx + a.x * item.w, y: item.cy + a.y * item.h }));
+  it('a pen stroke becomes a curve exactly where it was drawn', check(near(drawn[0], { x: 160, y: 500 }, 0.05) && near(drawn[2], { x: 560, y: 500 }, 0.05)));
+  it('named "Curve 1", selected', check(p.rig.nodes[id].name === 'Curve 1' && ed().selection[0] === id));
+
+  const before = ed().project.rig.nodes[id].shapePath;
+  ed().editCurve(id, (c) => moveAnchor(c, 1, { x: 0, y: -0.4 }), 'drag');
+  ed().editCurve(id, (c) => moveAnchor(c, 1, { x: 0, y: -0.45 }), 'drag');
+  it('dragging a point reshapes the curve', check(ed().project.rig.nodes[id].shapePath !== before && Math.abs(pathAnchors(ed().project.rig.nodes[id].shapePath!)[1].y + 0.45) < 1e-6));
+  ed().undo();
+  it('and the whole drag is one undo step', check(ed().project.rig.nodes[id].shapePath === before));
+
+  const smooth = ed().project.rig.nodes[id].shapePath!;
+  ed().setCurveType(id, 'bezier');
+  it('switching to hand-edited Bézier keeps the curve exactly as it was', check(ed().project.rig.nodes[id].shapePath === smooth && ed().project.rig.nodes[id].curve?.type === 'bezier'));
+  ed().setCurveType(id, 'polyline');
+  it('and a polyline draws it with straight segments', check(!/C/.test(ed().project.rig.nodes[id].shapePath!)));
+
+  ed().toggleAutoKey();
+  ed().setPlayhead(600);
+  ed().editCurve(id, (c) => moveAnchor(c, 1, { x: 0, y: 0.2 }));
+  ed().toggleAutoKey();
+  const track = ed().project.timelines.flatMap((t) => t.tracks).find((t) => t.nodeId === id && t.property === 'shape.path');
+  it('with autokey on, a point edit is a path keyframe — the curve animates', check(!!track && track.keyframes.some((k) => Math.abs(k.time - 600) < 1)));
+
+  const tid = ed().addText('HELLO', { at: { x: 200, y: 150 } });
+  const t = sceneAt(ed().project, 0, view).find((s) => s.id === tid)!;
+  it('a text layer lands where the Text tool was clicked', check(Math.abs(t.cx - 200) < 1 && Math.abs(t.cy - 150) < 1));
+  ed().loadProject(defaultProject());
 }

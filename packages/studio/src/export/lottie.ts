@@ -3,6 +3,7 @@ import { sceneAt, type SceneItem } from '../core/scene';
 import { flattenPath, pathFromPoints, pathToBezier, primitivePath, splitSubpaths } from '../core/path';
 import { outlinesOf } from '../core/emitters';
 import { mascotOf, mascotsOf } from '../core/mascot';
+import { glyphOutline } from '../core/fonts';
 import { activeTimeline } from '../core/types';
 import { parseHex } from '../core/color';
 import type { ColorStop, Project, Vec2 } from '../core/types';
@@ -113,6 +114,8 @@ export interface BakeResult {
   skipped: string[];
   /** names whose geometry was written as bezier vertices rather than a primitive */
   baked: string[];
+  /** what a person should know about the file before shipping it — a font it could not outline */
+  warnings: string[];
 }
 
 export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
@@ -125,7 +128,8 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
   const frames: SceneItem[][] = [];
   const COMP = compOf(project);
   const sample = opts.sampleAt ?? ((ms: number) => sceneAt(project, ms, COMP));
-  for (let f = 0; f <= total; f++) frames.push(sample(from + (f / fps) * 1000));
+  // a guide is there to work with in the editor, and is never exported
+  for (let f = 0; f <= total; f++) frames.push(sample(from + (f / fps) * 1000).filter((s) => !s.guide));
 
   const order: string[] = [];
   const seen = new Map<string, SceneItem>();
@@ -151,8 +155,10 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
   };
 
   const skipped: string[] = [];
-  /** set when any layer is text, so the font descriptor is only written when it is used */
-  let usesFont = false;
+  /** faces whose outlines were not loaded, so their text went out as live text */
+  const missingFaces = new Set<string>();
+  /** every font a live text layer names, so the descriptor lists exactly those */
+  const fontNames = new Set<string>();
   /** layers whose outline had to be written as vertices — what "baked" means in the note */
   const baked = new Set<string>();
   const layers: Record<string, unknown>[] = [];
@@ -160,13 +166,18 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
 
   order.forEach((id, n) => {
     const first = seen.get(id)!;
+    // a text layer: its letters as outlines, each placed on every frame
+    if (first.glyphs && first.font) {
+      layers.push(...glyphLayers(id, first, frames, total, nameOf(first), (k) => { keyframeCount += k; }, missingFaces, fontNames));
+      return;
+    }
     // A glyph with no vector in the shape library — an emoji, an arbitrary character —
     // becomes a real Lottie text layer rather than being dropped. Anything the library
     // DOES have a drawing for never reaches here: emitterItems resolves it to that
     // artwork, in the preview and the export alike.
     if (first.text !== undefined) {
       layers.push(textLayer(id, first, frames, total, (n2) => { keyframeCount += n2; }));
-      usesFont = true;
+      fontNames.add(FONT);
       return;
     }
 
@@ -307,14 +318,131 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       nm: opts.name, ddd: 0, assets: [], layers,
       // no embedded font: the descriptor names a family and the player falls back to it.
       // Only written when something actually uses it, so a file with no glyphs is unchanged.
-      ...(usesFont ? { fonts: { list: [{ fName: FONT, fFamily: 'sans-serif', fStyle: 'Regular', ascent: 72 }] } } : {}),
+      ...(fontNames.size ? { fonts: { list: [...fontNames].map((f) => ({ fName: f, fFamily: f === FONT ? 'sans-serif' : f, fStyle: 'Regular', ascent: 72 })) } } : {}),
       meta: { g: 'blooby' },
     },
     frames: total,
     keyframeCount,
     skipped,
     baked: [...baked],
+    warnings: [...missingFaces].map((f) => `${f} was not loaded, so its text is live text: a player will draw it in a font of its own`),
   };
+}
+
+/* ---- text layers ------------------------------------------------------------------------ */
+
+/**
+ * A text layer, as its letters.
+ *
+ * Each glyph is its outline from the font file — vectors, so the file needs no font to
+ * play and looks the same in every player — in a group of its own whose transform says
+ * where that glyph is on every frame. One construction covers everything the editor draws:
+ * a straight line, an arc, a path that animates, letters popping in one by one. A glyph
+ * is identified by its place in the text and its character, so words that change mid-clip
+ * are the old glyphs cut out and the new ones cut in.
+ *
+ * A face that never loaded has no outlines to write. Then each glyph goes out as a live
+ * Lottie text layer, placed the same way, and the result says which font a player must
+ * supply — never a silent substitution.
+ */
+function glyphLayers(
+  id: string, first: SceneItem, frames: SceneItem[][], total: number, nm: string,
+  countKeys: (n: number) => void, missing: Set<string>, fontNames: Set<string>,
+): Record<string, unknown>[] {
+  interface Slot { ch: string; p: Vec[]; r: Vec[]; s: Vec[]; o: Vec[]; on: boolean[]; size: number; items: (SceneItem | undefined)[] }
+  const slots = new Map<string, Slot>();
+  const ch: Chan = { p: [], s: [], r: [], o: [], c: [], fo: [], sc: [], so: [], sw: [], wh: [], rr: [] };
+  const present: boolean[] = [];
+  let last = first;
+  let stroked: SceneItem['stroke'] | undefined = frames.map((scene) => scene.find((s) => s.id === id)?.stroke).find(Boolean);
+
+  frames.forEach((scene, f) => {
+    const it = scene.find((s) => s.id === id);
+    const cur = it ?? last;
+    if (it) last = it;
+    const alpha = cur.alpha ?? cur.color.a;
+    const paint = (a: number) => Math.min(1, a / Math.max(alpha, 1e-6));
+    ch.o.push([it ? round(alpha * 100, 2) : 0]);
+    present.push(!!it);
+    ch.c.push([round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4), 1]);
+    ch.fo.push([round(paint(cur.color.a) * 100, 2)]);
+    const st = it?.stroke;
+    if (st) stroked = st;
+    const sc = st?.color ?? stroked?.color ?? { r: 0, g: 0, b: 0, a: 0 };
+    ch.sc.push([round(sc.r / 255, 4), round(sc.g / 255, 4), round(sc.b / 255, 4), 1]);
+    ch.so.push([st ? round(paint(st.color.a) * 100, 2) : 0]);
+    ch.sw.push([round(st?.width ?? stroked?.width ?? 0, 3)]);
+
+    const a = (cur.rotation * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+    const here = new Set<string>();
+    for (const g of it?.glyphs ?? []) {
+      const key = `${g.index}:${g.ch}`;
+      here.add(key);
+      const size = (it!.font?.size ?? 0) * g.scale;
+      const at: Vec = [round(cur.cx + g.x * c - g.y * s, 2), round(cur.cy + g.x * s + g.y * c, 2)];
+      let slot = slots.get(key);
+      if (!slot) {
+        // it has been out of sight until now: waiting where it will appear
+        slot = { ch: g.ch, p: [], r: [], s: [], o: [], on: [], size: 0, items: [] };
+        for (let k = 0; k < f; k++) { slot.p.push(at); slot.r.push([0]); slot.s.push([size]); slot.o.push([0]); slot.on.push(false); slot.items.push(undefined); }
+        slots.set(key, slot);
+      }
+      slot.size = Math.max(slot.size, size);
+      slot.p.push(at);
+      slot.r.push([round(cur.rotation + g.rot, 3)]);
+      slot.s.push([size]);
+      slot.o.push([round(g.alpha * 100, 2)]);
+      slot.on.push(true);
+      // what this glyph would be as a single live-text particle, for a face with no outlines
+      slot.items.push({ ...cur, id: key, text: g.ch, cx: at[0], cy: at[1], h: size, rotation: cur.rotation + g.rot,
+        color: { ...cur.color, a: alpha * g.alpha * paint(cur.color.a) } });
+    }
+    for (const [key, slot] of slots) {
+      if (here.has(key)) continue;
+      slot.p.push(slot.p[slot.p.length - 1]); slot.r.push(slot.r[slot.r.length - 1]); slot.s.push(slot.s[slot.s.length - 1]);
+      slot.o.push([0]); slot.on.push(false); slot.items.push(undefined);
+    }
+  });
+
+  const font = first.font!;
+  const outlined = [...slots.values()].every((sl) => glyphOutline(font, sl.ch));
+  if (!outlined) {
+    missing.add(`${font.family} ${font.weight}${font.style === 'italic' ? ' italic' : ''}`);
+    fontNames.add(font.family);
+    return [...slots.entries()].map(([key, sl]) => ({
+      ...textLayer(key, sl.items.find(Boolean)!, sl.items.map((x) => (x ? [x] : [])), total, countKeys, font.family),
+      nm: `${nm} ${sl.ch}`,
+    }));
+  }
+
+  const count = <T extends { a: number; k: unknown }>(v: T) => { if (v.a === 1) countKeys((v.k as unknown[]).length); return v; };
+  const fill = { c: count(prop(ch.c, EPS.c, 0)), o: count(prop(ch.fo, EPS.o, 0)) };
+  const stroke = stroked ? { c: count(prop(ch.sc, EPS.c, 0)), o: count(prop(ch.so, EPS.o, 0)), w: count(prop(ch.sw, EPS.p, 0)) } : null;
+  const groups = [...slots.values()].map((sl) => {
+    const k = Math.max(sl.size, 0.01);
+    const shapes = splitSubpaths(glyphOutline(font, sl.ch)!).map((sub, si) => {
+      const bz = pathToBezier(sub);
+      if (!bz) return null;
+      const at = (q: Vec2) => [round(q.x * k, 3), round(q.y * k, 3)];
+      return { ty: 'sh', ind: si, ks: { a: 0, k: { i: bz.i.map(at), o: bz.o.map(at), v: bz.v.map(at), c: bz.c } }, nm: `${sl.ch} ${si}`, hd: false };
+    }).filter(Boolean) as Record<string, unknown>[];
+    const items: Record<string, unknown>[] = [...shapes];
+    if (stroke) items.push({ ty: 'st', c: stroke.c, o: stroke.o, w: stroke.w, lc: LINE_CAP[stroked!.cap], lj: LINE_JOIN[stroked!.join], ml: 4, bm: 0, nm: 'stroke', hd: false });
+    items.push({ ty: 'fl', c: fill.c, o: fill.o, r: 1, bm: 0, nm: 'fill', hd: false });
+    const scale = sl.s.map((v) => [round((v[0] / k) * 100, 3), round((v[0] / k) * 100, 3)]);
+    items.push({
+      ty: 'tr', nm: 'transform', a: { a: 0, k: [0, 0] },
+      p: count(prop(sl.p, EPS.p, 0)), s: count(prop(scale, EPS.s, 0)), r: count(prop(sl.r, EPS.r, 0)),
+      o: count(prop(sl.o, EPS.o, 0, cutsOf(sl.on))), sk: { a: 0, k: 0 }, sa: { a: 0, k: 0 },
+    });
+    return { ty: 'gr', nm: sl.ch, np: items.length - 1, cix: 2, bm: 0, hd: false, it: items };
+  });
+  const o = count(prop(ch.o, EPS.o, 0, cutsOf(present)));
+  return [{
+    ddd: 0, ind: 0, ty: 4, nm, sr: 1, ao: 0, bm: 0,
+    ks: { o, r: { a: 0, k: 0 }, p: { a: 0, k: [0, 0] }, a: { a: 0, k: [0, 0] }, s: { a: 0, k: [100, 100] } },
+    shapes: groups, ip: 0, op: total + 1, st: 0,
+  }];
 }
 
 const round = (v: number, d: number) => {
@@ -402,7 +530,7 @@ const FONT = 'blooby-sans';
 const BASELINE = 0.36;
 
 function textLayer(
-  id: string, first: SceneItem, frames: SceneItem[][], total: number, countKeys: (n: number) => void,
+  id: string, first: SceneItem, frames: SceneItem[][], total: number, countKeys: (n: number) => void, fontName = FONT,
 ): Record<string, unknown> {
   const docs: { t: number; s: Record<string, unknown> }[] = [];
   const pos: Vec[] = [];
@@ -420,7 +548,7 @@ function textLayer(
     present.push(!!it);
     rot.push([round(cur.rotation, 3)]);
     const doc = {
-      s: round(size, 2), f: FONT, t: cur.text ?? '', j: 2, tr: 0,
+      s: round(size, 2), f: fontName, t: cur.text ?? '', j: 2, tr: 0,
       lh: round(size * 1.2, 2), ls: 0,
       fc: [round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4)],
     };

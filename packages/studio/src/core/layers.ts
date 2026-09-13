@@ -11,7 +11,8 @@ import { MORPH_MODES, type MorphMode } from './easing';
 import { relayoutBlocks } from './timeline';
 import { instantiateTemplate, laneOfMascot, makeMascot, mascotsOf, nextMascotName, roleOf, type MascotKind } from './mascot';
 import { curveToPath, type CurvePoint } from './curve';
-import type { ColorStop, CurveType, EasingCurve, KeyValue, MascotTemplate, Project, Rig, RigNode, ShapeKind, Vec2 } from './types';
+import { TEXT_DEFAULTS } from './text';
+import type { ColorStop, CurveType, EasingCurve, KeyValue, MascotTemplate, Project, Rig, RigNode, ShapeKind, TextStyle, Vec2 } from './types';
 
 /**
  * Everything you can do TO a layer, as plain functions on a project.
@@ -126,6 +127,30 @@ export function makeSvgLayer(text: string, name?: string): { node: RigNode; warn
     };
   }
   return { node: { ...base, svg: { ...base.svg!, paths: imp.paths, ...(warnings.length ? { unsupported: warnings } : {}) } }, warnings };
+}
+
+/** A text layer's fill: light, for the dark stage the editor opens on. */
+export const TEXT_FILL: ColorStop = { r: 246, g: 244, b: 239, a: 1 };
+
+/** What a text layer is called in the list: its own words, shortened. */
+export const textName = (content: string) => content.replace(/\s+/g, ' ').trim().slice(0, 24) || 'Text';
+
+/**
+ * A real text layer — editable words, never a picture of them. Centred on its anchor by
+ * default, so it grows evenly both ways as it is typed into.
+ */
+export function makeTextLayer(content = 'Type something', over: Partial<RigNode> = {}, style: Partial<TextStyle> = {}): RigNode {
+  return {
+    id: uid('text'), name: textName(content), kind: 'text', parentId: null,
+    surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: 0, y: -240 } },
+    transform: { scale: { x: 1, y: 1 }, rotation: 0 },
+    size: { x: 1, y: 1 }, color: TEXT_FILL, visible: true, zIndex: 0,
+    text: {
+      content, font: { ...TEXT_DEFAULTS.font }, size: TEXT_DEFAULTS.size, lineHeight: TEXT_DEFAULTS.lineHeight,
+      letterSpacing: TEXT_DEFAULTS.letterSpacing, align: 'center', valign: 'middle', ...style,
+    },
+    ...over,
+  };
 }
 
 /** "Curve 1", "Curve 2" — the first `base N` no layer is already called. */
