@@ -1,5 +1,7 @@
-import { blockStarts, blocksEnd, fmtSec } from '../core/timeline';
-import { TOOL_DOCS } from './tools';
+import { blockStarts, blocksEnd, fmtSec, laneOfBlock } from '../core/timeline';
+import { mascotRoster, TOOL_DOCS } from './tools';
+import { laneOfMascot, mascotLabel } from '../core/mascot';
+import { curveFromPath } from '../core/curve';
 import { ANIMATION_CRAFT } from './craft';
 import { activeTimeline } from '../core/types';
 import { NUMERIC_PROPS, PROPS } from '../core/props';
@@ -21,14 +23,31 @@ const POINT_NAME = { arm: { a: 'shoulder', b: 'hand', c: '' }, leg: { a: 'hip', 
 function layerLine(p: Project, n: RigNode, z: number): string {
   const r = (v: number) => Math.round(v * 10) / 10;
   const tl = activeTimeline(p);
-  const bits: string[] = [n.kind === 'svgLayer' ? 'svg' : n.kind];
+  const bits: string[] = [n.kind === 'svgLayer' ? 'svg' : n.kind === 'body' ? 'mascot' : n.curve ? 'curve' : n.kind];
+  const at = `${r(n.surface.flatOffset?.x ?? 0)},${r(n.surface.flatOffset?.y ?? 0)}`;
+  const parent = n.parentId ? p.rig.nodes[n.parentId] : undefined;
   if (n.id !== p.rig.rootId) {
-    if (n.parentId === null) bits.push(`world at ${r(n.surface.flatOffset?.x ?? 0)},${r(n.surface.flatOffset?.y ?? 0)}`);
-    else if (n.parentId === p.rig.rootId) {
-      bits.push(n.surface.mapped ? `on the mascot's surface, yaw ${r(n.surface.yaw)} pitch ${r(n.surface.pitch)}` : 'on the mascot');
-    } else bits.push(`attached to "${p.rig.nodes[n.parentId]?.name ?? n.parentId}"`);
+    if (!parent) bits.push(`world at ${at}`);
+    else if (parent.kind === 'body') {
+      const who = mascotLabel(p.rig, parent) === 'Mascot' ? 'the mascot' : mascotLabel(p.rig, parent);
+      if (n.kind === 'body') bits.push(`follows ${who}, at ${at} from it`);
+      else bits.push(n.surface.mapped ? `on ${who}'s surface, yaw ${r(n.surface.yaw)} pitch ${r(n.surface.pitch)}` : `on ${who}`);
+    } else bits.push(`attached to "${parent.name}"`);
   }
-  const shape = n.shapePath ? shapeById(shapeIdOf(n.shapePath) ?? '')?.id ?? 'custom outline' : undefined;
+  if (n.text) {
+    const t = n.text, path = t.path;
+    bits.push(`says ${JSON.stringify(t.content)} in ${t.font.family} ${t.font.weight}${t.font.style === 'italic' ? ' italic' : ''} ${t.size}px`);
+    if (path?.mode === 'arc') bits.push(`on an arc, radius ${path.radius ?? '?'}${path.reverse ? ', underneath' : ''}`);
+    if (path?.mode === 'path' && path.nodeId) bits.push(`along "${p.rig.nodes[path.nodeId]?.name ?? path.nodeId}", offset ${r(path.offset ?? 0)}`);
+  }
+  const curve = n.curve ? curveFromPath(n.shapePath) : null;
+  if (curve) {
+    // in the frame the layer lives in, so move_curve_point can take them back as they are
+    const pt = (q: { x: number; y: number }) => `${r((n.surface.flatOffset?.x ?? 0) + q.x * n.size.x)},${r((n.surface.flatOffset?.y ?? 0) + q.y * n.size.y)}`;
+    bits.push(`${n.curve!.type}, ${curve.closed ? 'closed' : 'open'}, points ${curve.points.map(pt).join(' ')}`);
+    if (n.guide) bits.push('guide — editor only');
+  }
+  const shape = n.shapePath && !n.curve ? shapeById(shapeIdOf(n.shapePath) ?? '')?.id ?? 'custom outline' : undefined;
   if (shape) bits.push(`shape ${shape}`);
   if (n.limb) {
     const names = POINT_NAME[n.limb.type];
@@ -101,9 +120,13 @@ function timelineDump(p: Project, budget = 4000): string {
   const tl = activeTimeline(p);
   const starts = blockStarts(tl);
   const clipOf = new Map(tl.blocks.map((b, i) => [b.id, `${b.name}@${Math.round(starts[i])}`]));
+  const laneName = (b: (typeof tl.blocks)[number]) => {
+    const m = p.rig.nodes[laneOfBlock(b)];
+    return m ? ` on ${mascotLabel(p.rig, m)}` : '';
+  };
 
   const strip = tl.blocks.length
-    ? tl.blocks.map((b, i) => `  ${i}: "${b.name}" ${Math.round(starts[i])}-${Math.round(starts[i] + b.durationMs)}ms${b.loop ? ' (loops)' : ''}`).join('\n')
+    ? tl.blocks.map((b, i) => `  ${i}: "${b.name}"${laneName(b)} ${Math.round(starts[i])}-${Math.round(starts[i] + b.durationMs)}ms${b.loop ? ' (loops)' : ''}`).join('\n')
     : '  (empty strip — keyframes here are global rather than owned by a clip)';
 
   const lines: string[] = [];
@@ -152,6 +175,12 @@ export function systemPrompt(p: Project, made: string[] = [], playhead = 0): str
   // back to front — the draw order reorder_layer changes
   const nodes = layerOrder(p.rig).map((n, z) => layerLine(p, n, z)).join('\n');
   const comp = compOf(p);
+  const roster = mascotRoster(p);
+  const mascots = roster.map((m, i) => {
+    const lane = laneOfMascot(p.rig, m.id);
+    const clips = tl.blocks.filter((b) => laneOfBlock(b) === lane).length;
+    return `  ${i + 1}. "${mascotLabel(p.rig, m)}" — body id ${m.id}${clips ? `, ${clips} clip${clips > 1 ? 's' : ''} in its lane` : ''}`;
+  }).join('\n');
   return `You are the animation copilot inside blooby, a mascot studio.
 
 The mascot is a sphere (the body) with features mapped onto its surface. Mapped features
@@ -168,6 +197,11 @@ ${PROPERTY_DOCS}
 Canvas: ${comp.width}×${comp.height} px at ${p.fps} fps. The playhead is at ${Math.round(playhead)}ms — "here", "now" and
 "at this point" mean that time.
 
+Mascots (${roster.length}) — "mascot" arguments take the number, the name or the body id:
+${mascots}
+${roster.length > 1 ? `Each has its own eyes, parts and lane of clips. "The second mascot" is number 2; "it" or
+"the mascot" with no number is the one the user is working on, else number 1.
+` : ''}
 Layers, back to front (the draw order). EDIT these by name rather than adding a second one:
 ${nodes}
 Expressions: ${p.expressions.map((e) => `${e.name}`).join(', ') || 'none'}
@@ -239,7 +273,7 @@ Rules:
 - Work through "plan" first: read the request, match it to a recipe, read the keyframes
   already on the timeline, then decide the beats and their times. Every call must follow
   from something you said there.
-- Refer to layers by the ids above (body, eyeL, eyeR), not by their display names.
+- Refer to layers by the ids above (body, eyeL, eyeR for the first mascot), not by their display names.
 - A preset track's "property" is a full path from the list above: "eye.openness", not
   "openness". The short names in set_eye_params are that one tool's own shorthand.
 - Prefer existing presets for common beats (Blink, Talk, Happy, Surprised, Thinking, Notify).
@@ -286,6 +320,17 @@ Rules:
     ankle closer with set_leg_points. bend flips the side (sign) and rounds the bend (±1).
     Hands have two points (shoulder, hand), legs three (hip, knee, ankle), body px, +y down.
   · fill and stroke are separate: set_svg_fill and set_svg_stroke, each with atMs to keyframe.
+- Several mascots. "add another mascot" → add_mascot. "make the second one wave" →
+  add_preset_to_timeline with mascot: 2 — the preset moves THAT mascot's parts, never add
+  keyframes to mascot 1's eyes for it. "make B follow A" → set_mascot_parent. Layers of a
+  mascot other than the first are listed with "on Mascot N" — edit those ids.
+- Text. "add a title HELLO" → add_text; restyle it with the set_text_* tools, never a second
+  text. "curve it" → set_text_curve arc. "put the words around the mascot" → set_text_path
+  with path: the mascot's body id and a baseline of ~20. "make the words travel along the
+  curve" → set_text_path_offset keyframes. "type it out" → animate_text typewriter.
+- Curves. "draw a wave for the text to follow" → add_curve with guide: true, then
+  set_text_path onto it. A curve's points are listed above at the coordinates
+  move_curve_point takes; key two positions of a point to make the curve itself move.
 - States. "transition from whatever state I'm in to happy" → set_transition { to: "Happy" }
   (from defaults to the current state). ONE direct edge — never route through other states.
   "make the current state angry": if a state called Angry exists, set_state it; otherwise

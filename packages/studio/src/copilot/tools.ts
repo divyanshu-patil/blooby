@@ -1,16 +1,23 @@
 import { uniqueName, useEditor, writeKeyframe } from '../core/store';
 import { attachPresetEffects, makeTimeline, uid } from '../core/defaults';
 import { namedEasing, EASING_NAMES } from '../core/easing';
-import { blockAt, blocksEnd, relayoutBlocks } from '../core/timeline';
-import { activeTrackFor } from '../core/scene';
+import { blockAt, blocksEnd, insertBlock, relayoutBlocks } from '../core/timeline';
+import { activeTrackFor, sceneAt, valueAt } from '../core/scene';
 import { setProp } from '../core/props';
+import { laneOf, laneOfMascot, makeMascot, MASCOT_KINDS, mascotLabel, mascotOf, nextMascotName, type MascotKind } from '../core/mascot';
+import { curveFromPath, curveToPath, moveAnchor, nearestOnCurve, removePoint, reverseCurve, type Curve } from '../core/curve';
+import { layoutLines, TEXT_DEFAULTS } from '../core/text';
+import { metricsFor } from '../core/fonts';
+import { naturalOutline } from '../core/path';
+import { presetTargets } from '../core/defaults';
 import { activeTimeline, MODIFIER_KINDS, MODIFIERS } from '../core/types';
 import { defaultValueFor, directTransition, machineOf, OPERATORS } from '../core/stateMachine';
 import { libraryOutline, shapeById, SHAPE_LIBRARY } from '../core/emitters';
 import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
 import {
-  duplicateLayer, makeGroup, makeLimb, makeShapeLayer, makeSvgLayer, removeLayer, reorderLayer,
-  setAppearance, setAttachment, setMorph, topZ, writeValue, type AppearanceRange,
+  addMascot, duplicateLayer, isInside, layerOrder, makeCurveLayer, makeGroup, makeLimb, makeShapeLayer, makeSvgLayer, makeTextLayer,
+  nextName, placeUnder, removeLayer, reorderLayer, setAppearance, setAttachment, setMorph, textName, topZ, writeValue,
+  type AppearanceRange,
 } from '../core/layers';
 import { looksLikeSvg } from '../core/svg';
 import { COMP_MAX, COMP_MIN, COMP_PRESETS, compOf } from '../core/comp';
@@ -34,6 +41,12 @@ export const TOOL_NAMES = [
   'set_svg_fill', 'set_svg_stroke', 'set_svg_stroke_width', 'set_shape_morph',
   'set_hand_points', 'set_hand_rig', 'set_leg_points', 'set_leg_rig',
   'set_composition', 'set_state', 'set_transition',
+  // several mascots, text, curves — see TOOL_DOCS
+  'add_mascot', 'remove_mascot', 'duplicate_mascot', 'rename_mascot', 'set_mascot_transform', 'set_mascot_shape', 'set_mascot_parent',
+  'add_text', 'set_text', 'set_text_font', 'set_text_style', 'set_text_size', 'set_text_weight', 'set_text_color', 'set_text_stroke',
+  'set_text_curve', 'set_text_path', 'set_text_path_offset', 'animate_text',
+  'add_curve', 'add_curve_point', 'move_curve_point', 'remove_curve_point', 'close_curve', 'reverse_curve',
+  'set_layer_parent', 'set_layer_order',
 ] as const;
 
 /** The JSON the model must produce. Ollama enforces this shape server-side via `format`. */
@@ -172,7 +185,71 @@ set_leg_rig           { nodeId, rubberHose?, length?, thickness?, bend?, roundne
                       // the limb bend, further and it straightens without stretching. So "longer"
                       // and "bend more" are both a longer length (~+30%), or the points closer.
                       // bend: its sign flips the side, ±1 a smooth arc, 0 a sharp elbow.
-set_composition       { width?, height?, preset?: ${COMP_PRESETS.map((c) => `"${c.width}x${c.height}"`).join('|')} }`.trim()
+set_composition       { width?, height?, preset?: ${COMP_PRESETS.map((c) => `"${c.width}x${c.height}"`).join('|')} }
+
+MASCOTS — a project can hold several. Each is a body with its own eyes (and limbs), its own clips
+and its own animation. \`mascot\` takes a mascot's name, its label ("Mascot 2") or its number in the
+Mascots list; the first mascot's body id is "body". Its parts are layers like any other: "Mascot 2"'s
+left eye is listed under Layers with its own id.
+add_mascot            { kind?: ${(Object.keys(MASCOT_KINDS) as MascotKind[]).map((k) => `"${k}"`).join('|')}, name?, x?, y? }
+                      // x/y px from the composition centre; left out, it goes in the widest free gap
+remove_mascot         { mascot }                               // its parts and clips go; things hung on it stay, in the world
+duplicate_mascot      { mascot }                               // a copy beside it, with its own lane of the same clips
+rename_mascot         { mascot, name }
+set_mascot_transform  { mascot, x?, y?, scale?, rotation?, yaw?, pitch?, atMs? }
+                      // x/y its position (px from the centre, or from its leader when it follows one);
+                      // scale 1 is its authored size; yaw/pitch turn its HEAD. With atMs, keyframes.
+set_mascot_shape      { mascot, shape, atMs? }                 // pebble, capsule, roundedRect, blob, octopus, circle…
+                      // with atMs it MORPHS from the shape it has to this one, finishing at atMs
+set_mascot_parent     { mascot, follows? }                     // it follows that mascot's moves, turns and scale;
+                      // follows null/omitted stands it on its own. A loop (A follows B follows A) is refused.
+add_preset_to_timeline also takes { mascot }: the clip goes in THAT mascot's lane and animates THAT
+mascot — "make the second mascot wave" is add_preset_to_timeline { preset: "Wave", mascot: "Mascot 2" }.
+Each mascot's lane of clips plays alongside the others.
+
+TEXT — real, editable text layers in Google Fonts, never pictures of text.
+add_text              { content, x?, y?, font?, weight?, size?, color?, attach? }
+                      // x/y px from the composition centre (or from the mascot when attach names one).
+                      // font is a Google Fonts family: "Inter", "Poppins", "Playfair Display"…
+set_text              { nodeId, content, atMs? }               // with atMs the words switch at that keyframe
+set_text_font         { nodeId, family, weight?, italic? }
+set_text_style        { nodeId, align?: "left"|"center"|"right", valign?: "top"|"middle"|"bottom",
+                        lineHeight?, letterSpacing?, width?, atMs? }   // width px wraps lines; 0 = no wrap
+set_text_size         { nodeId, size, atMs? }                  // px
+set_text_weight       { nodeId, weight, atMs? }                // 100-900: 400 regular, 700 bold
+set_text_color        { nodeId, color, opacity?, atMs? }
+set_text_stroke       { nodeId, color?, width?, opacity?, enabled?, atMs? }
+set_text_curve        { nodeId, mode: "straight"|"arc", amount?, radius?, start?, end?, underneath? }
+                      // arc: amount 0-1 bends the words that fraction of a full circle (0.3 is a gentle arc),
+                      // or give radius px with start/end degrees clockwise from 12 o'clock.
+                      // underneath: true makes it a smile — words sitting in the bowl of the arc.
+set_text_path         { nodeId, path, offset?, baseline?, reverse?, flip? }
+                      // the words run along another layer's outline, live: a curve, any shape, or a MASCOT
+                      // ("put HELLO around the mascot" is path: "body", baseline ~20). path null = straight again.
+                      // offset px along the path; baseline px off it; reverse runs it from the other end;
+                      // flip turns the letters over — for text round the bottom of a loop.
+set_text_path_offset  { nodeId, offset, atMs? }                // keyframe it to make the words travel along the path
+animate_text          { nodeId, effect: "typewriter"|"pop"|"fade"|"drop"|"rise"|"scatter"|"wave",
+                        startMs?, durationMs?, stagger? }
+                      // letters arriving: typewriter types them out; pop/fade/drop/rise/scatter bring each
+                      // letter in (stagger 0 all together, 1 one after another); wave keeps them bobbing.
+
+CURVES — a drawn path, a layer like any other, that text can follow and that can animate.
+Points are px from the composition centre, +y DOWN.
+add_curve             { points: [[x,y], …], closed?, type?: "smooth"|"polyline"|"bezier", guide?, name?, attach? }
+                      // at least two points; smooth (the default) flows through every one. guide: true
+                      // shows it in the editor only and leaves it out of every export — a path for text.
+add_curve_point       { nodeId, x, y }                         // joins the curve at the segment nearest (x, y)
+move_curve_point      { nodeId, index, x, y, atMs? }           // index into its points, from 0. With atMs it is a
+                      // PATH KEYFRAME: key two positions of a point and the curve animates — text on it follows.
+remove_curve_point    { nodeId, index }                        // a curve keeps at least two points
+close_curve           { nodeId, closed }
+reverse_curve         { nodeId }                               // runs it the other way; text on it starts from the other end
+
+set_layer_parent      { nodeId, parent }                       // a layer or a mascot to ride; null = the world.
+                      // Keeps its place on screen. Mascots may only follow mascots.
+set_layer_order       { nodeId, above?, below?, to?: "front"|"back" }
+                      // above/below another layer or MASCOT — a mascot moves as one, parts and all`.trim()
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A property the copilot may write: on a node, and a number. */
@@ -268,7 +345,7 @@ function conditionOf(p: Project, raw: unknown): SmCondition | string {
 function findKeyframe(p: Project, nodeId: unknown, property: unknown, atMs: unknown) {
   const t = num(atMs);
   if (t === undefined) return undefined;
-  const track = activeTrackFor(activeTimeline(p), String(nodeId), String(property), t);
+  const track = activeTrackFor(activeTimeline(p), String(nodeId), String(property), t, p.rig);
   const kf = track?.keyframes.find((k) => Math.abs(k.time - t) < 8);
   return track && kf ? { track, kf } : undefined;
 }
@@ -328,6 +405,69 @@ const JOINS: LineJoin[] = ['miter', 'round', 'bevel'];
 const ADD_TYPES = ['shape', 'hand', 'leg', 'group'] as const;
 const REORDER = ['front', 'back', 'forward', 'backward'] as const;
 
+/** The mascots in the order the prompt numbers them: the first one, then the rest as made. */
+export const mascotRoster = (p: Project): RigNode[] => {
+  const root = p.rig.nodes[p.rig.rootId];
+  return [...(root ? [root] : []), ...Object.values(p.rig.nodes).filter((n) => n.kind === 'body' && n.id !== p.rig.rootId)];
+};
+
+/** A mascot by body id, name, label ("Mascot 2"), its number in the list, or any part of it. */
+function mascotRef(p: Project, ref: unknown): RigNode | undefined {
+  if (ref === undefined || ref === null || ref === '') return undefined;
+  const roster = mascotRoster(p);
+  if (typeof ref === 'number' && Number.isInteger(ref)) return roster[ref - 1];
+  const s = String(ref).trim();
+  const byId = p.rig.nodes[s];
+  if (byId) return mascotOf(p.rig, byId.id);
+  const lower = s.toLowerCase();
+  const named = roster.find((m) => m.name.toLowerCase() === lower || mascotLabel(p.rig, m).toLowerCase() === lower);
+  if (named) return named;
+  const n = /^(?:mascot\s*)?#?(\d+)$/.exec(lower);
+  return n ? roster[Number(n[1]) - 1] : undefined;
+}
+const noMascot = (p: Project, ref: unknown) =>
+  `no mascot "${String(ref)}" — the mascots are ${mascotRoster(p).map((m, i) => `${i + 1}. ${mascotLabel(p.rig, m)}`).join(', ')}`;
+
+/** A text layer, or why not. */
+function textCheck(p: Project, ref: unknown): string | null {
+  const n = layerOf(p, ref);
+  if (!n) return `no layer "${String(ref)}"`;
+  return n.text ? null : `"${n.name}" is not a text layer — add one with add_text`;
+}
+/** A drawn curve, or why not. */
+function curveCheck(p: Project, ref: unknown): string | null {
+  const n = layerOf(p, ref);
+  if (!n) return `no layer "${String(ref)}"`;
+  return n.curve && n.shapePath ? null : `"${n.name}" is not a curve — draw one with add_curve`;
+}
+/** Layers text can run along: anything with an outline, a mascot included. */
+const followable = (n: RigNode) => n.kind === 'primitive' || n.kind === 'eye' || n.kind === 'body' || n.kind === 'limb' || (n.kind === 'svgLayer' && !!n.svg?.paths?.length);
+
+/** A curve as it stands at `t`, its points in composition px from the centre — and back. */
+function curveAt(p: Project, id: string, t: number) {
+  const n = p.rig.nodes[id];
+  const shown = valueAt(p, id, 'shape.path', t);
+  const c = curveFromPath(typeof shown === 'string' ? shown : n?.shapePath);
+  const item = sceneAt(p, t, compOf(p)).find((s) => s.id === id);
+  if (!n || !c) return null;
+  // the curve's own box on screen; a hidden one has none, so fall back to its stored place
+  const view = compOf(p);
+  const box = item ?? { cx: view.width / 2 + (n.surface.flatOffset?.x ?? 0), cy: view.height / 2 + (n.surface.flatOffset?.y ?? 0), w: n.size.x, h: n.size.y, rotation: n.transform.rotation };
+  const a = (box.rotation * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const w = Math.max(Math.abs(box.w), 1e-3), h = Math.max(Math.abs(box.h), 1e-3);
+  const toLocal = (x: number, y: number) => {
+    const dx = view.width / 2 + x - box.cx, dy = view.height / 2 + y - box.cy;
+    return { x: (dx * cos + dy * sin) / w, y: (-dx * sin + dy * cos) / h };
+  };
+  return { c, type: n.curve?.type ?? 'bezier', toLocal };
+}
+
+/** How wide a text's first line is, px — what an arc's "amount" is measured against. */
+function textWidth(n: RigNode): number {
+  const t = n.text!;
+  return layoutLines({ ...t, width: undefined }, metricsFor(t.font, t.size))[0]?.width ?? t.size * 3;
+}
+
 /** A limb of the given type, found by id or name — or why not. */
 function limbCheck(p: Project, ref: unknown, type: 'arm' | 'leg'): string | null {
   const n = layerOf(p, ref);
@@ -364,6 +504,11 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
 
   const id = findNode(p, a.nodeId);
   if (id) a.nodeId = id;
+  // a mascot by label or number becomes its body id; "follows" names one too
+  for (const k of ['mascot', 'follows'] as const) {
+    const m = typeof a[k] === 'string' || typeof a[k] === 'number' ? mascotRef(p, a[k]) : undefined;
+    if (m) a[k] = m.id;
+  }
   // set_eye_params documents short names (`openness`), so models write them everywhere.
   // resolveProp maps any unambiguous short name back onto its full path.
   const prop = resolveProp(a.property);
@@ -418,8 +563,8 @@ export function validateBatch(p: Project, calls: ToolCall[]): (string | null)[] 
     // and "key a shape, then say how it morphs" names a keyframe it has not made yet
     if (call.name === 'set_shape' && num(a.atMs) !== undefined) {
       const id = findNode(view, a.nodeId), tl = activeTimeline(view);
-      if (id && !activeTrackFor(tl, id, 'shape.path', num(a.atMs)!)) {
-        tl.tracks.push({ id: `__planned_${id}`, nodeId: id, property: 'shape.path', blockId: blockAt(tl, num(a.atMs)!)?.id,
+      if (id && !activeTrackFor(tl, id, 'shape.path', num(a.atMs)!, view.rig)) {
+        tl.tracks.push({ id: `__planned_${id}`, nodeId: id, property: 'shape.path', blockId: blockAt(tl, num(a.atMs)!, laneOf(view.rig, tl, id))?.id,
           keyframes: [{ id: '__k', time: num(a.atMs)!, value: '', easingOut: { type: 'linear' } }] });
       }
     }
@@ -442,6 +587,29 @@ export function validateBatch(p: Project, calls: ToolCall[]): (string | null)[] 
  */
 function plannedLayers(p: Project, call: ToolCall): RigNode[] {
   const a = call.args ?? {};
+  if (call.name === 'add_mascot') {
+    const kind = (str(a.kind) && str(a.kind)! in MASCOT_KINDS ? str(a.kind) : 'default') as MascotKind;
+    return makeMascot(kind, { name: str(a.name) ?? nextMascotName(p.rig), x: num(a.x), y: num(a.y) });
+  }
+  if (call.name === 'add_text') {
+    const node = makeTextLayer(String(a.content ?? 'Text'), {
+      surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: num(a.x) ?? 0, y: num(a.y) ?? -240 } },
+      ...(colorOf(a.color) ? { color: colorOf(a.color)! } : {}),
+    }, {
+      ...(num(a.size) !== undefined ? { size: Math.max(4, num(a.size)!) } : {}),
+      font: { ...TEXT_DEFAULTS.font, ...(str(a.font) ? { family: str(a.font)! } : {}), ...(num(a.weight) !== undefined ? { weight: num(a.weight)! } : {}) },
+    });
+    return [node];
+  }
+  if (call.name === 'add_curve') {
+    const pts = Array.isArray(a.points) ? (a.points as unknown[]).map(ptOf).filter((q): q is Vec2 => !!q) : [];
+    const cam = p.rig.camera.offset;
+    const node = makeCurveLayer(pts.map((q) => ({ x: q.x - cam.x, y: q.y - cam.y })), {
+      closed: a.closed === true, type: (['smooth', 'polyline', 'bezier'] as const).find((t) => t === a.type),
+      guide: a.guide === true, name: str(a.name) ?? nextName(p.rig, 'Curve'),
+    });
+    return node ? [node] : [];
+  }
   if (call.name === 'add_svg') {
     const made = makeSvgLayer(String(a.markup ?? ''), str(a.name));
     return made ? [placed(p, made.node, a)] : [];
@@ -633,6 +801,7 @@ export function validate(p: Project, call: ToolCall): string | null {
     }
     case 'set_svg_fill':
     case 'set_svg_stroke':
+    case 'set_text_stroke':
     case 'set_svg_stroke_width': {
       const n = layerOf(p, a.nodeId);
       if (!n) return `no layer "${String(a.nodeId)}"`;
@@ -641,8 +810,9 @@ export function validate(p: Project, call: ToolCall): string | null {
       if (call.name === 'set_svg_stroke_width') return num(a.width) !== undefined && num(a.width)! >= 0 ? null : 'width must be a number >= 0';
       if (a.cap !== undefined && !CAPS.includes(a.cap as LineCap)) return `cap must be one of ${CAPS.join(', ')}`;
       if (a.join !== undefined && !JOINS.includes(a.join as LineJoin)) return `join must be one of ${JOINS.join(', ')}`;
+      if (call.name === 'set_text_stroke' && !n.text) return `"${n.name}" is not a text layer — use set_svg_stroke`;
       const any = ['color', 'opacity', 'enabled', 'width', 'cap', 'join'].some((k) => a[k] !== undefined);
-      return any ? null : `${call.name} needs at least one of color, opacity, enabled${call.name === 'set_svg_stroke' ? ', width, cap, join' : ''}`;
+      return any ? null : `${call.name} needs at least one of color, opacity, enabled${call.name !== 'set_svg_fill' ? ', width, cap, join' : ''}`;
     }
     case 'set_shape_morph': {
       const n = layerOf(p, a.nodeId);
@@ -703,6 +873,128 @@ export function validate(p: Project, call: ToolCall): string | null {
     case 'set_camera':
       if (a.property !== 'perspective' && a.property !== 'fov' && a.property !== 'distance') return 'camera property must be perspective or distance';
       return num(a.value) !== undefined ? null : 'set_camera needs a numeric value';
+
+    // --- mascots ---
+    case 'add_mascot':
+      if (a.kind !== undefined && !(String(a.kind) in MASCOT_KINDS)) return `kind must be one of ${Object.keys(MASCOT_KINDS).join(', ')}`;
+      for (const k of ['x', 'y'] as const) if (a[k] !== undefined && num(a[k]) === undefined) return `${k} must be a number`;
+      return null;
+    case 'remove_mascot':
+    case 'duplicate_mascot':
+    case 'rename_mascot':
+    case 'set_mascot_transform':
+    case 'set_mascot_shape':
+    case 'set_mascot_parent': {
+      const m = mascotRef(p, a.mascot);
+      if (!m) return noMascot(p, a.mascot);
+      if (call.name === 'remove_mascot' && m.id === p.rig.rootId) return 'the first mascot cannot be removed — hide it, or remove another';
+      if (call.name === 'rename_mascot' && !str(a.name)) return 'rename_mascot needs a name';
+      if (call.name === 'set_mascot_transform') {
+        const keys = ['x', 'y', 'scale', 'rotation', 'yaw', 'pitch'].filter((k) => a[k] !== undefined);
+        if (!keys.length) return 'give at least one of x, y, scale, rotation, yaw, pitch';
+        return keys.every((k) => num(a[k]) !== undefined) ? null : `${keys.join(', ')} must be numbers`;
+      }
+      if (call.name === 'set_mascot_shape') return libraryOutline(String(a.shape)) ? null : `shape must be a shape library id: ${SHAPE_LIBRARY.filter((s) => s.outline).map((s) => s.id).join(', ')}`;
+      if (call.name === 'set_mascot_parent' && a.follows !== undefined && a.follows !== null && a.follows !== '') {
+        const leader = mascotRef(p, a.follows);
+        if (!leader) return noMascot(p, a.follows);
+        if (leader.id === m.id) return 'a mascot cannot follow itself';
+        if (isInside(p.rig, leader.id, m.id)) return `${mascotLabel(p.rig, leader)} already follows ${mascotLabel(p.rig, m)} — that would make a loop`;
+      }
+      return null;
+    }
+
+    // --- text ---
+    case 'add_text':
+      if (typeof a.content !== 'string' || !a.content.trim()) return 'add_text needs content';
+      if (a.color !== undefined && !colorOf(a.color)) return 'color must be [r,g,b] or "#rrggbb"';
+      if (a.attach !== undefined && !mascotRef(p, a.attach)) return noMascot(p, a.attach);
+      return null;
+    case 'set_text':
+      return textCheck(p, a.nodeId) ?? (typeof a.content === 'string' ? null : 'set_text needs content');
+    case 'set_text_font':
+      return textCheck(p, a.nodeId) ?? (str(a.family) ? null : 'set_text_font needs a family, e.g. "Poppins"');
+    case 'set_text_style': {
+      const bad = textCheck(p, a.nodeId);
+      if (bad) return bad;
+      if (a.align !== undefined && !['left', 'center', 'right'].includes(String(a.align))) return 'align must be left, center or right';
+      if (a.valign !== undefined && !['top', 'middle', 'bottom'].includes(String(a.valign))) return 'valign must be top, middle or bottom';
+      const nums = ['lineHeight', 'letterSpacing', 'width'].filter((k) => a[k] !== undefined);
+      if (!nums.length && a.align === undefined && a.valign === undefined) return 'give at least one of align, valign, lineHeight, letterSpacing, width';
+      return nums.every((k) => num(a[k]) !== undefined) ? null : `${nums.join(', ')} must be numbers`;
+    }
+    case 'set_text_size':
+    case 'set_text_weight': {
+      const bad = textCheck(p, a.nodeId);
+      const k = call.name === 'set_text_size' ? 'size' : 'weight';
+      return bad ?? (num(a[k]) !== undefined ? null : `${k} must be a number`);
+    }
+    case 'set_text_color':
+      return textCheck(p, a.nodeId) ?? (colorOf(a.color) ? null : 'color must be [r,g,b] or "#rrggbb"');
+    case 'set_text_curve': {
+      const bad = textCheck(p, a.nodeId);
+      if (bad) return bad;
+      if (a.mode !== 'straight' && a.mode !== 'arc') return 'mode must be "straight" or "arc" — to follow a curve use set_text_path';
+      for (const k of ['amount', 'radius', 'start', 'end'] as const) if (a[k] !== undefined && num(a[k]) === undefined) return `${k} must be a number`;
+      return null;
+    }
+    case 'set_text_path': {
+      const bad = textCheck(p, a.nodeId);
+      if (bad) return bad;
+      if (a.path === null || a.path === undefined || a.path === 'none') return null;
+      const target = layerOf(p, a.path) ?? mascotRef(p, a.path);
+      if (!target) return `no layer "${String(a.path)}" to follow`;
+      if (target.id === findNode(p, a.nodeId)) return 'text cannot follow itself';
+      return followable(target) ? null : `"${target.name}" has no outline to follow — use a curve, a shape or a mascot`;
+    }
+    case 'set_text_path_offset':
+      return textCheck(p, a.nodeId) ?? (num(a.offset) !== undefined ? null : 'offset must be a number');
+    case 'animate_text':
+      return textCheck(p, a.nodeId) ?? (['typewriter', 'pop', 'fade', 'drop', 'rise', 'scatter', 'wave'].includes(String(a.effect)) ? null : 'effect must be typewriter, pop, fade, drop, rise, scatter or wave');
+
+    // --- curves ---
+    case 'add_curve': {
+      const pts = Array.isArray(a.points) ? (a.points as unknown[]).map(ptOf) : [];
+      if (pts.length < 2 || pts.some((q) => !q)) return 'points must be at least two [x, y] pairs';
+      if (a.type !== undefined && !['smooth', 'polyline', 'bezier'].includes(String(a.type))) return 'type must be smooth, polyline or bezier';
+      if (a.attach !== undefined && !mascotRef(p, a.attach) && !layerOf(p, a.attach)) return `no mascot or layer "${String(a.attach)}" to attach to`;
+      return null;
+    }
+    case 'add_curve_point':
+      return curveCheck(p, a.nodeId) ?? (num(a.x) !== undefined && num(a.y) !== undefined ? null : 'x and y must be numbers');
+    case 'move_curve_point':
+    case 'remove_curve_point': {
+      const bad = curveCheck(p, a.nodeId);
+      if (bad) return bad;
+      const c = curveFromPath(layerOf(p, a.nodeId)!.shapePath)!;
+      const i = num(a.index);
+      if (i === undefined || !Number.isInteger(i) || i < 0 || i >= c.points.length) return `index must be 0-${c.points.length - 1}`;
+      if (call.name === 'remove_curve_point') return c.points.length > 2 ? null : 'a curve keeps at least two points';
+      return num(a.x) !== undefined && num(a.y) !== undefined ? null : 'x and y must be numbers';
+    }
+    case 'close_curve':
+      return curveCheck(p, a.nodeId) ?? (typeof a.closed === 'boolean' ? null : 'closed must be true or false');
+    case 'reverse_curve':
+      return curveCheck(p, a.nodeId);
+
+    // --- hierarchy and order ---
+    case 'set_layer_parent': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      if (a.parent === null || a.parent === undefined || a.parent === 'world') return n.id === p.rig.rootId ? null : null;
+      const parent = layerOf(p, a.parent) ?? mascotRef(p, a.parent);
+      if (!parent) return `no layer or mascot "${String(a.parent)}"`;
+      if (parent.id === n.id) return 'a layer cannot ride itself';
+      if (isInside(p.rig, parent.id, n.id)) return `"${parent.name}" is inside "${n.name}" — that would make a loop`;
+      if (n.kind === 'body' && parent.kind !== 'body') return 'a mascot can only follow another mascot';
+      return null;
+    }
+    case 'set_layer_order': {
+      if (!layerOf(p, a.nodeId)) return `no layer "${String(a.nodeId)}"`;
+      const ref = a.above ?? a.below;
+      if (ref !== undefined) return layerOf(p, ref) || mascotRef(p, ref) ? null : `no layer or mascot "${String(ref)}"`;
+      return a.to === 'front' || a.to === 'back' ? null : 'give above, below, or to: "front" | "back"';
+    }
     case 'morph_between':
       if (!findExpression(p, a.from)) return `no expression "${String(a.from)}"`;
       if (!findExpression(p, a.to)) return `no expression "${String(a.to)}"`;
@@ -822,11 +1114,50 @@ export function describe(p: Project, call: ToolCall): string {
       return `Edit preset "${named(findPreset(p, a.preset), a.preset)}": ${bits.join(', ')} (clips already on the strip keep their copy)`;
     }
     case 'morph_between': return `Morph ${named(findExpression(p, a.from), a.from)} → ${named(findExpression(p, a.to), a.to)} at ${at(a.atMs)} over ${a.durationMs}ms`;
+    case 'add_mascot': return `Add a ${MASCOT_KINDS[(String(a.kind ?? 'default')) as MascotKind]?.label.toLowerCase() ?? 'new'} mascot${a.name ? ` called "${a.name}"` : ''}`;
+    case 'remove_mascot': return `Remove ${mascotName(p, a.mascot)} and its clips (anything hung on it stays)`;
+    case 'duplicate_mascot': return `Duplicate ${mascotName(p, a.mascot)}, clips and all`;
+    case 'rename_mascot': return `Rename ${mascotName(p, a.mascot)} to "${a.name}"`;
+    case 'set_mascot_transform': {
+      const bits = ['x', 'y', 'scale', 'rotation', 'yaw', 'pitch'].filter((k) => num(a[k]) !== undefined).map((k) => `${k} ${a[k]}`);
+      return `${mascotName(p, a.mascot)}: ${bits.join(', ')}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    }
+    case 'set_mascot_shape': return `Make ${mascotName(p, a.mascot)} a ${shapeById(String(a.shape))?.name ?? a.shape}${a.atMs !== undefined ? `, morphing by ${at(a.atMs)}` : ''}`;
+    case 'set_mascot_parent': return a.follows ? `${mascotName(p, a.mascot)} follows ${mascotName(p, a.follows)}` : `${mascotName(p, a.mascot)} stands on its own`;
+    case 'add_text': return `Add text “${String(a.content ?? '')}”${a.font ? ` in ${a.font}` : ''}${a.attach ? ` on ${mascotName(p, a.attach)}` : ''}`;
+    case 'set_text': return `${name(a.nodeId)} says “${String(a.content)}”${a.atMs !== undefined ? ` from ${at(a.atMs)}` : ''}`;
+    case 'set_text_font': return `${name(a.nodeId)} in ${a.family}${a.weight ? ` ${a.weight}` : ''}${a.italic ? ' italic' : ''}`;
+    case 'set_text_style': {
+      const bits = ['align', 'valign', 'lineHeight', 'letterSpacing', 'width'].filter((k) => a[k] !== undefined).map((k) => `${k} ${a[k]}`);
+      return `${name(a.nodeId)}: ${bits.join(', ')}`;
+    }
+    case 'set_text_size': return `${name(a.nodeId)} at ${a.size}px${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'set_text_weight': return `${name(a.nodeId)} weight ${a.weight}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'set_text_color': return `${name(a.nodeId)} coloured ${colorName(a.color)}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'set_text_stroke': return `${name(a.nodeId)} outlined${a.color !== undefined ? ` ${colorName(a.color)}` : ''}${a.width !== undefined ? ` ${a.width}px` : ''}${a.enabled === false ? ' — off' : ''}`;
+    case 'set_text_curve': return a.mode === 'arc' ? `Bend ${name(a.nodeId)} round an arc${a.underneath ? ', underneath' : ''}` : `Straighten ${name(a.nodeId)}`;
+    case 'set_text_path': return a.path === null || a.path === undefined || a.path === 'none'
+      ? `${name(a.nodeId)} back on a straight line`
+      : `${name(a.nodeId)} runs along ${name(findNode(p, a.path) ?? mascotRef(p, a.path)?.id ?? a.path)}`;
+    case 'set_text_path_offset': return `Slide ${name(a.nodeId)} ${a.offset}px along its path${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'animate_text': return `${name(a.nodeId)}: ${a.effect}${a.startMs !== undefined ? ` from ${at(a.startMs)}` : ''}${a.durationMs !== undefined ? ` over ${a.durationMs}ms` : ''}`;
+    case 'add_curve': return `Draw ${a.name ? `“${a.name}”, ` : ''}a ${a.closed ? 'closed ' : ''}${String(a.type ?? 'smooth')} curve through ${(a.points as unknown[]).length} points${a.guide ? ' (a guide)' : ''}`;
+    case 'add_curve_point': return `Add a point to ${name(a.nodeId)} at ${a.x}, ${a.y}`;
+    case 'move_curve_point': return `Move point ${a.index} of ${name(a.nodeId)} to ${a.x}, ${a.y}${a.atMs !== undefined ? ` at ${at(a.atMs)} — the curve animates` : ''}`;
+    case 'remove_curve_point': return `Remove point ${a.index} of ${name(a.nodeId)}`;
+    case 'close_curve': return `${a.closed ? 'Close' : 'Open'} ${name(a.nodeId)}`;
+    case 'reverse_curve': return `Reverse ${name(a.nodeId)}`;
+    case 'set_layer_parent': return a.parent === null || a.parent === undefined || a.parent === 'world'
+      ? `${name(a.nodeId)} into the world, where it is now`
+      : `${name(a.nodeId)} rides ${name(findNode(p, a.parent) ?? mascotRef(p, a.parent)?.id ?? a.parent)}, staying where it is`;
+    case 'set_layer_order': return a.above !== undefined ? `${name(a.nodeId)} in front of ${name(findNode(p, a.above) ?? a.above)}`
+      : a.below !== undefined ? `${name(a.nodeId)} behind ${name(findNode(p, a.below) ?? a.below)}` : `${name(a.nodeId)} to the ${a.to}`;
     default: return call.name;
   }
 }
 
 const colorName = (v: unknown) => { const c = colorOf(v); return c ? `rgb(${c.r}, ${c.g}, ${c.b})` : String(v); };
+const mascotName = (p: Project, ref: unknown) => { const m = mascotRef(p, ref); return m ? mascotLabel(p.rig, m) : String(ref); };
 
 const EYE_MAP: Record<string, string> = {
   openness: 'eye.openness', distanceFromCenter: 'eye.distanceFromCenter', length: 'transform.length',
@@ -881,6 +1212,7 @@ export function applyCalls(calls: ToolCall[]) {
           break;
         }
         case 'set_svg_stroke':
+        case 'set_text_stroke':
         case 'set_svg_stroke_width': {
           const id = nid(a.nodeId);
           const c = colorOf(a.color);
@@ -1003,19 +1335,216 @@ export function applyCalls(calls: ToolCall[]) {
           const tl = activeTimeline(p);
           const index = num(a.index) ?? tl.blocks.length;
           const blockId = uid('b');
-          const start = blocksEnd({ ...tl, blocks: tl.blocks.slice(0, index) });
-          const shifted = new Set(tl.blocks.slice(index).map((b) => b.id));
-          for (const t of tl.tracks) if (t.blockId && shifted.has(t.blockId)) for (const k of t.keyframes) k.time += preset.durationMs;
+          // on a named mascot the clip goes in that mascot's lane and animates it
+          const m = a.mascot !== undefined ? mascotRef(p, a.mascot) : undefined;
+          const lane = m && laneOfMascot(p.rig, m.id) ? m.id : undefined;
+          const to = presetTargets(p.rig, preset, lane);
+          const start = insertBlock(tl, { id: blockId, presetId: preset.id, name: preset.name, durationMs: preset.durationMs, ...(lane ? { mascotId: lane } : {}) }, index);
           for (const t of preset.tracks) {
             tl.tracks.push({
-              id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
+              id: uid('t'), nodeId: to(t.nodeId), property: t.property, blockId,
               keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
             });
           }
-          tl.blocks.splice(index, 0, { id: blockId, presetId: preset.id, name: preset.name, durationMs: preset.durationMs });
           // a preset's effects and emitters come with it — "Sleepy" without the zzz is
           // not sleepy, and the copilot placing one must get the same clip the panel does
-          attachPresetEffects(tl, preset, blockId, p.rig);
+          attachPresetEffects(tl, preset, blockId, p.rig, lane);
+          break;
+        }
+
+        // --- mascots ---
+        case 'add_mascot': {
+          const kind = (str(a.kind) && str(a.kind)! in MASCOT_KINDS ? str(a.kind) : 'default') as MascotKind;
+          addMascot(p, kind, { name: str(a.name), x: num(a.x), y: num(a.y) });
+          break;
+        }
+        case 'remove_mascot': removeLayer(p, mascotRef(p, a.mascot)!.id, playhead); break;
+        case 'duplicate_mascot': duplicateLayer(p, mascotRef(p, a.mascot)!.id); break;
+        case 'rename_mascot': mascotRef(p, a.mascot)!.name = str(a.name)!; break;
+        case 'set_mascot_transform': {
+          const id = mascotRef(p, a.mascot)!.id;
+          const map: Record<string, string[]> = {
+            x: ['flatOffset.x'], y: ['flatOffset.y'], scale: ['transform.scale.x', 'transform.scale.y'],
+            rotation: ['transform.rotation'], yaw: ['surface.yaw'], pitch: ['surface.pitch'],
+          };
+          for (const [k, props] of Object.entries(map)) if (num(a[k]) !== undefined) for (const pr of props) put(id, pr, num(a[k])!, a);
+          break;
+        }
+        case 'set_mascot_shape': {
+          const m = mascotRef(p, a.mascot)!;
+          const d = libraryOutline(String(a.shape))!;
+          const t = num(a.atMs);
+          if (t === undefined) { writeValue(p, m.id, 'shape.path', d, playhead); m.shape = { kind: String(a.shape) }; break; }
+          // a morph finishing at atMs: from the outline it has, a beat before
+          if (!activeTrackFor(activeTimeline(p), m.id, 'shape.path', t, p.rig)) {
+            const from = valueAt(p, m.id, 'shape.path', Math.max(0, t - 450));
+            writeKeyframe(p, m.id, 'shape.path', Math.max(0, t - 450), typeof from === 'string' ? from : naturalOutline(m), easingOf('easeInOut'));
+          }
+          writeKeyframe(p, m.id, 'shape.path', t, d, easingOf(a.easing));
+          break;
+        }
+        case 'set_mascot_parent': {
+          const m = mascotRef(p, a.mascot)!;
+          const leader = a.follows ? mascotRef(p, a.follows) : undefined;
+          placeUnder(p, m.id, leader?.id ?? null, playhead);
+          break;
+        }
+
+        // --- text ---
+        case 'add_text': {
+          const [node] = plannedLayers(p, call);
+          node.zIndex = topZ(p.rig);
+          p.rig.nodes[node.id] = node;
+          const m = a.attach !== undefined ? mascotRef(p, a.attach) : undefined;
+          if (m) {
+            // x/y were meant from the mascot, not the canvas centre
+            node.parentId = m.id;
+            node.surface = { ...node.surface, flatOffset: { x: num(a.x) ?? 0, y: num(a.y) ?? -m.size.y * 1.4 } };
+          }
+          break;
+        }
+        case 'set_text': {
+          const id = nid(a.nodeId);
+          const n = p.rig.nodes[id];
+          // a name that tracked the words follows them — not a switch keyed for later
+          if (n?.text && a.atMs === undefined && n.name === textName(n.text.content)) n.name = textName(String(a.content));
+          put(id, 'text.content', String(a.content), a);
+          break;
+        }
+        case 'set_text_font': {
+          const id = nid(a.nodeId);
+          put(id, 'text.font.family', str(a.family)!, a);
+          if (num(a.weight) !== undefined) put(id, 'text.font.weight', num(a.weight)!, a);
+          const t = p.rig.nodes[id]?.text;
+          if (t && typeof a.italic === 'boolean') t.font = { ...t.font, style: a.italic ? 'italic' : 'normal' };
+          break;
+        }
+        case 'set_text_style': {
+          const id = nid(a.nodeId);
+          const t = p.rig.nodes[id]?.text;
+          if (t && a.align !== undefined) t.align = a.align as 'left';
+          if (t && a.valign !== undefined) t.valign = a.valign as 'top';
+          for (const [k, prop] of [['lineHeight', 'text.lineHeight'], ['letterSpacing', 'text.letterSpacing'], ['width', 'text.width']] as const) {
+            if (num(a[k]) !== undefined) put(id, prop, num(a[k])!, a);
+          }
+          break;
+        }
+        case 'set_text_size': put(nid(a.nodeId), 'text.size', Math.max(1, num(a.size)!), a); break;
+        case 'set_text_weight': put(nid(a.nodeId), 'text.font.weight', Math.min(900, Math.max(100, num(a.weight)!)), a); break;
+        case 'set_text_color': {
+          const id = nid(a.nodeId);
+          put(id, 'color', colorOf(a.color)!, a);
+          if (num(a.opacity) !== undefined) put(id, 'fill.opacity', Math.min(1, Math.max(0, num(a.opacity)!)), a);
+          break;
+        }
+        case 'set_text_curve': {
+          const id = nid(a.nodeId);
+          const n = p.rig.nodes[id];
+          if (!n?.text) break;
+          if (a.mode === 'straight') { n.text.path = { ...n.text.path, mode: 'straight' }; break; }
+          // "bend it 30%": the words span that share of a full circle
+          const amount = num(a.amount);
+          const span = amount !== undefined ? Math.min(0.95, Math.max(0.02, Math.abs(amount))) * 360 : undefined;
+          const radius = num(a.radius) ?? (span ? textWidth(n) / ((span * Math.PI) / 180) : n.text.path?.radius ?? TEXT_DEFAULTS.arc.radius);
+          n.text.path = { ...n.text.path, mode: 'arc', reverse: a.underneath === true };
+          // through put, so an arc already keyframed is changed where it is keyed
+          put(id, 'text.arc.radius', Math.round(radius), a);
+          const start = num(a.start) ?? (span ? -span / 2 - 6 : undefined);
+          const end = num(a.end) ?? (span ? span / 2 + 6 : undefined);
+          if (start !== undefined) put(id, 'text.arc.start', start, a);
+          if (end !== undefined) put(id, 'text.arc.end', end, a);
+          break;
+        }
+        case 'set_text_path': {
+          const id = nid(a.nodeId);
+          const n = p.rig.nodes[id];
+          if (!n?.text) break;
+          if (a.path === null || a.path === undefined || a.path === 'none') { n.text.path = { ...n.text.path, mode: 'straight', nodeId: undefined }; break; }
+          const target = layerOf(p, a.path) ?? mascotRef(p, a.path)!;
+          n.text.path = {
+            ...n.text.path, mode: 'path', nodeId: target.id,
+            ...(typeof a.reverse === 'boolean' ? { reverse: a.reverse } : {}),
+            ...(typeof a.flip === 'boolean' ? { flip: a.flip } : {}),
+          };
+          if (num(a.offset) !== undefined) put(id, 'text.path.offset', num(a.offset)!, a);
+          if (num(a.baseline) !== undefined) put(id, 'text.path.baseline', num(a.baseline)!, a);
+          break;
+        }
+        case 'set_text_path_offset': put(nid(a.nodeId), 'text.path.offset', num(a.offset)!, a); break;
+        case 'animate_text': {
+          const id = nid(a.nodeId);
+          const n = p.rig.nodes[id];
+          if (!n?.text) break;
+          const from = num(a.startMs) ?? playhead;
+          const letters = [...n.text.content.replace(/\n/g, '')].length;
+          const ease = easingOf(a.easing ?? 'easeOut');
+          if (a.effect === 'typewriter') {
+            const ms = num(a.durationMs) ?? Math.max(200, letters * 45);
+            writeKeyframe(p, id, 'text.reveal.end', from, 0, { type: 'linear' });
+            writeKeyframe(p, id, 'text.reveal.end', from + ms, letters, ease);
+            break;
+          }
+          n.text.chars = { kind: a.effect as 'pop', progress: 1, stagger: num(a.stagger) ?? (a.effect === 'wave' ? 0.4 : 0.6) };
+          const ms = num(a.durationMs) ?? (a.effect === 'wave' ? 1600 : Math.max(400, letters * 70));
+          writeKeyframe(p, id, 'text.chars.progress', from, 0, { type: 'linear' });
+          writeKeyframe(p, id, 'text.chars.progress', from + ms, a.effect === 'wave' ? 2 : 1, a.effect === 'wave' ? { type: 'linear' } : ease);
+          break;
+        }
+
+        // --- curves ---
+        case 'add_curve': {
+          const [node] = plannedLayers(p, call);
+          if (!node) break;
+          node.zIndex = topZ(p.rig);
+          p.rig.nodes[node.id] = node;
+          const target = a.attach !== undefined ? (mascotRef(p, a.attach) ?? layerOf(p, a.attach)) : undefined;
+          if (target) placeUnder(p, node.id, target.id, playhead, false);
+          break;
+        }
+        case 'add_curve_point':
+        case 'move_curve_point':
+        case 'remove_curve_point':
+        case 'close_curve':
+        case 'reverse_curve': {
+          const id = nid(a.nodeId);
+          const got = curveAt(p, id, num(a.atMs) ?? playhead);
+          if (!got) break;
+          const { c, type, toLocal } = got;
+          let next: Curve | null = c;
+          if (call.name === 'add_curve_point') {
+            const q = toLocal(num(a.x)!, num(a.y)!);
+            const at2 = nearestOnCurve(c, type, q);
+            next = { closed: c.closed, points: [...c.points] };
+            next.points.splice((at2?.seg ?? c.points.length - 1) + 1, 0, q);
+          } else if (call.name === 'move_curve_point') next = moveAnchor(c, num(a.index)!, toLocal(num(a.x)!, num(a.y)!));
+          else if (call.name === 'remove_curve_point') next = removePoint(c, num(a.index)!);
+          else if (call.name === 'close_curve') next = { ...c, closed: a.closed === true && c.points.length > 2 };
+          else next = reverseCurve(c);
+          const d = next && curveToPath(next, type);
+          if (d) put(id, 'shape.path', d, a);
+          break;
+        }
+
+        // --- hierarchy and order ---
+        case 'set_layer_parent': {
+          const id = nid(a.nodeId);
+          const parent = a.parent === null || a.parent === undefined || a.parent === 'world' ? null : (layerOf(p, a.parent) ?? mascotRef(p, a.parent))!.id;
+          placeUnder(p, id, parent, playhead);
+          break;
+        }
+        case 'set_layer_order': {
+          const id = nid(a.nodeId);
+          const ref = a.above ?? a.below;
+          if (ref === undefined) { reorderLayer(p, id, a.to as 'front'); break; }
+          const target = layerOf(p, ref) ?? mascotRef(p, ref)!;
+          const node = p.rig.nodes[id];
+          // counted among the layers the move does not carry — a mascot carries its parts
+          const carried = (n: RigNode) => n.id === id || (node.kind === 'body' && isInside(p.rig, n.id, id));
+          const rest = layerOrder(p.rig).filter((n) => !carried(n));
+          // a mascot target is its whole group: in front of all of it, or behind all of it
+          const inTarget = rest.map((n, i) => ({ n, i })).filter(({ n }) => n.id === target.id || (target.kind === 'body' && isInside(p.rig, n.id, target.id)));
+          if (!inTarget.length) break;
+          reorderLayer(p, id, a.above !== undefined ? inTarget[inTarget.length - 1].i + 1 : inTarget[0].i);
           break;
         }
         case 'add_modifier':
