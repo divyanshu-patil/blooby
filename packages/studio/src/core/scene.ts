@@ -82,16 +82,28 @@ function blockWindow(tl: Timeline, blockId: string): [number, number] | null {
  * "Every block" means every block of the layer's own LANE: the second mascot's clips seal
  * the second mascot, and leave the first one's keyframes alone. Pass the rig so a layer's
  * lane is known from the mascot it belongs to; without it, the lane of its own clips is used.
+ *
+ * A clip in ANOTHER lane may still drive a property its own lane's clip does not, while
+ * that clip is running — which is how one preset animates several mascots at once: "Two
+ * Friends" sits in the first mascot's lane and walks the second one in too. Its own lane
+ * always wins, so the second mascot can blink on its own row while the preset moves it.
+ * With a single lane there is no other lane, and this reads exactly as it always did.
  */
 export function activeTrackFor(tl: Timeline, nodeId: string, property: string, t: number, rig?: Rig): Track | undefined {
   const inside = blockAt(tl, t, laneOf(rig, tl, nodeId));
   let fallback: Track | undefined;
+  let borrowed: Track | undefined;
   for (const track of tl.tracks) {
     if (track.nodeId !== nodeId || track.property !== property) continue;
-    if (inside) { if (track.blockId === inside.id) return track; continue; }
-    if (!track.blockId) fallback ??= track;
+    if (track.blockId) {
+      if (inside && track.blockId === inside.id) return track;
+      if (!borrowed) {
+        const w = blockWindow(tl, track.blockId);
+        if (w && t >= w[0] && t < w[1] && !(inside && tl.blocks.find((b) => b.id === track.blockId)?.mascotId === inside.mascotId)) borrowed = track;
+      }
+    } else if (!inside) fallback ??= track;
   }
-  return fallback;
+  return borrowed ?? fallback;
 }
 
 const PENDULUM_AXIS: Record<ModifierAxis, string> = {

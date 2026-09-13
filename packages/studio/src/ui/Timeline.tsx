@@ -9,6 +9,8 @@ import { applyEasing, easingLabel, easingShape } from '../core/easing';
 import { activeTimeline, MODIFIERS, type Block, type EasingCurve, type Keyframe, type KeyValue, type Project, type Timeline, type Track, type Transition } from '../core/types';
 import { findEffect, PROP_LABEL } from '../core/props';
 import { MascotThumb } from './Mascot';
+import { mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
+import { textName } from '../core/layers';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
 import { NumberField } from './bits';
@@ -59,6 +61,15 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const setBlockColor = useEditor((s) => s.setBlockColor);
   const commit = useEditor((s) => s.commit);
   const setAppearance = useEditor((s) => s.setAppearance);
+  // one lane of clips per mascot; the strip shows the one being worked on
+  const activeLane = useEditor((s) => s.activeLane);
+  const setActiveLane = useEditor((s) => s.setActiveLane);
+  const mascots = mascotsOf(project.rig);
+  const lane = activeLane && activeLane !== project.rig.rootId && project.rig.nodes[activeLane]?.kind === 'body' ? activeLane : '';
+  const laneMascot = lane || undefined;
+  const inLane = tl.blocks.map((b, i) => ({ b, i })).filter(({ b }) => (b.mascotId ?? '') === lane);
+  /** a position in this lane's clips, as the index in the timeline's one list of them */
+  const globalAt = (k: number) => (k < inLane.length ? inLane[k].i : inLane.length ? inLane[inLane.length - 1].i + 1 : tl.blocks.length);
 
   const [view, setView] = useState<'tracks' | 'graph'>('tracks');
   const [zoom, setZoom] = useState(1);
@@ -143,6 +154,8 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
     [tl.tracks, selection, selectedEmitterId, isolatedBlockId],
   );
   const jumps = useMemo(() => keyframeTimes(visible.length ? visible : tl.tracks), [visible, tl.tracks]);
+  // the lanes grouped by whose they are: each mascot, then each text, curve and layer
+  const grouped = useMemo(() => groupTracks(project, visible), [project, visible]);
   const starts = blockStarts(tl);
   const selectEmitter = useEditor((s) => s.selectEmitter);
   const [showBands, setShowBands] = useState(true);
@@ -456,7 +469,21 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
             Editing "{isolatedBlock.name}" only · show all
           </button>
         )}
-        <div ref={stripRef} className={tl.blocks.length ? 'strip' : 'strip empty'}
+        {mascots.length > 1 && (
+          <div className="lane-chips" role="tablist" aria-label="Whose clips">
+            {mascots.slice().reverse().map((m) => {
+              const key = m.id === project.rig.rootId ? '' : m.id;
+              const n = tl.blocks.filter((b) => (b.mascotId ?? '') === key).length;
+              return (
+                <button key={m.id} role="tab" className="lane-chip" aria-selected={lane === key}
+                  title={`${mascotLabel(project.rig, m)}'s clips — they play alongside the other mascots'`} onClick={() => setActiveLane(key)}>
+                  <span className="lane-chip-name">{mascotLabel(project.rig, m)}</span><span className="lane-chip-n">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div ref={stripRef} className={inLane.length ? 'strip' : 'strip empty'}
           onDragOver={(e) => {
             if (e.dataTransfer.types.includes('text/blooby-preset') || e.dataTransfer.types.includes('text/blooby-block-reorder')) {
               e.preventDefault();
@@ -466,7 +493,8 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
           onDrop={(e) => {
             const kids = [...e.currentTarget.querySelectorAll('.block')];
             const idx = kids.findIndex((k) => e.clientX < k.getBoundingClientRect().left + k.getBoundingClientRect().width / 2);
-            const target = idx < 0 ? kids.length : idx;
+            // a place among THIS lane's clips, turned into the timeline's own index
+            const target = globalAt(idx < 0 ? kids.length : idx);
 
             const reorderId = e.dataTransfer.getData('text/blooby-block-reorder');
             if (reorderId) {
@@ -476,10 +504,10 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
               return;
             }
             const presetId = e.dataTransfer.getData('text/blooby-preset');
-            if (presetId) { e.preventDefault(); addBlock(presetId, target); }
+            if (presetId) { e.preventDefault(); addBlock(presetId, target, laneMascot); }
           }}>
-          {!tl.blocks.length && 'Drag a preset here, or click one to append it.'}
-          {tl.blocks.map((b, i) => {
+          {!inLane.length && (mascots.length > 1 ? `No clips for ${mascotLabel(project.rig, project.rig.nodes[lane || project.rig.rootId])} yet — drag a preset here, or click one.` : 'Drag a preset here, or click one to append it.')}
+          {inLane.map(({ b, i }, li) => {
             const start = starts[i];
             const within = playhead >= start && playhead < start + b.durationMs;
             const color = clipColor(project, b);
@@ -531,7 +559,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                     onPointerCancel={() => { resize.current = null; resizing.current = false; }} />
                 )}
               </div>
-              {i < tl.blocks.length - 1 && (
+              {li < inLane.length - 1 && (
                 <TransitionConnector
                   transition={explicitTransitionFor(tl, b.id)}
                   onChange={(patch) => setTransition(b.id, patch)}
@@ -541,7 +569,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
             );
           })}
           <button className="btn icon add-blank-clip" title="Add a blank clip — the rig's own rest pose, ready to animate from scratch"
-            onClick={() => addBlock('p_neutral')}>+</button>
+            onClick={() => addBlock('p_neutral', undefined, laneMascot)}>+</button>
         </div>
       </div>
 
@@ -581,7 +609,9 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                   <span>On screen</span><span className="node">{appearNode.name}</span>
                 </div>
               )}
-              {visible.map((t) => {
+              {grouped.map((row) => {
+                if (!row.track) return <div key={row.key} className="tgroup"><span className="tgroup-name">{row.group}</span><span className="tgroup-tag">{row.tag}</span></div>;
+                const t = row.track;
                 const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                 return (
                   <div key={t.id} style={{ display: 'contents' }}>
@@ -613,7 +643,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
               {box && <div className="marquee" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
               <div style={{ position: 'relative' }}>
                 <div className="ruler" onPointerDown={scrub} onPointerMove={scrub}>
-                  {tl.blocks.map((b, i) => (
+                  {inLane.map(({ b, i }) => (
                     <div key={b.id} className="blockband" title={b.name}
                       style={{ left: starts[i] * pxPerMs, width: b.durationMs * pxPerMs, borderLeftColor: clipColor(project, b) || undefined }}>
                       {b.name}
@@ -669,7 +699,9 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                     )}
                   </div>
                 )}
-                {visible.map((t) => {
+                {grouped.map((row) => {
+                  if (!row.track) return <div key={row.key} className="tgroup-lane" />;
+                  const t = row.track;
                   const numeric = t.keyframes.every((k) => typeof k.value === 'number');
                   return (
                     <div key={t.id} style={{ display: 'contents' }}>
@@ -923,6 +955,33 @@ export function DurationField() {
       </select>
     </div>
   );
+}
+
+/**
+ * The track rows under headings: one per mascot (its body, eyes, limbs and anything hung
+ * on it), then one per text, curve and other layer, then the effects. With a single owner
+ * there are no headings — a heading over the only group says nothing.
+ */
+function groupTracks(project: Project, tracks: Track[]): { key: string; group?: string; tag?: string; track?: Track }[] {
+  const rig = project.rig;
+  const owner = (id: string) => {
+    const m = mascotOf(rig, id);
+    if (m) return { key: `m:${m.id}`, rank: [0, -m.zIndex], group: mascotLabel(rig, m), tag: 'Mascot' };
+    const n = rig.nodes[id];
+    if (!n) return { key: 'fx', rank: [4, 0], group: 'Effects', tag: 'Effect' };
+    if (n.kind === 'text') return { key: `n:${id}`, rank: [1, -n.zIndex], group: `“${textName(n.text?.content ?? '')}”`, tag: 'Text' };
+    return { key: `n:${id}`, rank: [n.curve ? 2 : 3, -n.zIndex], group: n.name, tag: n.curve ? 'Curve' : n.kind === 'svgLayer' ? 'SVG' : n.kind === 'group' ? 'Group' : 'Shape' };
+  };
+  const buckets = new Map<string, ReturnType<typeof owner> & { tracks: Track[] }>();
+  for (const t of tracks) {
+    const o = owner(t.nodeId);
+    const b = buckets.get(o.key) ?? { ...o, tracks: [] };
+    b.tracks.push(t);
+    buckets.set(o.key, b);
+  }
+  const sorted = [...buckets.values()].sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1]);
+  if (sorted.length <= 1) return tracks.map((t) => ({ key: t.id, track: t }));
+  return sorted.flatMap((b) => [{ key: `g:${b.key}`, group: b.group, tag: b.tag }, ...b.tracks.map((t) => ({ key: t.id, track: t }))]);
 }
 
 /** What a lane belongs to: a layer, or an effect addressed by its own id. */

@@ -9,7 +9,7 @@ import { activeTrackFor, appearanceSpans, buildScene, evaluateRig, fromFrame, to
 import { activeTimeline } from './types';
 import { MORPH_MODES, type MorphMode } from './easing';
 import { relayoutBlocks } from './timeline';
-import { instantiateTemplate, laneOfMascot, makeMascot, mascotsOf, nextMascotName, roleOf, type MascotKind } from './mascot';
+import { instantiateTemplate, laneOfMascot, makeMascot, mascotsOf, nextMascotName, partOf, roleOf, type MascotKind } from './mascot';
 import { curveToPath, type CurvePoint } from './curve';
 import { TEXT_DEFAULTS } from './text';
 import type { ColorStop, CurveType, EasingCurve, KeyValue, MascotTemplate, Project, Rig, RigNode, ShapeKind, TextStyle, Vec2 } from './types';
@@ -72,6 +72,28 @@ export function makeLimb(type: 'arm' | 'leg', side: -1 | 1, parentId: string | n
     zIndex: type === 'arm' ? -1 : -2,
     limb, ...over,
   };
+}
+
+/**
+ * A pair of limbs for one mascot, sized to its body — only the sides it does not have yet
+ * (by role, or by an older role-less limb on that side), or one more on the right when it
+ * has both.
+ */
+export function makeLimbPair(rig: Rig, mascotId: string, type: 'arm' | 'leg'): RigNode[] {
+  const body = rig.nodes[mascotId];
+  const k = (body?.size.x ?? 148) / 148;
+  const has = (s: -1 | 1) => !!partOf(rig, mascotId, `${type}${s < 0 ? 'L' : 'R'}`)
+    || Object.values(rig.nodes).some((n) => n.limb?.type === type && Math.sign(n.limb.a.x) === s && isInside(rig, n.id, mascotId));
+  const sides = ([-1, 1] as const).filter((s) => !has(s));
+  return (sides.length ? sides : [1 as const]).map((s) => {
+    const l = makeLimb(type, s, mascotId);
+    if (l.limb && k !== 1) {
+      for (const pt of [l.limb.a, l.limb.b, l.limb.c]) if (pt) { pt.x *= k; pt.y *= k; }
+      l.limb.length *= k;
+      l.limb.thickness *= k;
+    }
+    return l;
+  });
 }
 
 /** SVG's own default paint — what an icon that says nothing about colour is drawn in. */
@@ -512,13 +534,21 @@ export function ungroupLayer(p: Project, id: string, atMs: number): void {
 // mascots: a body and its parts, instanced from core/mascot.ts
 
 /**
- * A new mascot on top of everything, standing where it can be seen: beside the others,
- * alternating right and left of centre and kept inside the canvas. Returns its body id.
+ * A new mascot on top of everything, standing where it can be seen: in the widest gap
+ * between the mascots already there, kept inside the canvas. Returns its body id.
  */
 export function addMascot(p: Project, kind: MascotKind | MascotTemplate, opts: { name?: string; x?: number; y?: number; id?: string } = {}): string {
-  const n = mascotsOf(p.rig).length;
   const reach = Math.max(0, compOf(p).width / 2 - 100);
-  const x = opts.x ?? Math.max(-reach, Math.min(reach, (n % 2 ? 1 : -1) * Math.ceil(n / 2) * 230));
+  const taken = mascotsOf(p.rig).filter((m) => m.parentId === null).map((m) => m.surface.flatOffset?.x ?? 0);
+  // the spot furthest from every mascot already standing — the right edge first on a tie
+  let x = opts.x ?? 0;
+  if (opts.x === undefined && taken.length) {
+    let best = -1;
+    for (let c = reach; c >= -reach; c -= 10) {
+      const gap = Math.min(...taken.map((t) => Math.abs(t - c)));
+      if (gap > best + 1e-9) { best = gap; x = c; }
+    }
+  }
   const name = opts.name?.trim() || nextMascotName(p.rig);
   const nodes = typeof kind === 'string'
     ? makeMascot(kind, { name, x, y: opts.y ?? 0, id: opts.id })

@@ -71,6 +71,35 @@ const ed = () => useEditor.getState();
   it('and it plays there, while the first mascot\'s clips run', check(evaluateRig(ed().project, 3000).nodes[m2].surface.flatOffset?.x === 400));
 }
 
+// --- new mascots find room -----------------------------------------------------------------
+{
+  const p = defaultProject();
+  const ids = [addMascot(p, 'default'), addMascot(p, 'blob'), addMascot(p, 'octopus')];
+  const xs = [0, ...ids.map((id) => p.rig.nodes[id].surface.flatOffset!.x)].sort((a, b) => a - b);
+  const gaps = xs.slice(1).map((x, i) => x - xs[i]);
+  it('each new mascot goes into the widest gap, so none lands on another', check(Math.min(...gaps) >= 120, xs.join()));
+  it('and all of them stay on the canvas', check(xs.every((x) => Math.abs(x) <= compOf(p).width / 2 - 100)));
+}
+
+// --- one clip animating several mascots ------------------------------------------------------
+{
+  // a clip in the FIRST mascot's lane that also walks the second mascot in — what a
+  // two-mascot preset is — and the second mascot's own lane blinking at the same time
+  const p = defaultProject();
+  const m2 = addMascot(p, 'default');
+  const tl = activeTimeline(p);
+  tl.blocks = [{ id: 'duo', presetId: 'p_neutral', name: 'Duo', durationMs: 1000 }, { id: 'own', presetId: 'p_blink', name: 'Blink', durationMs: 1000, mascotId: m2 }];
+  tl.tracks = [
+    { id: 'walk', nodeId: m2, property: 'flatOffset.x', blockId: 'duo', keyframes: [{ id: 'a', time: 0, value: 300, easingOut: { type: 'linear' } }, { id: 'b', time: 1000, value: 100, easingOut: { type: 'linear' } }] },
+    { id: 'blink', nodeId: `${m2}.eyeL`, property: 'eye.openness', blockId: 'own', keyframes: [{ id: 'c', time: 0, value: 0.2, easingOut: { type: 'linear' } }] },
+  ];
+  tl.transitions = [];
+  const r = evaluateRig(p, 500);
+  it('a clip in the first mascot\'s lane can walk the second mascot', check(Math.abs(r.nodes[m2].surface.flatOffset!.x - 200) < 1e-6));
+  it('while the second mascot\'s own lane blinks it at the same moment', check(Math.abs(r.nodes[`${m2}.eyeL`].eye!.openness - 0.2) < 1e-6));
+  it('and once that clip is over, it walks no more', check(evaluateRig(p, 1500).nodes[m2].surface.flatOffset!.x === p.rig.nodes[m2].surface.flatOffset!.x));
+}
+
 // --- layer order: a mascot moves as one ----------------------------------------------------
 {
   const p = defaultProject();

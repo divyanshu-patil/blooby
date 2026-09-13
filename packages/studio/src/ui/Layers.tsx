@@ -2,25 +2,32 @@ import { useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { cssColor } from '../core/color';
 import { shapeById, SHAPE_LIBRARY, libraryOutline } from '../core/emitters';
-import { attachmentOf, layerOrder, makeLimb, makeShapeLayer, makeSvgLayer } from '../core/layers';
-import { naturalOutline, PRIMITIVE_SHAPES } from '../core/path';
+import { attachmentOf, layerOrder, makeLimbPair, makeShapeLayer, makeSvgLayer } from '../core/layers';
+import { naturalOutline, PRIMITIVE_SHAPES, primitivePath } from '../core/path';
 import { looksLikeSvg } from '../core/svg';
+import { MASCOT_KINDS, mascotLabel, mascotOf, mascotsOf, type MascotKind } from '../core/mascot';
 import { Icon, Panel } from './bits';
 import type { RigNode, ShapeKind } from '../core/types';
 
+type Tray = null | 'add' | 'shape' | 'svg';
+
 /**
- * The layers, as a small Figma-style list: front at the top, the mascot's own parts
- * indented under it, world layers beside it.
+ * The layers, as a small Figma-style list: front at the top, each mascot's own parts
+ * indented under it, world layers beside them.
  *
  * The order shown IS the draw order — both read `zIndex`, through `layerOrder` — so
  * dragging a row is exactly what changes what paints over what on the stage and in the
- * export. There is no second ordering for this panel to disagree with.
+ * export. There is no second ordering for this panel to disagree with. A mascot drags as
+ * one, parts and all.
  */
 export function Layers() {
   const project = useEditor((s) => s.project);
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
   const addLayer = useEditor((s) => s.addLayer);
+  const addMascot = useEditor((s) => s.addMascot);
+  const addText = useEditor((s) => s.addText);
+  const setTool = useEditor((s) => s.setTool);
   const deleteNode = useEditor((s) => s.deleteNode);
   const updateNode = useEditor((s) => s.updateNode);
   const reorderLayer = useEditor((s) => s.reorderLayer);
@@ -29,11 +36,10 @@ export function Layers() {
   const ungroupLayer = useEditor((s) => s.ungroupLayer);
   const playhead = useEditor((s) => s.playhead);
   const file = useRef<HTMLInputElement>(null);
-  const [picking, setPicking] = useState(false);
+  const [tray, setTray] = useState<Tray>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; front: boolean } | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [svgOpen, setSvgOpen] = useState(false);
   const [svgText, setSvgText] = useState('');
 
   const rig = project.rig;
@@ -49,7 +55,7 @@ export function Layers() {
     rows.push({ node: n, depth });
     for (const c of kids(n.id)) walk(c, depth + 1);
   };
-  // the mascot and the world layers interleave by their own draw order at the top level
+  // the mascots and the world layers interleave by their own draw order at the top level
   const tops = [rig.nodes[rig.rootId], ...kids(null)].filter(Boolean)
     .sort((a, b) => (rank.get(b.id) ?? 0) - (rank.get(a.id) ?? 0));
   for (const t of tops) walk(t, 0);
@@ -57,21 +63,17 @@ export function Layers() {
   const sel = selection.map((id) => rig.nodes[id]).filter((n): n is RigNode => !!n);
   const one = sel.length === 1 ? sel[0] : null;
   const isRoot = (n: RigNode) => n.id === rig.rootId;
+  // hands and legs go on the mascot being worked on
+  const current = mascotOf(rig, selection[0]) ?? rig.nodes[rig.rootId];
+  const many = mascotsOf(rig).length > 1;
 
   const addShape = (shape: string) => {
-    setPicking(false);
+    setTray(null);
     const kind = (PRIMITIVE_SHAPES as string[]).includes(shape) ? (shape as ShapeKind) : 'circle';
     const node = makeShapeLayer(kind, { name: shapeById(shape)?.name ?? 'Shape', shape: { kind: shape } });
     const d = libraryOutline(shape);
     if (d) node.shapePath = d;
     addLayer(node);
-  };
-
-  const addLimbs = (type: 'arm' | 'leg') => {
-    // a pair, as one undo step; a side that is already there is not doubled
-    const have = (side: number) => Object.values(rig.nodes).some((n) => n.limb?.type === type && Math.sign(n.limb.a.x) === side);
-    const make = ([-1, 1] as const).filter((s) => !have(s));
-    addLayer((make.length ? make : [1 as const]).map((s) => makeLimb(type, s, rig.rootId)));
   };
 
   /** Markup → a layer at the playhead. False (with a note) when it is not SVG we can read. */
@@ -83,10 +85,10 @@ export function Layers() {
     return true;
   };
   const importFile = async (f: File) => { importText(await f.text(), f.name.replace(/\.svg$/i, ''), f.name); };
-  const closeSvg = () => { setSvgOpen(false); setSvgText(''); };
+  const closeTray = () => { setTray(null); setSvgText(''); };
   const pasteClipboard = async () => {
     try {
-      if (importText(await navigator.clipboard.readText(), undefined, 'The clipboard')) closeSvg();
+      if (importText(await navigator.clipboard.readText(), undefined, 'The clipboard')) closeTray();
     } catch {
       setNote('The browser blocked clipboard access — paste into the box with ⌘V instead.');
     }
@@ -103,19 +105,50 @@ export function Layers() {
 
   return (
     <Panel title="Layers" actions={
-      <>
-        <button className="btn ghost sm icon" title="Add a shape" aria-expanded={picking}
-          onClick={() => { closeSvg(); setPicking((v) => !v); }}><Icon name="shape" /></button>
-        <button className="btn ghost sm icon" title="Import an SVG — paste it or choose a file" aria-expanded={svgOpen}
-          onClick={() => { setPicking(false); if (svgOpen) closeSvg(); else setSvgOpen(true); }}><Icon name="svg" /></button>
-        <button className="btn ghost sm icon" title="Add hands — two points each, a rubber-hose arm" onClick={() => addLimbs('arm')}><Icon name="hand" /></button>
-        <button className="btn ghost sm icon" title="Add legs — hip, knee and ankle" onClick={() => addLimbs('leg')}><Icon name="leg" /></button>
-      </>
+      <button className="btn sm add-btn" aria-expanded={tray !== null} title="Add a mascot, text, a curve, a shape or an SVG"
+        onClick={() => (tray ? closeTray() : setTray('add'))}><Icon name="plus" size={12} />Add</button>
     }>
       <input ref={file} type="file" accept=".svg,image/svg+xml" multiple hidden
-        onChange={(e) => { for (const f of [...(e.target.files ?? [])]) void importFile(f); e.target.value = ''; closeSvg(); }} />
+        onChange={(e) => { for (const f of [...(e.target.files ?? [])]) void importFile(f); e.target.value = ''; closeTray(); }} />
       {/* trays in the panel's own flow: a popover here is clipped by .panel's overflow */}
-      {picking && (
+      {tray === 'add' && (
+        <div className="add-tray" role="menu" aria-label="Add" onKeyDown={(e) => { if (e.key === 'Escape') closeTray(); }}>
+          <span className="add-tray-label">Mascot</span>
+          <div className="add-mascots">
+            {(Object.keys(MASCOT_KINDS) as MascotKind[]).map((k) => (
+              <button key={k} role="menuitem" className="add-mascot" title={MASCOT_KINDS[k].blurb}
+                onClick={() => { addMascot(k); closeTray(); }}>
+                <MascotGlyph color={MASCOT_KINDS[k].color} shape={MASCOT_KINDS[k].shape} />
+                <span>{MASCOT_KINDS[k].label}</span>
+              </button>
+            ))}
+            {(project.mascotTemplates ?? []).map((t) => {
+              const body = t.nodes.find((n) => n.kind === 'body');
+              return (
+                <button key={t.id} role="menuitem" className="add-mascot" title={`Your saved mascot “${t.name}”`}
+                  onClick={() => { addMascot({ templateId: t.id }); closeTray(); }}>
+                  <MascotGlyph color={body?.color} path={body?.shapePath} />
+                  <span>{t.name}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span className="add-tray-label">Layer</span>
+          <div className="add-layers">
+            <button role="menuitem" className="add-layer" onClick={() => { addText(); closeTray(); }}><Icon name="text" />Text<kbd>T</kbd></button>
+            <button role="menuitem" className="add-layer" title="Draw it on the stage, point by point"
+              onClick={() => { setTool('pen'); closeTray(); }}><Icon name="pen" />Curve<kbd>P</kbd></button>
+            <button role="menuitem" className="add-layer" onClick={() => setTray('shape')}><Icon name="shape" />Shape</button>
+            <button role="menuitem" className="add-layer" onClick={() => setTray('svg')}><Icon name="svg" />SVG</button>
+            <button role="menuitem" className="add-layer" title={`Two rubber-hose arms on ${mascotLabel(rig, current)}`}
+              onClick={() => { addLayer(makeLimbPair(rig, current.id, 'arm')); closeTray(); }}><Icon name="hand" />Hands</button>
+            <button role="menuitem" className="add-layer" title={`Two legs on ${mascotLabel(rig, current)}`}
+              onClick={() => { addLayer(makeLimbPair(rig, current.id, 'leg')); closeTray(); }}><Icon name="leg" />Legs</button>
+          </div>
+          {many && <p className="hint" style={{ margin: 0 }}>Hands and legs go on {mascotLabel(rig, current)} — select another mascot to give them to it.</p>}
+        </div>
+      )}
+      {tray === 'shape' && (
         <div className="shape-grid tray" role="listbox" aria-label="Add a shape">
           {SHAPE_LIBRARY.map((s) => (
             <button key={s.id} className="shapepick-cell" title={s.name} onClick={() => addShape(s.id)}>
@@ -124,16 +157,16 @@ export function Layers() {
           ))}
         </div>
       )}
-      {svgOpen && (
-        <div className="svg-import" role="group" aria-label="Import an SVG" onKeyDown={(e) => { if (e.key === 'Escape') closeSvg(); }}>
+      {tray === 'svg' && (
+        <div className="svg-import" role="group" aria-label="Import an SVG" onKeyDown={(e) => { if (e.key === 'Escape') closeTray(); }}>
           <textarea className="ask svg-paste" autoFocus spellCheck={false} aria-label="SVG markup"
             placeholder="Paste SVG markup here (⌘V)" value={svgText} onChange={(e) => setSvgText(e.target.value)}
             onPaste={(e) => {
               const t = e.clipboardData.getData('text');
-              if (looksLikeSvg(t) && importText(t)) { e.preventDefault(); closeSvg(); }
+              if (looksLikeSvg(t) && importText(t)) { e.preventDefault(); closeTray(); }
             }} />
           <div className="row">
-            <button className="btn sm" disabled={!svgText.trim()} onClick={() => { if (importText(svgText)) closeSvg(); }}>Add layer</button>
+            <button className="btn sm" disabled={!svgText.trim()} onClick={() => { if (importText(svgText)) closeTray(); }}>Add layer</button>
             <button className="btn ghost sm" onClick={() => void pasteClipboard()}>From clipboard</button>
             <button className="btn ghost sm" onClick={() => file.current?.click()}>File…</button>
           </div>
@@ -144,12 +177,13 @@ export function Layers() {
       <div className="layer-list" role="tree" aria-label="Layers" aria-multiselectable>
         {rows.map(({ node, depth }) => {
           const locked = !!node.locked;
-          const attached = !isRoot(node) && attachmentOf(node) === 'mascot';
+          const mascot = node.kind === 'body';
+          const attached = !mascot && attachmentOf(node) === 'mascot';
           return (
             <div key={node.id} role="treeitem" aria-selected={selection.includes(node.id)} className="layer"
               data-depth={Math.min(depth, 4)} data-drop={drop?.id === node.id ? (drop.front ? 'front' : 'back') : undefined}
-              data-hidden={!node.visible || undefined}
-              draggable={!isRoot(node) && renaming !== node.id}
+              data-hidden={!node.visible || undefined} data-mascot={mascot || undefined}
+              draggable={renaming !== node.id}
               onDragStart={(e) => { e.dataTransfer.setData('text/blooby-layer', node.id); e.dataTransfer.effectAllowed = 'move'; }}
               onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes('text/blooby-layer')) return;
@@ -173,18 +207,21 @@ export function Layers() {
               </button>
               <LayerThumb node={node} />
               {renaming === node.id ? (
-                <input className="txt layer-rename" autoFocus defaultValue={node.name} aria-label="Layer name"
+                <input className="txt layer-rename" autoFocus defaultValue={mascot ? mascotLabel(rig, node) : node.name} aria-label="Layer name"
                   onPointerDown={(e) => e.stopPropagation()}
                   onBlur={(e) => { const v = e.target.value.trim(); if (v) updateNode(node.id, (n) => { n.name = v; }); setRenaming(null); }}
                   onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setRenaming(null); }} />
-              ) : <span className="layer-name">{isRoot(node) ? 'Mascot' : node.name}</span>}
-              {attached && depth === 1 && node.kind !== 'eye' && node.kind !== 'limb' && (
-                <span className="layer-badge" title={node.surface.mapped ? 'Attached to the mascot, on its surface' : 'Attached to the mascot'}><Icon name="anchor" size={11} /></span>
+              ) : <span className="layer-name">{mascot ? mascotLabel(rig, node) : node.name}</span>}
+              {attached && node.kind !== 'eye' && node.kind !== 'limb' && (
+                <span className="layer-badge" title={node.surface.mapped ? 'Attached to its mascot, on the surface' : `Attached to ${rig.nodes[node.parentId!]?.name ?? 'its parent'}`}><Icon name="anchor" size={11} /></span>
               )}
-              {!isRoot(node) && attachmentOf(node) === 'world' && (
-                <span className="layer-badge" title="A world layer — stays put when the mascot moves"><Icon name="world" size={11} /></span>
+              {mascot && node.parentId && (
+                <span className="layer-badge" title={`Follows ${mascotLabel(rig, rig.nodes[node.parentId] ?? node)}`}><Icon name="anchor" size={11} /></span>
               )}
-              <span className="kind">{KIND_LABEL[node.kind]}</span>
+              {!mascot && attachmentOf(node) === 'world' && (
+                <span className="layer-badge" title="A world layer — stays put when the mascots move"><Icon name="world" size={11} /></span>
+              )}
+              <span className="kind">{node.guide ? 'guide' : node.curve ? 'curve' : KIND_LABEL[node.kind]}</span>
               <button className="layer-btn lock" data-on={locked} title={locked ? 'Unlock' : 'Lock — cannot be selected or moved on the stage'}
                 aria-label={locked ? `Unlock ${node.name}` : `Lock ${node.name}`}
                 onPointerDown={(e) => e.stopPropagation()}
@@ -205,8 +242,8 @@ export function Layers() {
           <span className="spacer" />
           {one?.kind === 'group'
             ? <button className="btn ghost sm" title="Ungroup — the children stay where they are" onClick={() => ungroupLayer(one.id)}>Ungroup</button>
-            : <button className="btn ghost sm icon" title="Group selection" disabled={!sel.length || sel.some(isRoot)} onClick={() => groupLayers(sel.map((n) => n.id))}><Icon name="group" /></button>}
-          <button className="btn ghost sm icon" title="Duplicate (⌘D)" disabled={!one || isRoot(one)} onClick={() => one && duplicateLayer(one.id)}><Icon name="copy" /></button>
+            : <button className="btn ghost sm icon" title="Group selection" disabled={!sel.length || sel.some((n) => n.kind === 'body')} onClick={() => groupLayers(sel.map((n) => n.id))}><Icon name="group" /></button>}
+          <button className="btn ghost sm icon" title="Duplicate (⌘D)" disabled={!one} onClick={() => one && duplicateLayer(one.id)}><Icon name="copy" /></button>
           <button className="btn ghost sm icon danger-icon" title="Delete (⌫)" disabled={sel.every(isRoot)}
             onClick={() => { for (const n of sel) if (!isRoot(n)) deleteNode(n.id); }}><Icon name="trash" /></button>
         </div>
@@ -215,15 +252,32 @@ export function Layers() {
   );
 }
 
-const KIND_LABEL: Record<string, string> = { body: 'body', eye: 'eye', group: 'grp', svgLayer: 'svg', primitive: 'shape', limb: 'limb' };
+const KIND_LABEL: Record<string, string> = { body: 'mascot', eye: 'eye', group: 'grp', svgLayer: 'svg', primitive: 'shape', limb: 'limb', text: 'text' };
+
+/** A mascot look in miniature: its body outline in its colour, and two eyes. */
+function MascotGlyph({ color, shape, path }: { color?: RigNode['color']; shape?: string; path?: string }) {
+  const d = path ?? (shape ? primitivePath(shape as ShapeKind) : primitivePath('circle'));
+  return (
+    <svg viewBox="-0.6 -0.6 1.2 1.2" aria-hidden>
+      <path d={d} fill={cssColor({ ...(color ?? { r: 242, g: 239, b: 233, a: 1 }), a: 1 })} stroke="rgba(10,10,10,.18)" strokeWidth={0.03} />
+      <ellipse cx={-0.13} cy={-0.04} rx={0.045} ry={0.08} fill="#141318" />
+      <ellipse cx={0.13} cy={-0.04} rx={0.045} ry={0.08} fill="#141318" />
+    </svg>
+  );
+}
 
 /** A 16px picture of what the layer draws — its outline in its own colour. */
 function LayerThumb({ node }: { node: RigNode }) {
-  const fill = cssColor({ ...node.color, a: 1 });
+  const paint = node.curve ? node.stroke?.color ?? node.color : node.color;
+  const fill = cssColor({ ...paint, a: 1 });
   let body;
   if (node.kind === 'limb') {
     body = <path d={node.limb?.type === 'leg' ? 'M-0.1 -0.45 C0.2 -0.1 0.1 0.2 -0.05 0.35 L0.35 0.35' : 'M-0.4 0.3 C-0.1 0.35 0.2 0 0.3 -0.35'}
       fill="none" stroke={fill} strokeWidth={0.2} strokeLinecap="round" />;
+  } else if (node.kind === 'text') {
+    body = <text x={0} y={0.22} textAnchor="middle" fontSize={0.72} fontWeight={700} fill={fill}>T</text>;
+  } else if (node.curve && node.shapePath) {
+    body = <path d={node.shapePath} fill="none" stroke={fill} strokeWidth={0.12} strokeLinecap="round" transform="scale(0.85)" />;
   } else if (node.kind === 'svgLayer' && node.svg?.paths) {
     body = <g transform="scale(0.9)">{node.svg.paths.map((p, i) => <path key={i} d={p.d} fill={p.fill === null ? 'none' : p.fill ? cssColor(p.fill) : fill} stroke={p.stroke ? cssColor(p.stroke) : undefined} strokeWidth={p.stroke ? 0.06 : undefined} />)}</g>;
   } else if (node.kind === 'group') {
@@ -235,7 +289,7 @@ function LayerThumb({ node }: { node: RigNode }) {
   }
   // a dark layer on the dark tile is invisible (the eyes were black on black), so the tile
   // flips to the light surface for anything darker than mid-grey
-  const { r, g, b } = node.color;
+  const { r, g, b } = paint;
   const dark = (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
   return <svg className={`layer-thumb${dark ? ' on-light' : ''}`} viewBox="-0.55 -0.55 1.1 1.1" aria-hidden>{body}</svg>;
 }

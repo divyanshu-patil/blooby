@@ -83,7 +83,8 @@ export function Presets() {
   const shown = peeking ? list.slice(0, PEEK + 2) : list;
 
   const add = (preset: Preset) => {
-    addBlock(preset.id);
+    // onto the mascot being worked on — its lane of clips
+    addBlock(preset.id, undefined, useEditor.getState().activeLane || undefined);
     if (preset.source === 'official' || preset.source === 'community') void assetsApi.markUsed(preset.id);
   };
   // hide the shared-library tabs entirely when there is no library to browse, rather

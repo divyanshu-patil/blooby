@@ -90,6 +90,13 @@ export function retargetId(rig: Rig, mascotId: string | undefined, id: string, p
   return presetLayer ? `${target}:${id}` : id;
 }
 
+/** What a mascot is called on screen. An older file's first mascot is named "Body"; beside
+ *  others it reads as "Mascot 1", alone as "Mascot". Renaming it makes it its own. */
+export function mascotLabel(rig: Rig, m: RigNode): string {
+  if (m.id !== rig.rootId || m.name !== 'Body') return m.name;
+  return mascotsOf(rig).length > 1 ? 'Mascot 1' : 'Mascot';
+}
+
 /** "Mascot 2", "Mascot 3" — the first number no mascot is already called. */
 export function nextMascotName(rig: Rig): string {
   const names = new Set(mascotsOf(rig).map((m) => m.name));

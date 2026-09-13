@@ -8,14 +8,18 @@ import { ShapeEditor } from './ShapeEditor';
 import { Collapsible } from './Collapsible';
 import { RangeBar } from './RangeBar';
 import { INK, BONE } from '../core/defaults';
-import { COMP_MAX, COMP_MIN, COMP_PRESETS, compOf } from '../core/comp';
+import { compOf } from '../core/comp';
+import { mascotLabel } from '../core/mascot';
+import { openComposition } from './CompositionDialog';
+import { TextLayoutSection, TextLettersSection, TextPathSection, TextSection } from './TextSections';
+import { CurveSection } from './CurveSection';
+import { MascotFollowSection, MascotRigSection } from './MascotSections';
 import { attachmentOf, isInside } from '../core/layers';
 import { limbPoints } from '../core/limb';
 import { blockStarts, fmtSec } from '../core/timeline';
 import { EASING_NAMES, easingLabel, namedEasing } from '../core/easing';
 import { NUMERIC_PROPS, PROP_LABEL, PROPS } from '../core/props';
 import { getEntry, type GalleryEntry } from '../core/gallery';
-import { useStageBg } from './stageBg';
 
 const SWATCHES: ColorStop[] = [
   BONE, INK,
@@ -132,43 +136,62 @@ export function NodeInspector() {
   if (selection.length > 1) return <MultiNodeInspector ids={selection} />;
   const id = selection[0];
   const node = id ? project.rig.nodes[id] : undefined;
-  if (!node) return <CompositionPanel />;
+  if (!node) return <NothingSelected />;
 
   const isRoot = node.id === project.rig.rootId;
+  // every mascot is a body; the first one is the rig's root
+  const mascot = node.kind === 'body';
+  const text = node.kind === 'text' && !!node.text;
+  const curve = !!node.curve;
   const drawsPaint = node.kind !== 'group';
+  const tag = mascot ? 'mascot' : text ? 'text' : curve ? 'curve' : node.kind === 'svgLayer' ? 'svg' : node.kind;
 
   return (
     <div className="insp">
       <div className="insp-head">
-        <input className="txt" value={node.name} aria-label="Layer name"
+        <input className="txt" value={mascot ? mascotLabel(project.rig, node) : node.name} aria-label={mascot ? 'Mascot name' : 'Layer name'}
           onChange={(e) => updateNode(node.id, (n) => { n.name = e.target.value; }, `name.${node.id}`)} />
-        <span className="tag">{isRoot ? 'mascot' : node.kind === 'svgLayer' ? 'svg' : node.kind}</span>
+        <span className="tag">{tag}</span>
       </div>
 
+      {text && (
+        <>
+          <Collapsible title="Text" storageKey="insp-text"><TextSection node={node} /></Collapsible>
+          <Collapsible title="Layout" storageKey="insp-text-layout"><TextLayoutSection node={node} /></Collapsible>
+          <Collapsible title="Path" storageKey="insp-text-path" defaultOpen={false}><TextPathSection node={node} /></Collapsible>
+        </>
+      )}
+      {curve && <Collapsible title="Curve" storageKey="insp-curve"><CurveSection node={node} /></Collapsible>}
+      {mascot && <Collapsible title="Rig" storageKey="insp-rig"><MascotRigSection node={node} /></Collapsible>}
       <Collapsible title="Transform" storageKey="insp-transform">
-        <TransformSection node={node} isRoot={isRoot} />
+        <TransformSection node={node} isRoot={mascot} />
       </Collapsible>
       {node.kind === 'limb' && (
         <Collapsible title={node.limb?.type === 'leg' ? 'Leg' : 'Hand'} storageKey="insp-limb">
           <LimbSection node={node} />
         </Collapsible>
       )}
-      {node.kind !== 'limb' && node.kind !== 'group' && (
-        <Collapsible title="Shape" storageKey="insp-shape">
+      {node.kind !== 'limb' && node.kind !== 'group' && !text && !curve && (
+        <Collapsible title={mascot ? 'Look' : 'Shape'} storageKey="insp-shape">
           <ShapeEditor node={node} />
         </Collapsible>
       )}
       {drawsPaint && (
-        <Collapsible title="Fill" storageKey="insp-fill">
+        <Collapsible title="Fill" storageKey={curve ? 'insp-curve-fill' : 'insp-fill'} defaultOpen={!curve}>
           <FillSection node={node} />
         </Collapsible>
       )}
       {drawsPaint && (
-        <Collapsible title="Stroke" storageKey="insp-stroke" defaultOpen={false}>
+        <Collapsible title="Stroke" storageKey={curve ? 'insp-curve-stroke' : 'insp-stroke'} defaultOpen={curve}>
           <StrokeSection node={node} />
         </Collapsible>
       )}
-      {!isRoot && node.kind !== 'eye' && node.kind !== 'limb' && (
+      {mascot && (
+        <Collapsible title="Follow" storageKey="insp-follow" defaultOpen={!!node.parentId}>
+          <MascotFollowSection node={node} />
+        </Collapsible>
+      )}
+      {!mascot && node.kind !== 'eye' && node.kind !== 'limb' && (
         <Collapsible title="Attachment" storageKey="insp-attach">
           <AttachmentSection node={node} />
         </Collapsible>
@@ -178,6 +201,7 @@ export function NodeInspector() {
           <AppearanceSection node={node} />
         </Collapsible>
       )}
+      {text && <Collapsible title="Letters" storageKey="insp-letters" defaultOpen={false}><TextLettersSection node={node} /></Collapsible>}
       <Collapsible title="Animation" storageKey="insp-anim" defaultOpen={false}>
         <AnimationSection node={node} />
       </Collapsible>
@@ -214,7 +238,7 @@ function TransformSection({ node, isRoot }: { node: RigNode; isRoot: boolean }) 
       {node.kind !== 'limb' && <PropRow nodeId={node.id} property="transform.rotation" label={isRoot ? 'Roll' : 'Rotation'} />}
       <PropRow nodeId={node.id} property="opacity" />
       <PropRow nodeId={node.id} property="visible" label="Presence" />
-      {node.kind !== 'limb' && node.kind !== 'group' && (
+      {node.kind !== 'limb' && node.kind !== 'group' && node.kind !== 'text' && !node.curve && (
         <Collapsible title="Size" storageKey="insp-size" defaultOpen={false}>
           {node.kind !== 'body' && <PropRow nodeId={node.id} property="transform.length" />}
           <PropRow nodeId={node.id} property="size.x" label={isRoot ? 'Radius' : 'Width'} />
@@ -462,49 +486,24 @@ function TweenToTarget({ node }: { node: RigNode }) {
 const fmtVal = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
 
 /**
- * The canvas: its size, its rate, its length, its backdrop. Shown whenever nothing is
- * selected, because that is when the thing you are looking at IS the composition.
- * Changing the size reframes rather than distorts — the mascot keeps its pixel size and
- * stays centred.
+ * Nothing selected: say how to select something, and show the canvas at a glance — its
+ * settings live in their own dialog now, because they belong to no layer.
  */
-export function CompositionPanel() {
+function NothingSelected() {
   const project = useEditor((s) => s.project);
-  const setComposition = useEditor((s) => s.setComposition);
-  const setTimelineDuration = useEditor((s) => s.setTimelineDuration);
-  const commit = useEditor((s) => s.commit);
-  const [bg, setBg] = useStageBg();
   const c = compOf(project);
-  const preset = COMP_PRESETS.find((p) => p.width === c.width && p.height === c.height);
-  const clamp = (v: number) => Math.min(COMP_MAX, Math.max(COMP_MIN, Math.round(v)));
+  const k = 30 / Math.max(c.width, c.height);
   return (
-    <Panel title="Composition" actions={<span className="tag">{c.width}×{c.height}</span>}>
-      <div className="comp-presets">
-        {COMP_PRESETS.map((p) => (
-          <button key={p.label} className="btn sm" aria-pressed={preset === p} onClick={() => setComposition({ width: p.width, height: p.height })}>{p.label}</button>
-        ))}
-        <span className="tag" aria-pressed={!preset}>{preset ? 'preset' : 'custom'}</span>
-      </div>
-      <div className="row">
-        <span className="prop-label" style={{ width: 44 }}>Width</span>
-        <NumberField value={c.width} step={10} onChange={(v) => setComposition({ width: clamp(v) })} />
-        <span className="prop-label" style={{ width: 44, marginLeft: 6 }}>Height</span>
-        <NumberField value={c.height} step={10} onChange={(v) => setComposition({ height: clamp(v) })} />
-      </div>
-      <div className="row">
-        <span className="prop-label" style={{ width: 44 }}>FPS</span>
-        <NumberField value={project.fps} step={1} onChange={(v) => commit((p) => { p.fps = Math.min(120, Math.max(1, Math.round(v))); }, 'fps')} />
-        <span className="prop-label" style={{ width: 44, marginLeft: 6 }}>Length</span>
-        <NumberField value={Math.round(activeTimeline(project).timelineDurationMs) / 1000} step={0.1}
-          onChange={(s) => setTimelineDuration(Math.max(0.2, s) * 1000)} />
-        <span className="hint">s</span>
-      </div>
-      <div className="row">
-        <span className="prop-label" style={{ width: 44 }}>Backdrop</span>
-        <input type="color" aria-label="Backdrop colour" value={bg === 'transparent' ? '#17161b' : bg}
-          onChange={(e) => setBg(e.target.value)} style={{ width: 40, height: 23, border: '1px solid var(--line)', borderRadius: 5, background: 'none', padding: 1 }} />
-        <button className="btn sm" aria-pressed={bg === 'transparent'} onClick={() => setBg(bg === 'transparent' ? '#17161b' : 'transparent')}>Transparent</button>
-      </div>
-      <p className="hint">The mascot keeps its size and stays centred — a wider canvas gives it room, it never stretches it. Every export uses this size.</p>
+    <Panel title="Inspector">
+      <p className="hint" style={{ margin: 0 }}>Select a layer on the stage or in the Layers list to edit it.</p>
+      <button className="comp-summary" onClick={openComposition} title="Size, frame rate, length and backdrop">
+        <span className="comp-frame-box"><span className="comp-frame" style={{ width: Math.max(6, c.width * k), height: Math.max(6, c.height * k) }} /></span>
+        <span className="comp-summary-text">
+          <strong>{c.width} × {c.height}</strong>
+          <span>{project.fps} fps · {(activeTimeline(project).timelineDurationMs / 1000).toFixed(1)} s</span>
+        </span>
+        <span className="comp-summary-go">Composition…</span>
+      </button>
     </Panel>
   );
 }

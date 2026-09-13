@@ -11,7 +11,7 @@ import {
   setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
   type AppearanceRange, type AttachMode, type ReorderTo,
 } from './layers';
-import { laneOf, mascotOf, type MascotKind } from './mascot';
+import { laneOf, laneOfMascot, mascotOf, type MascotKind } from './mascot';
 import { presetTargets } from './defaults';
 import { compOf } from './comp';
 import { naturalOutline } from './path';
@@ -30,6 +30,10 @@ const HISTORY_LIMIT = 80;
 // opt into an instant cut instead, not the other way around.
 const DEFAULT_STATE_TRANSITION_MS = 300;
 const DEFAULT_STATE_EASING: EasingCurve = { type: 'preset', name: 'easeInOut' };
+
+/** What a click on the stage does: select and move, pan the view, place a shape, draw a
+ *  curve point by point, place text, or turn a mascot's head. */
+export type Tool = 'select' | 'hand' | 'shape' | 'pen' | 'text' | 'turn';
 
 /** The active timeline — every editor action reads/writes through this, never `p.timelines[i]` directly. */
 const at = (p: Project): Timeline => activeTimeline(p);
@@ -142,6 +146,13 @@ export interface Editor {
   setCurveType: (nodeId: string, type: CurveType) => void;
   /** Bumped whenever a font face arrives, so text is laid out again with its real metrics. */
   fontsVersion: number;
+  /** The clip lane the strip shows and presets land in: '' for the first mascot, else a body
+   *  id. Selecting a mascot (or any part of one) switches to its lane. */
+  activeLane: string;
+  setActiveLane: (lane: string) => void;
+  /** The stage tool. In the store so the Layers panel's "Curve" can arm the pen. */
+  tool: Tool;
+  setTool: (tool: Tool) => void;
 
   loadCatalog: () => Promise<void>;
   /** `mascotId` puts the clip in that mascot's lane, the preset animating that mascot */
@@ -426,8 +437,16 @@ export const useEditor = create<Editor>((set, get) => ({
     set({ project: future[0], past: [...past, project], future: future.slice(1), lastLabel: '' });
   },
 
-  // a new selection starts out of point-edit mode: the anchors belong to one outline
-  select: (selection) => set({ selection, editPoints: false }),
+  // a new selection starts out of point-edit mode: the anchors belong to one outline — and
+  // on the lane of the mascot it belongs to, so the next preset lands on that mascot
+  select: (selection) => set((s) => {
+    const m = mascotOf(s.project.rig, selection[0]);
+    return { selection, editPoints: false, ...(m ? { activeLane: laneOfMascot(s.project.rig, m.id) } : {}) };
+  }),
+  activeLane: '',
+  setActiveLane: (activeLane) => set({ activeLane }),
+  tool: 'select',
+  setTool: (tool) => set({ tool, editPoints: false }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
   setPlaying: (playing) => set({ playing }),
   setLoop: (loop) => set({ loop }),
@@ -1382,7 +1401,7 @@ export const useEditor = create<Editor>((set, get) => ({
     const next = { ...defaultProject(), ...migrate(p) };
     setActiveId(galleryId ?? uidGallery());
     autosave(next);
-    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null, inputs: {}, previousTimelineId: null, pendingStateChange: null, stateTransition: null });
+    set({ project: next, past: [], future: [], selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null, inputs: {}, previousTimelineId: null, pendingStateChange: null, stateTransition: null, activeLane: '' });
   },
   resetProject() { get().loadProject(defaultProject()); },
 }));

@@ -1032,6 +1032,154 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   /* --- stage: the letterbox outside the composition ---------------------------- */
   .stage-outside { fill: rgba(0, 0, 0, .5); }
   .stage-frame.on-light .stage-outside { fill: rgba(23, 22, 27, .16); }
+}
+
+/* ============================================================================
+   Several mascots, text, curves. The same monochrome vocabulary: hairlines, the
+   three-tone surfaces, ink for the one active thing. The font picker is the one
+   place type gets to be loud — every family set in itself.
+   ========================================================================= */
+@layer blooby {
+  /* --- stage tools ------------------------------------------------------------- */
+  .stage-tools .tool-group { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: rgba(var(--stage-ink), .06); }
+  .stage-tools .tool-group .btn { border-color: transparent; background: transparent; }
+  .stage-tools .tool-group .btn[aria-pressed='true'] { background: rgba(var(--stage-ink), .9); color: var(--ink); }
+  .stage-frame.on-light .stage-tools .tool-group .btn[aria-pressed='true'] { color: #fff; }
+  .stage-frame[data-tool='hand'] svg { cursor: grab; }
+  .stage-frame[data-tool='hand'] svg:active { cursor: grabbing; }
+  .stage-frame[data-tool='pen'] svg, .stage-frame[data-tool='shape'] svg { cursor: crosshair; }
+  .stage-frame[data-tool='text'] svg { cursor: text; }
+  .stage-hint {
+    position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); pointer-events: none;
+    padding: 5px 12px; border-radius: 999px; background: rgba(10, 10, 10, .72); color: #fafafa;
+    font: 500 11px var(--ui); white-space: nowrap;
+  }
+  .stage-meta-size { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; pointer-events: all; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .pen-draft path { fill: none; stroke: #4f8cff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .pen-draft circle { fill: #fff; stroke: #4f8cff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .pen-draft circle[data-first] { fill: #4f8cff; }
+  .pen-draft .pen-arm { stroke: #4f8cff; stroke-width: 1; opacity: .6; vector-effect: non-scaling-stroke; }
+  .curve-edit .curve-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: copy; }
+  .curve-edit .curve-pt { fill: #fff; stroke: #4f8cff; stroke-width: 1.6; cursor: move; vector-effect: non-scaling-stroke; }
+  .curve-edit .curve-pt[data-first] { stroke-width: 2.4; }
+  .curve-edit .curve-pt[data-picked] { fill: #4f8cff; }
+  .curve-edit .curve-arm { stroke: #4f8cff; stroke-width: 1; opacity: .7; pointer-events: none; vector-effect: non-scaling-stroke; }
+  .curve-edit .curve-handle { fill: #4f8cff; stroke: #fff; stroke-width: 1; cursor: pointer; vector-effect: non-scaling-stroke; }
+  .textpath-guide { fill: none; stroke: rgba(var(--stage-ink), .55); stroke-width: 1; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+  .textpath-anchor { fill: rgba(var(--stage-ink), .7); }
+  .textpath-flag line { stroke: #4f8cff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .textpath-flag path { fill: #4f8cff; }
+  .textpath-flag.end line, .textpath-flag.end path { opacity: .55; }
+  .textpath-lift { stroke: #4f8cff; stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+  .textpath-tick { fill: #fff; stroke: #4f8cff; stroke-width: 1.5; cursor: ns-resize; vector-effect: non-scaling-stroke; }
+  .text-edit { display: flex; flex-direction: column; gap: 4px; }
+  .text-edit textarea {
+    width: 100%; resize: none; padding: 8px 10px; border-radius: 10px; border: 1px solid #4f8cff;
+    background: #fff; color: #0a0a0a; font: 500 13px/1.35 var(--ui); outline: none; box-shadow: 0 6px 20px rgba(0, 0, 0, .22);
+  }
+  .text-edit span { font: 500 10px var(--ui); color: rgba(var(--stage-ink), .7); text-align: center; }
+
+  /* --- layers: the add tray and mascot rows -------------------------------------- */
+  .add-btn { gap: 4px; display: inline-flex; align-items: center; }
+  .add-tray { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-alt); }
+  .add-tray-label { font: 500 10.5px var(--ui); color: var(--muted); }
+  .add-mascots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .add-mascot {
+    display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 2px 5px; min-width: 0;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font: 500 10px var(--ui); color: var(--ink);
+  }
+  .add-mascot > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .add-mascot:hover, .add-layer:hover { border-color: var(--ink); }
+  .add-mascot svg { width: 30px; height: 30px; }
+  .add-layers { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
+  .add-layer {
+    display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: 500 11px var(--ui); color: var(--ink);
+  }
+  .add-layer kbd { margin-left: auto; font: 400 9.5px var(--mono); color: var(--muted); }
+  .layer[data-mascot] .layer-name { font-weight: 600; }
+
+  /* --- timeline: lanes and groups -------------------------------------------------- */
+  .lane-chips { display: flex; flex-direction: column; gap: 3px; align-self: center; max-height: 112px; overflow-y: auto; scrollbar-width: thin; flex: none; }
+  .lane-chip {
+    display: flex; align-items: center; gap: 6px; width: 118px; height: 24px; padding: 0 9px;
+    border: 1px solid var(--line); border-radius: var(--r-btn); background: var(--panel); font: 500 11px var(--ui); color: var(--muted);
+  }
+  .lane-chip[aria-selected='true'] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .lane-chip-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lane-chip-n { font: 500 10px var(--mono); opacity: .7; }
+  .tgroup, .tgroup-lane { height: 20px; box-sizing: border-box; border-bottom: 1px solid var(--line); background: var(--surface-alt); }
+  .tgroup { display: flex; align-items: center; gap: 6px; padding: 0 8px; font: 600 10.5px var(--ui); color: var(--ink); }
+  .tgroup-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tgroup-tag { font: 500 9.5px var(--ui); color: var(--muted); }
+
+  /* --- the font picker ------------------------------------------------------------- */
+  .font-pick { display: flex; flex-direction: column; gap: 5px; }
+  .font-current {
+    display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left;
+  }
+  .font-current:hover, .font-current[aria-expanded='true'] { border-color: var(--ink); }
+  .font-current-name { flex: 1; font-size: 20px; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+  .font-caret { color: var(--muted); font-size: 10px; }
+  .font-note { margin: 0; font: 400 11px/1.4 var(--ui); color: var(--muted); }
+  .font-note.warn { color: var(--hot); }
+  .font-tray { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-alt); }
+  .font-search { width: 100%; }
+  .font-cats { display: flex; flex-wrap: wrap; gap: 2px; }
+  .font-cats button { height: 22px; padding: 0 8px; border-radius: var(--r-btn); font: 500 10.5px var(--ui); color: var(--muted); background: transparent; border: 1px solid transparent; }
+  .font-cats button[aria-selected='true'] { background: var(--panel); border-color: var(--line); color: var(--ink); }
+  .font-list { display: flex; flex-direction: column; max-height: 280px; overflow-y: auto; scrollbar-width: thin; margin: 0 -4px; }
+  .font-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 8px; border-radius: 8px; text-align: left; background: none; border: 0; }
+  .font-row:hover { background: var(--panel); }
+  .font-row[aria-selected='true'] { background: var(--panel); box-shadow: inset 0 0 0 1px var(--ink); }
+  .font-row-name { flex: 1; font-size: 17px; line-height: 1.2; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .font-row-meta { font: 400 10px var(--ui); color: var(--muted); flex: none; }
+  .text-content { min-height: 56px; font: 500 13px/1.4 var(--ui); }
+  .text-align-row { justify-content: space-between; }
+  .text-align-row .seg button { padding: 0 7px; display: inline-flex; align-items: center; }
+  .curve-facts { gap: 12px; font: 400 11px var(--ui); color: var(--muted); }
+  .curve-facts strong { color: var(--ink); font-weight: 600; }
+
+  /* --- composition: a dialog of its own -------------------------------------------- */
+  .modal-scrim { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px; background: rgba(10, 10, 10, .28); }
+  .modal {
+    width: min(460px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+    padding: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card);
+    box-shadow: var(--shadow), 0 24px 48px -12px rgba(0, 0, 0, .18);
+  }
+  .modal-head { display: flex; align-items: baseline; gap: 10px; }
+  .modal-head h2 { margin: 0; font: 600 18px var(--ui); letter-spacing: -0.01em; color: var(--ink); }
+  .modal-sub { flex: 1; font: 400 12px var(--mono); color: var(--muted); }
+  .comp-sizes { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+  .comp-size { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+  .comp-size:hover { border-color: #a3a3a3; }
+  .comp-size[aria-checked='true'] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+  .comp-frame-box { width: 48px; height: 48px; display: grid; place-items: center; flex: none; }
+  .comp-frame { display: block; border: 1.5px solid var(--ink); border-radius: 3px; background: var(--field); }
+  .comp-size[aria-checked='true'] .comp-frame { background: var(--ink); }
+  .comp-size-label { font: 500 11px var(--ui); color: var(--ink); }
+  .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  .modal-field { display: grid; grid-template-columns: 1fr auto; gap: 4px 6px; align-items: center; }
+  .modal-field > span { grid-column: 1 / -1; font: 500 11px var(--ui); color: var(--muted); }
+  .modal-field .prop-num { width: 100%; }
+  .modal-field em { font: 400 11px var(--ui); color: var(--muted); font-style: normal; }
+  .modal-row { display: flex; align-items: center; gap: 12px; }
+  .modal-label { font: 500 11px var(--ui); color: var(--muted); width: 64px; }
+  .comp-swatches { display: flex; align-items: center; gap: 6px; }
+  .comp-swatches .sw { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); padding: 0; }
+  .comp-swatches .sw.checker { background: repeating-conic-gradient(#d4d4d4 0 25%, #fff 0 50%) 50% / 8px 8px; }
+  .comp-swatches .sw[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--ink); }
+  .comp-swatches input[type='color'] { width: 28px; height: 24px; border: 1px solid var(--line); border-radius: 6px; padding: 1px; background: none; }
+  .modal-hint { margin: 0; font: 400 12px/1.5 var(--ui); color: var(--muted); }
+  .modal-foot { display: flex; justify-content: flex-end; }
+  .comp-chip { font-family: var(--mono); }
+  .comp-summary { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-align: left; }
+  .comp-summary:hover { border-color: var(--ink); }
+  .comp-summary .comp-frame-box { width: 34px; height: 34px; }
+  .comp-summary-text { flex: 1; display: flex; flex-direction: column; gap: 2px; font: 400 11px var(--ui); color: var(--muted); }
+  .comp-summary-text strong { font: 600 13px var(--mono); color: var(--ink); }
+  .comp-summary-go { font: 500 11px var(--ui); color: var(--ink); }
   .shape-keys { display: flex; flex-wrap: wrap; gap: 4px; }
   .shape-key {
     font: 500 10.5px var(--ui); padding: 2px 7px; border-radius: 999px;

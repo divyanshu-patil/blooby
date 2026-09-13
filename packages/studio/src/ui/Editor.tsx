@@ -13,6 +13,9 @@ import { ExportBar } from './ExportBar';
 import { Split } from './Resizable';
 import { TimelineTabs } from './TimelineTabs';
 import { Gallery, openGallery } from './Gallery';
+import { CompositionDialog, openComposition } from './CompositionDialog';
+import { ensureFonts } from '../core/fonts';
+import { compOf } from '../core/comp';
 import { importDotLottie } from '../export/dotlottie';
 import { StateMachine } from './StateMachine';
 import { looksLikeSvg } from '../core/svg';
@@ -53,6 +56,8 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
   const resetProject = useEditor((s) => s.resetProject);
   const [tab, setTab] = useState<Tab>('node');
   const file = useRef<HTMLInputElement>(null);
+  // the faces this project's text uses, fetched as it needs them — never all of Google Fonts
+  useEffect(() => { void ensureFonts(project); }, [project]);
 
   // playback: wall-clock driven so a slow frame doesn't slow the animation down
   useEffect(() => {
@@ -165,6 +170,9 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
           <strong> {activeTimeline(project).blocks.length}</strong> blocks
         </span>
         <DurationField />
+        <button className="btn ghost sm comp-chip" onClick={openComposition} title="Composition — size, frame rate, length and backdrop">
+          {compOf(project).width} × {compOf(project).height}
+        </button>
         {cloudBar}
         <span className="spacer" />
         <input ref={file} type="file" accept=".json,.lottie" hidden
@@ -245,6 +253,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
         ]} />
       </div>
       <Gallery />
+      <CompositionDialog />
       {pasteNote && <div className="toast" role="status">{pasteNote}</div>}
     </div>
   );
