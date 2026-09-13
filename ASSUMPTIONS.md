@@ -123,6 +123,47 @@ blend of the taut and bent curves, exact to the sampling, not to the float.
 easing, Overshoot and Elastic are curves that pass 1 — and `morphPath` extrapolates past
 its ends rather than clamping, which is the only reason those two read as morphs.
 
+## Several mascots, text and curves
+
+**A mascot is a body and what rides it** (`core/mascot.ts`). There is one definition,
+`makeMascot`; every mascot is an instance with its own ids, tracks and lane of clips. The
+first mascot is `rig.rootId` and keeps the ids every older file and preset use (`body`,
+`eyeL`, `eyeR`); any other names its parts `<body>.eyeL` and tags them with a `role`, which
+is how a preset written for `eyeL` finds the second mascot's left eye (`retargetId`).
+A mascot following another is a body parented to a body; a loop is refused.
+
+**Lanes are `Block.mascotId`.** Blocks tile within their lane; the first mascot's lane has
+no id. A layer plays in its mascot's lane, but a block may also drive another mascot's parts
+while it runs — which is how "Two Friends", placed on one lane, animates the friend it brought.
+
+**A body draws at twice its `size`.** The default mascot is ~296px across on a 720 canvas;
+`flatOffset`s are composition px and arc radii are unscaled. Presets that place things
+round a mascot are written against that (they were first written against 148 and put words
+inside the head).
+
+**Text is outlines, not `<text>`, wherever the font has loaded.** Fonts come from the
+Fontsource CDN (Google Fonts, **latin subset only**) and are parsed with opentype.js for
+metrics and glyph outlines, so the stage, the raster export and Lottie draw the same shapes.
+Until a face arrives the stage uses deterministic fallback metrics and a `<text>` element;
+a Lottie baked without the face falls back to live text layers and says so in its warnings.
+A **fixed text height is not implemented** — a box wraps to a width and grows downward.
+The letter motions (pop, fade, drop, rise, scatter, wave) are one keyed `progress`, and
+which motion plays is a discrete `text.chars.kind` track, so a preset can switch it.
+
+**Curves are ordinary shape layers** with an open or closed `shapePath` and a `curve.type`
+— smooth, polyline or Bézier; a quadratic is covered by Bézier. Two keys of the same
+structure interpolate anchor by anchor (`lerpPath`), so path keyframes move a curve and the
+text on it. A `guide` curve shows in the editor and is left out of every export.
+
+**Text presets on a selected text.** A text preset whose own words are straight plays on
+the selected text layer instead (`textPresetOnto`): tracks move to it, the typewriter's
+count scales to its length, and the closing keys that let the preset's own caption loop are
+dropped, so the user's words stay once they have arrived. Presets with words on a curve of
+their own, or with another mascot, always bring their layers.
+
+**The view is not the camera.** Pan and zoom on the stage move the editor's view only;
+Recentre resets that view. The preview and every export frame the composition.
+
 ## Timeline
 
 **"Even" duration mode** gives every block the mean of the current durations. The spec

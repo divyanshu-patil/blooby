@@ -267,6 +267,13 @@ is why every capability added to the editor arrives with a tool in the same comm
 | the canvas | `set_composition` |
 | which state is current | `set_state` |
 | CURRENT → TARGET | `set_transition` — one direct edge, never a chain |
+| several mascots | `add_mascot`, `remove_mascot`, `duplicate_mascot`, `rename_mascot`, `set_mascot_transform`, `set_mascot_shape`, `set_mascot_parent` |
+| a clip on one mascot | `add_preset_to_timeline` with `mascot` — the clip goes in that mascot's lane |
+| text layers | `add_text`, `set_text`, `set_text_font`, `set_text_style`, `set_text_size`, `set_text_weight`, `set_text_color`, `set_text_stroke` |
+| text on arcs and paths | `set_text_curve`, `set_text_path`, `set_text_path_offset` |
+| letters arriving | `animate_text` (typewriter, pop, fade, drop, rise, scatter, wave) |
+| curves | `add_curve`, `add_curve_point`, `move_curve_point` (with `atMs`, a path keyframe), `remove_curve_point`, `close_curve`, `reverse_curve` |
+| parent and order for any layer | `set_layer_parent`, `set_layer_order` (a mascot moves as one) |
 
 Every freeform tool calls the same pure function the editor does (`core/layers.ts`,
 `directTransition` in `core/stateMachine.ts`, `writeKeyframe`), inside `applyCalls`' one
@@ -284,6 +291,14 @@ points, plus the canvas size, the playhead and the current state — what a foll
 The tool docs list the shape library's ids inline, generated from `SHAPE_LIBRARY`, so a
 new shape is offerable the moment it exists. The selfcheck asserts that: every entry's id
 must appear in `TOOL_DOCS`.
+
+With several mascots the prompt lists them first, numbered, with each one's body id and
+how many clips its lane holds; a `mascot` argument takes the number, the name, the label
+("Mascot 2") or the body id, and `normaliseCall` resolves all four to the body id. Each
+text layer's line gives its words, font, weight and size and what it runs along; each
+curve's gives its type and its points, at the coordinates `move_curve_point` takes back.
+`copilot/mascotText.test.ts` drives every one of these tools through the same
+normalise → validate-batch → apply path the panel uses.
 
 ## Rules the copilot code itself follows
 
