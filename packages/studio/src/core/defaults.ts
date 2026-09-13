@@ -6,6 +6,7 @@ import { SCHEMA_VERSION } from './migrate';
 import { uid } from './id';
 import { COMP } from './comp';
 import { showcasePresets } from './showcase';
+import { textPresets } from './textPresets';
 import { BONE, INK, makeBody, makeEye, retargetId, roleOf } from './mascot';
 
 export { uid } from './id';
@@ -94,6 +95,8 @@ export function builtinPresets(): Preset[] {
     // first, so the rail's first rows show what the editor can do now: hands, legs,
     // stickers, morphs — see core/showcase.ts
     ...showcasePresets(),
+    // then words: curved text, and letters arriving — see core/textPresets.ts
+    ...textPresets(),
     {
       // no tracks at all — dropped into a sequence it just holds whatever pose already
       // precedes it (the rig's own rest pose if it's first). The "base state" clip §8
@@ -528,7 +531,8 @@ export function addPresetLayers(rig: Rig, preset: Preset, mascotId?: string): vo
       const parent = to(copy.parentId);
       copy.parentId = rig.nodes[parent] || own.has(copy.parentId) ? parent : body;
     }
-    if (copy.text?.path?.nodeId && own.has(copy.text.path.nodeId)) copy.text.path = { ...copy.text.path, nodeId: to(copy.text.path.nodeId) };
+    // words round "the body" go round the body of the mascot it was placed on
+    if (copy.text?.path?.nodeId) copy.text.path = { ...copy.text.path, nodeId: to(copy.text.path.nodeId) };
     // limbs tuck behind the body; everything else a preset adds sits on top of the rig
     if (copy.kind !== 'limb') copy.zIndex = top + 1 + copy.zIndex;
     rig.nodes[copy.id] = copy;

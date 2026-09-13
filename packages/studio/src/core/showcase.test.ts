@@ -6,12 +6,13 @@ import { compOf } from './comp';
 import { sceneAt } from './scene';
 import { shapeIdOf } from './emitters';
 import { showcasePresets } from './showcase';
-import { makeLimb } from './layers';
+import { textPresets } from './textPresets';
+import { makeLimb, makeTextLayer } from './layers';
 import { bakeLottie } from '../export/lottie';
 import { activeTimeline } from './types';
 import type { Preset, Project } from './types';
 
-const SHOWCASE = showcasePresets();
+const SHOWCASE = [...showcasePresets(), ...textPresets()];
 
 // --- the seven are real presets, first in the library ------------------------------------
 {
@@ -126,4 +127,82 @@ for (const preset of SHOWCASE) {
   it('and does not narrow it to the clip', check(!(activeTimeline(p).appearances ?? []).some((a) => a.nodeId === 'armR')));
   it('so it is still there before the clip', check(sceneAt(p, 100, compOf(p)).some((s) => s.id === 'armR')));
   useEditor.getState().loadProject(defaultProject());
+}
+
+// --- several mascots in one clip -------------------------------------------------------------
+{
+  const byId = (id: string) => SHOWCASE.find((p) => p.id === id)!;
+  {
+    const { project, start } = placed(byId('p_friends'));
+    const mid = sceneAt(project, start + 1600, compOf(project));
+    const me = mid.find((s) => s.id === 'body'), pal = mid.find((s) => s.id === 'pal');
+    it('Two Friends brings a second mascot, with eyes of its own', check(!!pal && mid.filter((s) => s.id.startsWith('pal.eye')).length === 2));
+    it('standing clear of the first', check(!!me && !!pal && Math.abs(me.cx - pal.cx) > (me.w + pal.w) / 2, `${me?.cx}/${me?.w} ${pal?.cx}/${pal?.w}`));
+  }
+  {
+    // placed on a second mascot, the words go round THAT mascot
+    const ed = useEditor.getState();
+    ed.loadProject(defaultProject());
+    const m2 = useEditor.getState().addMascot('default');
+    useEditor.getState().addBlock('p_around', undefined, m2);
+    const p = useEditor.getState().project;
+    it('Around You on a second mascot runs its words round that mascot', check(p.rig.nodes[`${m2}:aroundText`]?.text?.path?.nodeId === m2));
+  }
+  {
+    const { project, start } = placed(byId('p_follow'));
+    it('Follow Me: the friend is the mascot\'s child', check(project.rig.nodes.buddy?.parentId === 'body'));
+    const x = (t: number) => sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'buddy')?.cx ?? NaN;
+    it('so it goes wherever the mascot goes', check(x(1500) - x(300) > 80, `${x(300)} → ${x(1500)}`));
+  }
+  {
+    const { project, start } = placed(byId('p_crowd'));
+    const bodies = sceneAt(project, start + 1200, compOf(project)).filter((s) => project.rig.nodes[s.id]?.kind === 'body');
+    it('Crowd: five mascots on screen at once', check(bodies.length === 5, String(bodies.length)));
+  }
+}
+
+// --- words ---------------------------------------------------------------------------------------
+{
+  const byId = (id: string) => SHOWCASE.find((p) => p.id === id)!;
+  {
+    const { project, start } = placed(byId('p_txt_ring'));
+    const ring = (t: number) => JSON.stringify(sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'ringText')?.glyphs?.[0]);
+    it('NEW SHAPE runs round a circle, and turns', check(project.rig.nodes.ringText.text!.path!.mode === 'arc' && ring(1000) !== ring(2000)));
+  }
+  {
+    const preset = byId('p_txt_path');
+    const { project, start } = placed(preset);
+    // glyphs sit relative to the item's centre, so where the first letter is on screen is both
+    const at = (t: number) => {
+      const s = sceneAt(project, start + t, compOf(project)).find((i) => i.id === 'followCaption');
+      return s?.glyphs?.[0] ? s.cx + s.glyphs[0].x : undefined;
+    };
+    it('Path Follow: the words travel along their curve', check((at(2000) ?? 0) - (at(500) ?? 0) > 100, `${at(500)} → ${at(2000)}`));
+    const baked = JSON.stringify(bakeLottie(presetPreviewProject(project, preset), { background: null, name: 'x' }));
+    it('and the curve is a guide, left out of the export', check(!baked.includes('Follow path')));
+  }
+  {
+    const { project, start } = placed(byId('p_txt_lookhere'));
+    const curve = (t: number) => sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'lookPath');
+    const [a, b] = [curve(300), curve(950)];
+    it('LOOK HERE: the curve under the words is itself animated', check(!!a && !!b && JSON.stringify(a) !== JSON.stringify(b), `${!!a} ${!!b}`));
+  }
+  {
+    // on a text of the user's: that text rather than a copy, and all of it typed
+    const base = defaultProject();
+    base.rig.nodes.mine = makeTextLayer('Good morning', { id: 'mine' });
+    const ed = useEditor.getState();
+    ed.loadProject(base);
+    useEditor.getState().select(['mine']);
+    useEditor.getState().addBlock('p_txt_type');
+    const p = useEditor.getState().project;
+    const reveal = activeTimeline(p).tracks.find((t) => t.nodeId === 'mine' && t.property === 'text.reveal.end');
+    it('a text preset on a selected text animates that text', check(!p.rig.nodes.caption && !!reveal));
+    it('and the typewriter types all of it', check(reveal?.keyframes.at(-1)?.value === 'Good morning'.length, String(reveal?.keyframes.at(-1)?.value)));
+    it('and never hides it outside the clip', check(!(activeTimeline(p).appearances ?? []).some((a) => a.nodeId === 'mine')));
+    useEditor.getState().addBlock('p_txt_pop');
+    const kinds = activeTimeline(useEditor.getState().project).tracks.filter((t) => t.nodeId === 'mine' && t.property === 'text.chars.kind');
+    it('Pop In on it keys its letter motion', check(kinds.length === 1 && kinds[0].keyframes[0].value === 'pop'));
+    useEditor.getState().loadProject(defaultProject());
+  }
 }

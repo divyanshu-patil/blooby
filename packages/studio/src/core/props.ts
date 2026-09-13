@@ -86,6 +86,7 @@ function setLimbProp(node: RigNode, path: string, n: number): void {
 
 /** Where a text layer's arc sits before anyone bends it. */
 const ARC = { radius: 180, start: -70, end: 70 };
+const CHAR_KINDS = ['none', 'pop', 'fade', 'drop', 'rise', 'scatter', 'wave'] as const;
 
 function getTextProp(node: RigNode, path: string): KeyValue | undefined {
   const t = node.text;
@@ -107,6 +108,7 @@ function getTextProp(node: RigNode, path: string): KeyValue | undefined {
     case 'text.reveal.end': return t.reveal?.end ?? [...t.content.replace(/\n/g, '')].length;
     case 'text.chars.progress': return t.chars?.progress ?? 1;
     case 'text.chars.stagger': return t.chars?.stagger ?? 0.5;
+    case 'text.chars.kind': return t.chars?.kind ?? 'none';
     default: return undefined;
   }
 }
@@ -116,6 +118,11 @@ function setTextProp(node: RigNode, path: string, v: KeyValue): void {
   if (!t) return;
   if (path === 'text.content') { if (typeof v === 'string') t.content = v; return; }
   if (path === 'text.font.family') { if (typeof v === 'string' && v.trim()) t.font = { ...t.font, family: v.trim() }; return; }
+  if (path === 'text.chars.kind') {
+    const kind = CHAR_KINDS.find((k) => k === v);
+    if (kind) t.chars = { progress: t.chars?.progress ?? 1, stagger: t.chars?.stagger ?? 0.5, kind };
+    return;
+  }
   const n = v as number;
   if (typeof n !== 'number' || !Number.isFinite(n)) return;
   const path2 = { mode: 'straight' as const, ...t.path };
@@ -394,6 +401,8 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'Text layers only. Drives the per-letter animation (pop, fade, drop, rise, scatter): 0 is before, 1 is done. For a wave it is the phase, one cycle per unit.' },
   'text.chars.stagger': { on: 'node', label: 'Stagger', range: [0, 1, 0.01, ''],
     help: 'Text layers only. 0 moves every letter together, 1 moves them one after another.' },
+  'text.chars.kind': { on: 'node', label: 'Letter motion', discrete: true,
+    help: 'Text layers only. Which per-letter animation text.chars.progress plays: none, pop, fade, drop, rise, scatter or wave. Keyframes switch it. Set it with animate_text.' },
 
   'camera.fov': { on: 'camera', label: 'Perspective', range: [0, 89, 1, '\u00b0'],
     help: 'Perspective, as a field-of-view angle. 0 is flat/orthographic; higher makes the sphere bulge and features near the rim fall away faster.' },

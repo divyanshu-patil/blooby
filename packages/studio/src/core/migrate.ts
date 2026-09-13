@@ -1,5 +1,6 @@
 import { makeTimeline } from './defaults';
 import { showcasePresets } from './showcase';
+import { textPresets } from './textPresets';
 import { slug } from './stateMachine';
 import type { Block, Modifier, Project, Track } from './types';
 
@@ -24,7 +25,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 interface Migration {
   /** the version this step produces */
@@ -174,6 +175,23 @@ const MIGRATIONS: Migration[] = [
       root.visible = true;
       root.fill = { ...root.fill, enabled: false };
       if (root.stroke) root.stroke = { ...root.stroke, enabled: false };
+    },
+  },
+  {
+    to: 6,
+    label: 'mascot and text presets',
+    /**
+     * Presets with several mascots, curved text and letters arriving came with text layers
+     * and several mascots. Added the way step 4 added the showcase — once, skipping any the
+     * file already has, so one a user deletes stays deleted — and after the showcase
+     * presets the library opens with, as in a new project.
+     */
+    run(p) {
+      if (!Array.isArray(p.presets)) return;
+      const have = new Set(p.presets.map((x) => x?.id));
+      const showcase = new Set(showcasePresets().map((x) => x.id));
+      const lead = p.presets.findIndex((x) => !showcase.has(x?.id));
+      p.presets.splice(lead < 0 ? p.presets.length : lead, 0, ...[...showcasePresets(), ...textPresets()].filter((x) => !have.has(x.id)));
     },
   },
 ];

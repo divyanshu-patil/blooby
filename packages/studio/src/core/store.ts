@@ -13,6 +13,7 @@ import {
 } from './layers';
 import { laneOf, laneOfMascot, mascotOf, type MascotKind } from './mascot';
 import { presetTargets } from './defaults';
+import { textPresetOnto } from './textPresets';
 import { compOf } from './comp';
 import { naturalOutline } from './path';
 import type { MorphMode } from './easing';
@@ -782,6 +783,9 @@ export const useEditor = create<Editor>((set, get) => ({
     // the first mascot's lane has no id; any other is named by its body
     const lane = mascotId && mascotId !== project.rig.rootId && project.rig.nodes[mascotId]?.kind === 'body' ? mascotId : undefined;
     const at0 = index ?? at(project).blocks.length;
+    // a text preset whose words are straight plays on the selected text, not a copy of its own
+    const picked = project.rig.nodes[get().selection[0] ?? ''];
+    const played = (picked && textPresetOnto(preset, picked)) || preset;
     get().commit((p) => {
       const tl = at(p);
       // a catalogue preset becomes part of the file the moment it is used, so the saved
@@ -790,16 +794,16 @@ export const useEditor = create<Editor>((set, get) => ({
       const block: Block = { id: blockId, presetId, name: preset.name, durationMs: preset.durationMs, ...(lane ? { mascotId: lane } : {}) };
       // where everything the preset names lands on this mascot — decided before its layers
       // arrive, so a part the mascot already has is reused rather than doubled
-      const to = presetTargets(p.rig, preset, lane);
+      const to = presetTargets(p.rig, played, lane);
       const start = insertBlock(tl, block, at0);
-      for (const t of preset.tracks) {
+      for (const t of played.tracks) {
         tl.tracks.push({
           id: uid('t'), nodeId: to(t.nodeId), property: t.property, blockId,
           keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
         });
       }
       // with the rig, so a preset that brings its own layers (an arm, a sticker) adds them
-      attachPresetEffects(tl, preset, blockId, p.rig, lane);
+      attachPresetEffects(tl, played, blockId, p.rig, lane);
       tl.timelineDurationMs = derivedDuration(tl);
     });
   },
