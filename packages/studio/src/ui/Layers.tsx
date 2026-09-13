@@ -4,6 +4,7 @@ import { cssColor } from '../core/color';
 import { shapeById, SHAPE_LIBRARY, libraryOutline } from '../core/emitters';
 import { attachmentOf, layerOrder, makeLimb, makeShapeLayer, makeSvgLayer } from '../core/layers';
 import { naturalOutline, PRIMITIVE_SHAPES } from '../core/path';
+import { looksLikeSvg } from '../core/svg';
 import { Icon, Panel } from './bits';
 import type { RigNode, ShapeKind } from '../core/types';
 
@@ -32,6 +33,8 @@ export function Layers() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; front: boolean } | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [svgOpen, setSvgOpen] = useState(false);
+  const [svgText, setSvgText] = useState('');
 
   const rig = project.rig;
   const order = layerOrder(rig);
@@ -71,11 +74,22 @@ export function Layers() {
     addLayer((make.length ? make : [1 as const]).map((s) => makeLimb(type, s, rig.rootId)));
   };
 
-  const importFile = async (f: File) => {
-    const made = makeSvgLayer(await f.text(), f.name.replace(/\.svg$/i, ''));
-    if (!made) { setNote(`${f.name} is not an SVG this can read.`); return; }
+  /** Markup → a layer at the playhead. False (with a note) when it is not SVG we can read. */
+  const importText = (text: string, name?: string, label = 'That'): boolean => {
+    const made = makeSvgLayer(text, name);
+    if (!made) { setNote(`${label} is not an SVG this can read.`); return false; }
     addLayer(made.node, { appearAt: playhead });
     setNote(made.warnings.length ? `Imported ${made.node.name} — not carried over: ${made.warnings.join('; ')}` : null);
+    return true;
+  };
+  const importFile = async (f: File) => { importText(await f.text(), f.name.replace(/\.svg$/i, ''), f.name); };
+  const closeSvg = () => { setSvgOpen(false); setSvgText(''); };
+  const pasteClipboard = async () => {
+    try {
+      if (importText(await navigator.clipboard.readText(), undefined, 'The clipboard')) closeSvg();
+    } catch {
+      setNote('The browser blocked clipboard access — paste into the box with ⌘V instead.');
+    }
   };
 
   /** Top half of a row means "in front of it". */
@@ -90,25 +104,41 @@ export function Layers() {
   return (
     <Panel title="Layers" actions={
       <>
-        <div className="shape-pick" style={{ flex: 'none' }}>
-          <button className="btn ghost sm icon" title="Add a shape" aria-expanded={picking} onClick={() => setPicking((v) => !v)}><Icon name="shape" /></button>
-          {picking && (
-            <div className="shape-grid" style={{ left: 'auto', right: 0 }} role="listbox" aria-label="Add a shape">
-              {SHAPE_LIBRARY.map((s) => (
-                <button key={s.id} className="shapepick-cell" title={s.name} onClick={() => addShape(s.id)}>
-                  <svg viewBox={s.viewBox} aria-hidden dangerouslySetInnerHTML={{ __html: s.markup }} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <button className="btn ghost sm icon" title="Import an SVG (or just paste one anywhere)" onClick={() => file.current?.click()}><Icon name="svg" /></button>
+        <button className="btn ghost sm icon" title="Add a shape" aria-expanded={picking}
+          onClick={() => { closeSvg(); setPicking((v) => !v); }}><Icon name="shape" /></button>
+        <button className="btn ghost sm icon" title="Import an SVG — paste it or choose a file" aria-expanded={svgOpen}
+          onClick={() => { setPicking(false); if (svgOpen) closeSvg(); else setSvgOpen(true); }}><Icon name="svg" /></button>
         <button className="btn ghost sm icon" title="Add hands — two points each, a rubber-hose arm" onClick={() => addLimbs('arm')}><Icon name="hand" /></button>
         <button className="btn ghost sm icon" title="Add legs — hip, knee and ankle" onClick={() => addLimbs('leg')}><Icon name="leg" /></button>
       </>
     }>
       <input ref={file} type="file" accept=".svg,image/svg+xml" multiple hidden
-        onChange={(e) => { for (const f of [...(e.target.files ?? [])]) void importFile(f); e.target.value = ''; }} />
+        onChange={(e) => { for (const f of [...(e.target.files ?? [])]) void importFile(f); e.target.value = ''; closeSvg(); }} />
+      {/* trays in the panel's own flow: a popover here is clipped by .panel's overflow */}
+      {picking && (
+        <div className="shape-grid tray" role="listbox" aria-label="Add a shape">
+          {SHAPE_LIBRARY.map((s) => (
+            <button key={s.id} className="shapepick-cell" title={s.name} onClick={() => addShape(s.id)}>
+              <svg viewBox={s.viewBox} aria-hidden dangerouslySetInnerHTML={{ __html: s.markup }} />
+            </button>
+          ))}
+        </div>
+      )}
+      {svgOpen && (
+        <div className="svg-import" role="group" aria-label="Import an SVG" onKeyDown={(e) => { if (e.key === 'Escape') closeSvg(); }}>
+          <textarea className="ask svg-paste" autoFocus spellCheck={false} aria-label="SVG markup"
+            placeholder="Paste SVG markup here (⌘V)" value={svgText} onChange={(e) => setSvgText(e.target.value)}
+            onPaste={(e) => {
+              const t = e.clipboardData.getData('text');
+              if (looksLikeSvg(t) && importText(t)) { e.preventDefault(); closeSvg(); }
+            }} />
+          <div className="row">
+            <button className="btn sm" disabled={!svgText.trim()} onClick={() => { if (importText(svgText)) closeSvg(); }}>Add layer</button>
+            <button className="btn ghost sm" onClick={() => void pasteClipboard()}>From clipboard</button>
+            <button className="btn ghost sm" onClick={() => file.current?.click()}>File…</button>
+          </div>
+        </div>
+      )}
       {note && <p className="hint" role="status">{note}</p>}
 
       <div className="layer-list" role="tree" aria-label="Layers" aria-multiselectable>

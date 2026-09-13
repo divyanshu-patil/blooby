@@ -126,21 +126,22 @@ export function ShapeEditor({ node }: { node: RigNode }) {
             <span className="shape-name">{current?.name ?? 'Custom'}</span>
             <span aria-hidden>▾</span>
           </button>
-          {picking && (
-            <div className="shape-grid" role="listbox" aria-label="Shapes">
-              {SHAPE_LIBRARY.map((s) => (
-                <button key={s.id} role="option" aria-selected={s.id === currentId} className="shapepick-cell" title={s.name}
-                  onClick={() => pick(s.id)}>
-                  <svg viewBox={s.viewBox} aria-hidden dangerouslySetInnerHTML={{ __html: s.markup }} />
-                </button>
-              ))}
-            </div>
-          )}
         </div>
         <button className="btn ghost sm" disabled={onKey}
           title={onKey ? 'There is a shape keyframe here — pick a shape to change it' : 'Key the current shape at the playhead; pick another later and it morphs'}
           onClick={() => addKeyframeNow(node.id, 'shape.path')}>◇ {onKey ? 'Keyed' : 'Add keyframe'}</button>
       </div>
+      {/* in the flow, below the row: the rail clips a popover that does not fit */}
+      {picking && (
+        <div className="shape-grid tray" role="listbox" aria-label="Shapes">
+          {SHAPE_LIBRARY.map((s) => (
+            <button key={s.id} role="option" aria-selected={s.id === currentId} className="shapepick-cell" title={s.name}
+              onClick={() => pick(s.id)}>
+              <svg viewBox={s.viewBox} aria-hidden dangerouslySetInnerHTML={{ __html: s.markup }} />
+            </button>
+          ))}
+        </div>
+      )}
 
       {dials.filter((k) => k !== 'rotation' || params?.kind).map((k) => {
         const spec = DIAL[k];

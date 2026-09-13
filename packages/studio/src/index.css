@@ -1019,6 +1019,19 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   }
   .shape-grid .shapepick-cell[aria-selected='true'] { border-color: var(--ink); background: var(--field); }
   .shape-grid .shapepick-cell svg { width: 18px; height: 18px; fill: currentColor; }
+  /* in the flow rather than floating: .panel clips its overflow, so a popover inside one
+     loses whatever part of it does not fit */
+  .shape-grid.tray { position: static; width: auto; box-shadow: none; }
+  .svg-import {
+    display: flex; flex-direction: column; gap: 6px; padding: 8px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .svg-import .svg-paste { min-height: 88px; font: 400 11px var(--mono, ui-monospace, monospace); }
+  .svg-import .row { gap: 4px; flex-wrap: wrap; }
+
+  /* --- stage: the letterbox outside the composition ---------------------------- */
+  .stage-outside { fill: rgba(0, 0, 0, .5); }
+  .stage-frame.on-light .stage-outside { fill: rgba(23, 22, 27, .16); }
   .shape-keys { display: flex; flex-wrap: wrap; gap: 4px; }
   .shape-key {
     font: 500 10.5px var(--ui); padding: 2px 7px; border-radius: 999px;

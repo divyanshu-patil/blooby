@@ -357,6 +357,9 @@ export function Stage() {
             fill="none" style={{ stroke: 'rgba(var(--stage-ink), .14)' }} strokeDasharray="4 6" pointerEvents="none" />
         )}
         <Shapes scene={scene} />
+        {/* past the composition's edge is not in any export — dim it, art that spills there included */}
+        <path className="stage-outside" fillRule="evenodd" pointerEvents="none"
+          d={`M${-view.width * 20} ${-view.height * 20}H${view.width * 21}V${view.height * 21}H${-view.width * 20}Z M0 0H${view.width}V${view.height}H0Z`} />
 
         {/* an attached layer shows what it is attached to: a faint tether to its anchor */}
         {sel && attachedTo && showGuides && (
