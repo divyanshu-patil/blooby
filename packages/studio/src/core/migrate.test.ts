@@ -50,7 +50,7 @@ const v1Timelines = () => JSON.parse(JSON.stringify({
 {
   const { project, from, applied } = migrateProject(v0Flat());
   it('an unversioned document is recognised as v0', check(from === 0, String(from)));
-  it('and every step runs on it', check(applied.length === 4, applied.join(', ')));
+  it('and every step runs on it', check(applied.length === 5, applied.join(', ')));
   it('it comes out stamped at the current version', check(project.schemaVersion === SCHEMA_VERSION));
 
   it('the flat animation became exactly one timeline', check(project.timelines.length === 1));
@@ -115,7 +115,7 @@ const v2Sticker = () => JSON.parse(JSON.stringify({
 })) as unknown as Project;
 {
   const { project, from, applied } = migrateProject(v2Sticker());
-  it('a v2 document runs only the steps after it', check(from === 2 && applied.join() === 'freeform layers,showcase presets', applied.join()));
+  it('a v2 document runs only the steps after it', check(from === 2 && applied.join() === 'freeform layers,showcase presets,several mascots', applied.join()));
   it('its composition is pinned at the size it always rendered at', check(project.composition?.width === 720 && project.composition?.height === 720));
   it('a never-drawn offset on a mapped layer is dropped', check(project.rig.nodes.dot.surface.flatOffset === undefined));
   it('and so is its track', check(!project.timelines[0].tracks.some((t) => t.nodeId === 'dot')));
@@ -136,7 +136,7 @@ const v3Library = () => JSON.parse(JSON.stringify({
 {
   const { project, applied } = migrateProject(v3Library());
   const ids = project.presets.map((x) => x.id);
-  it('a v3 document runs only the showcase step', check(applied.join() === 'showcase presets', applied.join()));
+  it('a v3 document runs only the steps after it', check(applied.join() === 'showcase presets,several mascots', applied.join()));
   it('the showcase presets it lacked are added, first in the library', check(
     ids.slice(0, 6).join() === 'p_shapeshift,p_sticker,p_peek,p_newshape,p_dance,p_reveal', ids.join()));
   it('one it already had is kept as it was, not doubled', check(
@@ -145,6 +145,37 @@ const v3Library = () => JSON.parse(JSON.stringify({
   const deleted = { ...project, presets: project.presets.filter((x) => x.id !== 'p_peek') };
   const again = migrateProject(JSON.parse(JSON.stringify(deleted)) as Project).project;
   it('a showcase preset deleted after the upgrade stays deleted', check(!again.presets.some((x) => x.id === 'p_peek')));
+}
+
+// --- v4 → v5: several mascots -----------------------------------------------------
+/**
+ * A v4 document whose body is hidden. The body's eye used to hide only its own drawing, so
+ * the eyes floated; a mascot's eye now hides the whole mascot. The file must keep looking
+ * as it did — eyes and all — and a visible body must be left exactly alone.
+ */
+const v4Hidden = (visible: boolean) => JSON.parse(JSON.stringify({
+  name: 'Ghost', schemaVersion: 4, fps: 30, expressions: [], presets: [], composition: { width: 720, height: 720 },
+  rig: {
+    id: 'r', rootId: 'body', camera: { fov: 28, distance: 6, offset: { x: 0, y: 0 } },
+    nodes: {
+      body: { id: 'body', name: 'Body', kind: 'body', parentId: null, surface: { yaw: 0, pitch: 0, mapped: false },
+        transform: { scale: { x: 1, y: 1 }, rotation: 0 }, size: { x: 148, y: 148 }, color: { r: 242, g: 239, b: 233, a: 1 }, visible, zIndex: 0,
+        stroke: { enabled: true, width: 3 } },
+      eyeL: { id: 'eyeL', name: 'Left eye', kind: 'eye', parentId: 'body', surface: { yaw: -21, pitch: -4, mapped: true },
+        transform: { scale: { x: 1, y: 1 }, rotation: 0, length: 1.55 }, size: { x: 38, y: 38 }, color: { r: 20, g: 19, b: 24, a: 1 }, visible: true, zIndex: 1,
+        eye: { linkedToId: null, openness: 1, distanceFromCenter: -21 } },
+    },
+  },
+  timelines: [{ id: 'tl', name: 'Idle', tracks: [], modifiers: [], blocks: [], durationMode: 'custom', timelineDurationMs: 1000, loop: false }],
+  activeTimelineId: 'tl',
+})) as unknown as Project;
+{
+  const hidden = migrateProject(v4Hidden(false));
+  it('a v4 document runs only the mascot step', check(hidden.applied.join() === 'several mascots', hidden.applied.join()));
+  const b = hidden.project.rig.nodes.body;
+  it('a hidden body becomes an unpainted one, so its eyes still show', check(b.visible === true && b.fill?.enabled === false && b.stroke?.enabled === false));
+  const shown = migrateProject(v4Hidden(true)).project.rig.nodes.body;
+  it('a visible body is left exactly as it was', check(shown.fill === undefined && shown.stroke?.enabled === true));
 }
 
 // --- idempotence and the future ------------------------------------------------

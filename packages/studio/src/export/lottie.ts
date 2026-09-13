@@ -2,6 +2,7 @@ import { compOf } from '../core/comp';
 import { sceneAt, type SceneItem } from '../core/scene';
 import { flattenPath, pathFromPoints, pathToBezier, primitivePath, splitSubpaths } from '../core/path';
 import { outlinesOf } from '../core/emitters';
+import { mascotOf, mascotsOf } from '../core/mascot';
 import { activeTimeline } from '../core/types';
 import { parseHex } from '../core/color';
 import type { ColorStop, Project, Vec2 } from '../core/types';
@@ -141,6 +142,14 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
   });
 
+  // With several mascots every one has a "Left eye": the layer says whose it is, so each
+  // mascot reads as its own group of layers in any Lottie tool.
+  const many = mascotsOf(project.rig).length > 1;
+  const nameOf = (item: SceneItem) => {
+    const m = many ? mascotOf(project.rig, item.id) : undefined;
+    return m && m.id !== item.id ? `${m.name} / ${item.name}` : item.name;
+  };
+
   const skipped: string[] = [];
   /** set when any layer is text, so the font descriptor is only written when it is used */
   let usesFont = false;
@@ -273,7 +282,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     };
 
     layers.push({
-      ddd: 0, ind: n + 1, ty: 4, nm: first.name, sr: 1, ao: 0, bm: 0,
+      ddd: 0, ind: n + 1, ty: 4, nm: nameOf(first), sr: 1, ao: 0, bm: 0,
       ks,
       shapes: paintGroups(first.name, geometry, outlines ?? [], layerPaint),
       ip: 0, op: total + 1, st: 0,

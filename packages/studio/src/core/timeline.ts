@@ -1,32 +1,57 @@
 import type { Block, EasingCurve, Preset, Timeline, Track, Transition } from './types';
 
-export function blockStarts(tl: Timeline): number[] {
-  const out: number[] = [];
-  let t = 0;
-  for (const b of tl.blocks) { out.push(t); t += b.durationMs; }
+/**
+ * The lane a clip plays in: '' for the first mascot's, the body id for any other.
+ *
+ * Every lane is its own strip. Clips tile end to end inside one and run alongside the
+ * others, which is how two mascots play two different clips at once. A timeline with one
+ * mascot has one lane, and everything below reads exactly as it did before lanes.
+ */
+export const laneOfBlock = (b: Block): string => b.mascotId ?? '';
+
+/** Every lane with a clip in it, the first mascot's first. */
+export function lanesOf(tl: Timeline): string[] {
+  const out = [''];
+  for (const b of tl.blocks) if (!out.includes(laneOfBlock(b))) out.push(laneOfBlock(b));
   return out;
 }
 
-export function blocksEnd(tl: Timeline): number {
-  return tl.blocks.reduce((s, b) => s + b.durationMs, 0);
+/** Where each clip starts, in array order — measured within its own lane. */
+export function blockStarts(tl: Timeline): number[] {
+  const end = new Map<string, number>();
+  return tl.blocks.map((b) => {
+    const lane = laneOfBlock(b);
+    const s = end.get(lane) ?? 0;
+    end.set(lane, s + b.durationMs);
+    return s;
+  });
 }
 
-/** Which clip (if any) occupies time `t` — a clip is a sealed instance: activeTrackFor
+/** Where the longest lane ends. */
+export function blocksEnd(tl: Timeline): number {
+  const end = new Map<string, number>();
+  for (const b of tl.blocks) end.set(laneOfBlock(b), (end.get(laneOfBlock(b)) ?? 0) + b.durationMs);
+  return Math.max(0, ...end.values());
+}
+
+/** Which clip (if any) of `lane` occupies time `t` — a clip is a sealed instance: activeTrackFor
  * uses this to keep a track scoped to one block from ever winning inside another, and a
  * global (blockless) track from bleeding into a clip that simply doesn't animate that
  * property itself, which used to read as "a random earlier keyframe leaking into it." */
-export function blockAt(tl: Timeline, t: number): Block | undefined {
+export function blockAt(tl: Timeline, t: number, lane = ''): Block | undefined {
   const starts = blockStarts(tl);
+  let last: { b: Block; s: number } | undefined;
   for (let i = 0; i < tl.blocks.length; i++) {
     const b = tl.blocks[i];
+    if (laneOfBlock(b) !== lane) continue;
     if (t >= starts[i] && t < starts[i] + b.durationMs) return b;
+    last = { b, s: starts[i] };
   }
   // past the end of the last block — including any padding where the timeline's own
   // duration runs longer than the blocks tiled on it — still belongs to that last block:
   // its tracks hold their pose (and loop-ease back to frame 0) through the tail, instead
   // of vanishing to the rig's bare defaults the moment the block durations are used up.
-  const last = tl.blocks.at(-1);
-  if (last && t >= starts.at(-1)!) return last;
+  if (last && t >= last.s) return last.b;
   return undefined;
 }
 
@@ -56,6 +81,21 @@ export function mergeTracksForClip(sourceTracks: Track[], validIds: Set<string>,
   return [...merged.values()];
 }
 
+/**
+ * Put a clip into the timeline at array index `at`, pushing every later clip of ITS lane —
+ * and their keyframes — along by its duration. Returns where it starts. The other lanes
+ * are left alone: adding to one mascot's row does not slide another's.
+ */
+export function insertBlock(tl: Timeline, block: Block, at: number): number {
+  const lane = laneOfBlock(block);
+  const next = [...tl.blocks];
+  next.splice(at, 0, block);
+  const later = new Set(tl.blocks.slice(at).filter((b) => laneOfBlock(b) === lane).map((b) => b.id));
+  for (const t of tl.tracks) if (t.blockId && later.has(t.blockId)) for (const k of t.keyframes) k.time += block.durationMs;
+  tl.blocks = next;
+  return blockStarts(tl)[at];
+}
+
 export function lastKeyframe(tl: Timeline): number {
   let t = 0;
   for (const tr of tl.tracks) for (const k of tr.keyframes) if (k.time > t) t = k.time;
@@ -70,9 +110,9 @@ export function derivedDuration(tl: Timeline): number {
 export function relayoutBlocks(tl: Timeline, next: Block[]): void {
   const oldStarts = blockStarts(tl);
   const oldById = new Map(tl.blocks.map((b, i) => [b.id, { start: oldStarts[i], dur: b.durationMs }]));
-  let t = 0;
   const newById = new Map<string, { start: number; dur: number; loop?: boolean }>();
-  for (const b of next) { newById.set(b.id, { start: t, dur: b.durationMs, loop: b.loop }); t += b.durationMs; }
+  const newStarts = blockStarts({ ...tl, blocks: next });
+  next.forEach((b, i) => newById.set(b.id, { start: newStarts[i], dur: b.durationMs, loop: b.loop }));
 
   for (const track of tl.tracks) {
     if (!track.blockId) continue;
@@ -102,15 +142,17 @@ export function relayoutBlocks(tl: Timeline, next: Block[]): void {
  * at the moment its incoming clip begins, never past into the clip after that. Every seam
  * morphs by default (an implicit `{DEFAULT_TRANSITION_MS, DEFAULT_TRANSITION_EASING}`) —
  * an explicit `durationMs: 0` entry is the only way to opt a seam out into a hard cut. */
-export function activeTransitionAt(tl: Timeline, t: number): { transition: Transition; boundaryMs: number } | null {
+export function activeTransitionAt(tl: Timeline, t: number, lane = ''): { transition: Transition; boundaryMs: number } | null {
   if (tl.blocks.length < 2) return null;
-  const starts = blockStarts(tl);
-  for (let i = 1; i < tl.blocks.length; i++) {
-    const afterId = tl.blocks[i - 1].id;
+  const all = blockStarts(tl);
+  // the seams of ONE lane: a clip in another mascot's lane is not what this one follows
+  const mine = tl.blocks.map((b, i) => ({ b, s: all[i] })).filter((x) => laneOfBlock(x.b) === lane);
+  for (let i = 1; i < mine.length; i++) {
+    const afterId = mine[i - 1].b.id;
     const explicit = explicitTransitionFor(tl, afterId);
     if (explicit?.durationMs === 0) continue; // explicit hard cut — no blend
     const transition = explicit ?? { id: `${afterId}~default`, afterBlockId: afterId, durationMs: DEFAULT_TRANSITION_MS, easing: DEFAULT_TRANSITION_EASING };
-    const boundaryMs = starts[i];
+    const boundaryMs = mine[i].s;
     if (t >= boundaryMs && t < boundaryMs + transition.durationMs) return { transition, boundaryMs };
   }
   return null;

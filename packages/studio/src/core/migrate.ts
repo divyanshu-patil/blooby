@@ -24,7 +24,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 interface Migration {
   /** the version this step produces */
@@ -154,6 +154,26 @@ const MIGRATIONS: Migration[] = [
       if (!Array.isArray(p.presets)) return;
       const have = new Set(p.presets.map((x) => x?.id));
       p.presets = [...showcasePresets().filter((x) => !have.has(x.id)), ...p.presets];
+    },
+  },
+  {
+    to: 5,
+    label: 'several mascots',
+    /**
+     * A project can hold several mascots now, and each is a layer group whose eye in the
+     * layer list hides all of it. The first mascot's body used to hide only its own drawing,
+     * leaving the eyes floating — so a file saved with its body hidden keeps that look by
+     * not painting the body instead, rather than losing its eyes.
+     *
+     * Nothing else needs a step. The first mascot keeps its ids, and every clip already
+     * sits in its lane (no `mascotId` is that lane); text, curves and roles are optional.
+     */
+    run(p) {
+      const root = p.rig?.nodes?.[p.rig?.rootId];
+      if (!root || root.visible !== false) return;
+      root.visible = true;
+      root.fill = { ...root.fill, enabled: false };
+      if (root.stroke) root.stroke = { ...root.stroke, enabled: false };
     },
   },
 ];

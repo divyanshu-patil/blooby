@@ -377,10 +377,15 @@ function flattenUncached(d: string, n: number): Vec2[] {
   }
   if (total <= 0) return Array.from({ length: n }, () => ({ ...segs[0].p0 }));
 
+  // A loop's last point would sit on its first, so it is spread over n gaps. An open line
+  // is spread over n-1 so its far end is actually reached — a drawn curve that stopped a
+  // sample short of its last anchor lost its tip in every morph and every export.
+  const open = subpathSegs(segs).length === 1 && !segs[0].closed;
+  const gaps = open && n > 1 ? n - 1 : n;
   const out: Vec2[] = [];
   let j = 0;
   for (let k = 0; k < n; k++) {
-    const target = (k / n) * total;
+    const target = Math.min(total, (k / gaps) * total);
     while (j < lens.length - 1 && lens[j] < target) j++;
     const prevLen = j > 0 ? lens[j - 1] : 0;
     const prevPt = j > 0 ? walk[j - 1] : segs[0].p0;
@@ -393,10 +398,17 @@ function flattenUncached(d: string, n: number): Vec2[] {
 
 const round = (v: number) => Math.round(v * 1000) / 1000;
 
-export function pathFromPoints(pts: Vec2[]): string {
+export function pathFromPoints(pts: Vec2[], closed = true): string {
   if (!pts.length) return '';
-  return `M ${round(pts[0].x)} ${round(pts[0].y)} ${pts.slice(1).map((p) => `L ${round(p.x)} ${round(p.y)}`).join(' ')} Z`;
+  const d = `M ${round(pts[0].x)} ${round(pts[0].y)} ${pts.slice(1).map((p) => `L ${round(p.x)} ${round(p.y)}`).join(' ')}`;
+  return closed ? `${d} Z` : d;
 }
+
+/** Whether a path is one open line — a drawn curve — rather than an outline that closes. */
+export const isOpenPath = (d: string): boolean => {
+  const segs = segments(d);
+  return segs.length > 0 && subpathSegs(segs).length === 1 && !segs[0].closed;
+};
 
 /**
  * The offset at which `b`'s points line up best with `a`'s.
@@ -461,12 +473,97 @@ function aligned(a: string, b: string, n: number): { pa: Vec2[]; pb: Vec2[] } | 
 export function morphPath(a: string, b: string, t: number, n = 64): string {
   if (t === 0 || !Number.isFinite(t)) return a;
   if (t === 1) return b;
+  // Two open lines morph end to end and stay open. Rotating one to "best align" with the
+  // other is right for two loops and meaningless for two lines, and closing the result
+  // gave an animated curve an edge it never had — which text laid on it then followed.
+  if (isOpenPath(a) && isOpenPath(b)) {
+    const pa = flattenPath(a, n), raw = flattenPath(b, n);
+    if (!pa.length || !raw.length) return t < 0.5 ? a : b;
+    const far = (q: Vec2[]) => q.reduce((s, p, k) => s + (p.x - pa[k].x) ** 2 + (p.y - pa[k].y) ** 2, 0);
+    const pb = far([...raw].reverse()) < far(raw) ? [...raw].reverse() : raw;
+    return pathFromPoints(pa.map((p, k) => ({ x: lerp(p.x, pb[k].x, t), y: lerp(p.y, pb[k].y, t) })), false);
+  }
   const al = aligned(a, b, n);
   if (!al) return t < 0.5 ? a : b;
   return pathFromPoints(al.pa.map((p, k) => {
     const q = al.pb[k];
     return { x: lerp(p.x, q.x, t), y: lerp(p.y, q.y, t) };
   }));
+}
+
+/**
+ * Between two keyframed outlines. When both are written the same way — the same commands in
+ * the same order, which two keyframes of one drawn curve always are — every number is
+ * interpolated where it stands, so the anchors in between are the real anchors and not 64
+ * resampled points. Anything else morphs.
+ */
+export function lerpPath(a: string, b: string, t: number): string {
+  if (t === 0 || !Number.isFinite(t)) return a;
+  if (t === 1) return b;
+  const ta = a.match(PATH_TOKEN) ?? [], tb = b.match(PATH_TOKEN) ?? [];
+  const same = ta.length === tb.length && ta.length > 0
+    && ta.every((x, i) => /[a-z]/i.test(x) ? x === tb[i] : !/[a-z]/i.test(tb[i]));
+  if (!same) return morphPath(a, b, t);
+  return ta.map((x, i) => (/[a-z]/i.test(x) ? x : String(round(lerp(Number(x), Number(tb[i]), t))))).join(' ');
+}
+const PATH_TOKEN = /[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi;
+
+/**
+ * A path measured along its length — what text on a path, and anything else travelling
+ * along one, reads positions and directions from. Built once per `d` and kept: the text
+ * asks for dozens of positions on the same curve every frame.
+ */
+export interface PathSampler {
+  length: number;
+  closed: boolean;
+  /** the point `s` px along, and the direction of travel there in radians. Past either end
+   *  of an open line it carries straight on; round a loop it wraps. */
+  at(s: number): { x: number; y: number; angle: number };
+}
+const samplerCache = new Map<string, PathSampler | null>();
+
+export function pathSampler(d: string): PathSampler | null {
+  const hit = samplerCache.get(d);
+  if (hit !== undefined) return hit;
+  const built = buildSampler(d);
+  if (samplerCache.size >= CACHE_MAX) samplerCache.clear();
+  samplerCache.set(d, built);
+  return built;
+}
+
+function buildSampler(d: string): PathSampler | null {
+  // the first outline only: a letter's counter is not somewhere a line of text should go
+  const segs = (subpathSegs(segments(d).filter(finiteSeg))[0] ?? []);
+  if (!segs.length) return null;
+  const pts: Vec2[] = [segs[0].p0];
+  for (const s of segs) {
+    const steps = s.c1 ? 32 : 1;
+    for (let k = 1; k <= steps; k++) pts.push(along(s, k / steps));
+  }
+  const closed = !!segs[0].closed;
+  if (closed && dist(pts[pts.length - 1], pts[0]) > 1e-9) pts.push(pts[0]);
+  const lens = [0];
+  for (let i = 1; i < pts.length; i++) lens.push(lens[i - 1] + dist(pts[i - 1], pts[i]));
+  const length = lens[lens.length - 1];
+  if (!(length > 1e-9)) return null;
+  const dirAt = (i: number) => Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x);
+  return {
+    length, closed,
+    at(s) {
+      if (!Number.isFinite(s)) s = 0;
+      if (closed) s = ((s % length) + length) % length;
+      if (!closed && (s < 0 || s > length)) {
+        // carry straight on off the end, so text longer than its line does not pile up
+        const i = s < 0 ? 0 : pts.length - 2;
+        const a = dirAt(i), base = s < 0 ? pts[0] : pts[pts.length - 1], over = s < 0 ? s : s - length;
+        return { x: base.x + Math.cos(a) * over, y: base.y + Math.sin(a) * over, angle: a };
+      }
+      let lo = 0, hi = lens.length - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (lens[mid] <= s) lo = mid; else hi = mid; }
+      const span = lens[hi] - lens[lo], u = span > 0 ? (s - lens[lo]) / span : 0;
+      return { x: lerp(pts[lo].x, pts[hi].x, u), y: lerp(pts[lo].y, pts[hi].y, u), angle: dirAt(Math.min(lo, pts.length - 2)) };
+    },
+  };
 }
 
 /* ---- built-in shapes ------------------------------------------------------

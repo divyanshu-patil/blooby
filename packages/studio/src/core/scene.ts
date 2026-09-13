@@ -1,13 +1,14 @@
 import { applyEasing } from './easing';
 import { lerpColor } from './color';
-import { mapPath, morphPath, pathBounds } from './path';
+import { lerpPath, mapPath, morphPath, pathBounds } from './path';
 import { shapeResolver } from './emitters';
 import { noise1d } from './noise';
 import { bodyTurnScale, FLAT, projectToScreen, silhouetteScale, type Projected } from './curvature';
 import { hoseInputOf, rubberHose } from './limb';
 import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, readEffectProp, readProp, setCameraProp, setProp, STROKE_DEFAULT, writeEffectProp, writeProp } from './props';
 import { activeTimeline } from './types';
-import { activeTransitionAt, blockAt, blockStarts } from './timeline';
+import { activeTransitionAt, blockAt, blockStarts, lanesOf } from './timeline';
+import { laneOf } from './mascot';
 import type { Anchor, Appearance, ColorStop, EasingCurve, Emitter, KeyValue, LineCap, LineJoin, Modifier, ModifierAxis, Project, Rig, RigNode, Timeline, Track, Vec2, VectorPath } from './types';
 
 const isColor = (v: KeyValue): v is ColorStop => typeof v === 'object' && 'r' in v;
@@ -15,8 +16,9 @@ const isVec = (v: KeyValue): v is Vec2 => typeof v === 'object' && 'x' in v;
 
 export function lerpValue(a: KeyValue, b: KeyValue, t: number): KeyValue {
   if (typeof a === 'number' && typeof b === 'number') return a + (b - a) * t;
-  // two path strings: a real morph, not a switch at the halfway mark
-  if (typeof a === 'string' && typeof b === 'string') return morphPath(a, b, t);
+  // two path strings: a real morph, not a switch at the halfway mark — and between two
+  // keyframes of one drawn curve, its own anchors interpolated where they stand
+  if (typeof a === 'string' && typeof b === 'string') return lerpPath(a, b, t);
   if (isColor(a) && isColor(b)) return lerpColor(a, b, t);
   if (isVec(a) && isVec(b)) return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   return a;
@@ -68,9 +70,13 @@ function blockWindow(tl: Timeline, blockId: string): [number, number] | null {
  * (which used to read as "a stray keyframe from somewhere else leaking into a brand-new
  * clip that should just show its own rest pose"). A global track is only ever the
  * fallback outside every block — past the last one, or a timeline with no blocks at all.
+ *
+ * "Every block" means every block of the layer's own LANE: the second mascot's clips seal
+ * the second mascot, and leave the first one's keyframes alone. Pass the rig so a layer's
+ * lane is known from the mascot it belongs to; without it, the lane of its own clips is used.
  */
-export function activeTrackFor(tl: Timeline, nodeId: string, property: string, t: number): Track | undefined {
-  const inside = blockAt(tl, t);
+export function activeTrackFor(tl: Timeline, nodeId: string, property: string, t: number, rig?: Rig): Track | undefined {
+  const inside = blockAt(tl, t, laneOf(rig, tl, nodeId));
   let fallback: Track | undefined;
   for (const track of tl.tracks) {
     if (track.nodeId !== nodeId || track.property !== property) continue;
@@ -161,6 +167,7 @@ export function resolveTracks(project: Project): Track[] {
   if (!loop) return tracks;
 
   const keyOf = (nodeId: string, property: string) => `${nodeId} ${property}`;
+  const rig = project.rig;
 
   // What the viewer actually sees at t=0, per property — the pose the tail must return to.
   const seen = new Set<string>();
@@ -169,7 +176,7 @@ export function resolveTracks(project: Project): Track[] {
     const key = keyOf(t.nodeId, t.property);
     if (seen.has(key)) continue;
     seen.add(key);
-    const winner = activeTrackFor(tl, t.nodeId, t.property, 0);
+    const winner = activeTrackFor(tl, t.nodeId, t.property, 0, rig);
     const value = winner && sampleTrack(winner, 0);
     if (value !== undefined) startValue.set(key, { nodeId: t.nodeId, property: t.property, value });
   }
@@ -182,7 +189,7 @@ export function resolveTracks(project: Project): Track[] {
     if (last.time >= durationMs - 1) return track;
     // only the track actually reachable at the tail gets the close — the others are sealed
     // inside earlier clips and never rendered there.
-    if (activeTrackFor(tl, track.nodeId, track.property, durationMs)?.id !== track.id) return track;
+    if (activeTrackFor(tl, track.nodeId, track.property, durationMs, rig)?.id !== track.id) return track;
     const key = keyOf(track.nodeId, track.property);
     const entry = startValue.get(key);
     if (!entry) return track;
@@ -194,12 +201,15 @@ export function resolveTracks(project: Project): Track[] {
   // close on, so synthesize the smallest track that gets them home.
   // ponytail: assumes the closing block plays at speed 1 and doesn't loop, so
   // blockSampleTime is the identity across it; retime these two keys if that stops holding.
-  const endBlock = blockAt(tl, durationMs);
-  if (endBlock) {
-    const endStart = blockStarts(tl)[tl.blocks.indexOf(endBlock)];
-    for (const [key, entry] of startValue) {
+  const starts = blockStarts(tl);
+  for (const [key, entry] of startValue) {
+    // the closing clip of THIS layer's lane — another mascot's last clip is not its tail
+    const endBlock = blockAt(tl, durationMs, laneOf(rig, tl, entry.nodeId));
+    if (!endBlock) continue;
+    {
+      const endStart = starts[tl.blocks.indexOf(endBlock)];
       if (closed.has(key)) continue;
-      if (activeTrackFor(tl, entry.nodeId, entry.property, durationMs)) continue;
+      if (activeTrackFor(tl, entry.nodeId, entry.property, durationMs, rig)) continue;
       const base = readProp(project.rig, entry.nodeId, entry.property);
       if (base === undefined || endStart >= durationMs - 1) continue;
       resolved.push({
@@ -269,7 +279,7 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
     const key = `${track.nodeId} ${track.property}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const winner = activeTrackFor(resolvedTl, track.nodeId, track.property, timeMs);
+    const winner = activeTrackFor(resolvedTl, track.nodeId, track.property, timeMs, project.rig);
     const sampleT = winner?.blockId ? blockSampleTime(project, tl, winner.blockId, timeMs) : timeMs;
     const v = winner && sampleTrack(winner, sampleT);
     if (v !== undefined) writeProp(rig, track.nodeId, track.property, v);
@@ -378,12 +388,13 @@ export function scopeSpan(tl: Timeline, blockId: string | undefined): [number, n
 const ANIMATABLE_PROPS = NUMERIC_PROPS.filter((p) => !CAMERA_PROPS.includes(p));
 
 /** Lerp (lerpAngle for rotation-ish paths, matching sampleTrack's own convention) every
- * animatable property of `to` toward `from`, in place on `to`. */
-function blendRigInto(to: Rig, from: Rig, amount: number): void {
+ * animatable property of `to` toward `from`, in place on `to`. `only` narrows it to some
+ * layers — one mascot's lane at a seam — and `camera` says whether the view blends too. */
+function blendRigInto(to: Rig, from: Rig, amount: number, only?: (id: string) => boolean, camera = true): void {
   const isAngle = (p: string) => p.endsWith('rotation') || p.includes('yaw') || p.includes('pitch');
   for (const node of Object.values(to.nodes)) {
     const other = from.nodes[node.id];
-    if (!other) continue;
+    if (!other || (only && !only(node.id))) continue;
     for (const path of ANIMATABLE_PROPS) {
       const a = getProp(other, path), b = getProp(node, path);
       if (typeof a !== 'number' || typeof b !== 'number') continue;
@@ -398,6 +409,7 @@ function blendRigInto(to: Rig, from: Rig, amount: number): void {
       node.shapePath = morphPath(other.shapePath, node.shapePath, amount);
     }
   }
+  if (!camera) return;
   for (const path of CAMERA_PROPS) {
     const a = getCameraProp(from, path), b = getCameraProp(to, path);
     setCameraProp(to, path, a + (b - a) * amount);
@@ -413,21 +425,25 @@ function blendRigInto(to: Rig, from: Rig, amount: number): void {
  */
 export function evaluateRig(project: Project, timeMs: number): Rig {
   const tl = activeTimeline(project);
-  const active = activeTransitionAt(tl, timeMs);
   const rig = evaluateRigRaw(project, timeMs);
-  if (!active) return rig;
-  // boundaryMs is the *incoming* clip's own start (blockAt's window check is exclusive on
-  // the upper end, so the outgoing clip's own span ends just short of it) — evaluating
-  // "outgoing" at that exact instant would silently read the incoming clip's context
-  // instead (both clips resolve to the same block there), capturing the same pose on both
-  // sides of the blend and producing no visible morph at all. Step fractionally back so
-  // this reads as the outgoing clip's own last instant, not the incoming clip's first.
-  const outgoing = evaluateRigRaw(project, active.boundaryMs - 1e-3);
-  const progress = applyEasing(active.transition.easing, (timeMs - active.boundaryMs) / active.transition.durationMs);
-  // amount=progress: blendRigInto(to, from, amount) resolves toward `from` at amount=0
-  // and `to` at amount=1 — at the seam (progress 0) that must read as 100% outgoing,
-  // sliding to 100% incoming (`rig`, already evaluated live above) as progress reaches 1.
-  blendRigInto(rig, outgoing, progress);
+  // each mascot's lane has its own seams: the second mascot changing clip blends the
+  // second mascot, and the first carries on untouched
+  for (const lane of lanesOf(tl)) {
+    const active = activeTransitionAt(tl, timeMs, lane);
+    if (!active) continue;
+    // boundaryMs is the *incoming* clip's own start (blockAt's window check is exclusive on
+    // the upper end, so the outgoing clip's own span ends just short of it) — evaluating
+    // "outgoing" at that exact instant would silently read the incoming clip's context
+    // instead (both clips resolve to the same block there), capturing the same pose on both
+    // sides of the blend and producing no visible morph at all. Step fractionally back so
+    // this reads as the outgoing clip's own last instant, not the incoming clip's first.
+    const outgoing = evaluateRigRaw(project, active.boundaryMs - 1e-3);
+    const progress = applyEasing(active.transition.easing, (timeMs - active.boundaryMs) / active.transition.durationMs);
+    // amount=progress: blendRigInto(to, from, amount) resolves toward `from` at amount=0
+    // and `to` at amount=1 — at the seam (progress 0) that must read as 100% outgoing,
+    // sliding to 100% incoming (`rig`, already evaluated live above) as progress reaches 1.
+    blendRigInto(rig, outgoing, progress, (id) => laneOf(project.rig, tl, id) === lane, lane === '');
+  }
   return rig;
 }
 
@@ -528,8 +544,10 @@ export const fromFrame = (f: LayerFrame, p: Vec2): Vec2 => {
   return { x: (dx * c - dy * s) / (f.kx || 1), y: (dx * s + dy * c) / (f.ky || 1) };
 };
 
+/** A layer's children, in the order the rig holds them — the first mascot first at the top. */
 function childrenOf(rig: Rig, id: string | null): RigNode[] {
-  return Object.values(rig.nodes).filter((n) => n.parentId === id && n.id !== rig.rootId);
+  const kids = Object.values(rig.nodes).filter((n) => n.parentId === id);
+  return id === null ? kids.sort((a, b) => Number(b.id === rig.rootId) - Number(a.id === rig.rootId)) : kids;
 }
 
 function eyeHeight(n: RigNode): number {
@@ -581,56 +599,62 @@ function outlineItem(d: string): { cx: number; cy: number; w: number; h: number;
  * layer's frame, keyed by id (and the world's under WORLD).
  */
 export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerFrame>): SceneItem[] {
-  const root = rig.nodes[rig.rootId];
-  if (!root) return [];
+  if (!rig.nodes[rig.rootId]) return [];
   const out: SceneItem[] = [];
-
-  const turn = bodyTurnScale(root.surface.yaw, root.surface.pitch);
-  const rx = root.size.x * root.transform.scale.x * turn.sx;
-  const ry = (root.size.y || root.size.x) * root.transform.scale.y * turn.sy;
-  const off = root.surface.flatOffset ?? { x: 0, y: 0 };
-  const cx = view.width / 2 + rig.camera.offset.x + off.x;
-  const cy = view.height / 2 + rig.camera.offset.y + off.y;
-  const roll = root.transform.rotation;
-  const head = { x: root.surface.yaw, y: root.surface.pitch };
-  const squash = rx === 0 ? 1 : ry / rx;
 
   // rx is the *sphere* radius that features are placed on; the drawn outline is its
   // silhouette, which perspective pushes outward. Keep them separate or features escape.
   const limb = silhouetteScale(rig.camera.fov, rig.camera.distance);
-  const rootSeen = root.presence ?? 1;
-  const rootAlpha = Math.min(1, Math.max(0, root.opacity ?? 1));
-  if (root.visible && rootSeen > 0.002 && rootAlpha > 0.002) {
-    out.push({
-      id: root.id, name: root.name, shape: 'ellipse', cx, cy,
-      w: rx * limb * 2 * rootSeen, h: ry * limb * 2 * rootSeen,
-      r: Math.min(rx, ry) * limb * rootSeen, rotation: roll,
-      ...paintOf(root, rootSeen * rootAlpha),
-      depth: -2, zIndex: root.zIndex,
-      ...(root.shapePath ? { path: root.shapePath } : {}),
-    });
-  }
-
-  const rootFrame: LayerFrame = {
-    x: cx, y: cy, rot: roll,
-    // a local offset on the body stretches with it, so an attached hat stays put on the
-    // head through a squash rather than sliding off it
-    kx: root.transform.scale.x * turn.sx, ky: root.transform.scale.y * turn.sy,
-    cum: scaleOf(root), R: rx, head, squash, alpha: rootAlpha, parentCum: 1,
-  };
   const worldFrame: LayerFrame = {
     x: view.width / 2 + rig.camera.offset.x, y: view.height / 2 + rig.camera.offset.y,
     rot: 0, kx: 1, ky: 1, cum: 1, R: 0, head: { x: 0, y: 0 }, squash: 1, alpha: 1, parentCum: 1,
   };
-  frames?.set(root.id, rootFrame);
   frames?.set(WORLD, worldFrame);
 
+  /**
+   * A mascot: its body drawn, and the frame everything on it lives in.
+   *
+   * Every mascot comes through here — the first and the tenth, one standing in the world
+   * and one following another — placed by its offset in whatever frame holds it. That is
+   * the whole of "several mascots": the same sphere, head turn and squash, instanced.
+   */
+  const mascot = (node: RigNode, f: LayerFrame): LayerFrame => {
+    const turn = bodyTurnScale(node.surface.yaw, node.surface.pitch);
+    const k = f.cum;
+    const rx = node.size.x * node.transform.scale.x * turn.sx * k;
+    const ry = (node.size.y || node.size.x) * node.transform.scale.y * turn.sy * k;
+    const at = toFrame(f, node.surface.flatOffset ?? { x: 0, y: 0 });
+    const roll = f.rot + node.transform.rotation;
+    const seen = node.presence ?? 1;
+    const alpha = f.alpha * Math.min(1, Math.max(0, node.opacity ?? 1));
+    if (seen > 0.002 && alpha > 0.002) {
+      out.push({
+        id: node.id, name: node.name, shape: 'ellipse', cx: at.x, cy: at.y,
+        w: rx * limb * 2 * seen, h: ry * limb * 2 * seen,
+        r: Math.min(rx, ry) * limb * seen, rotation: roll,
+        ...paintOf(node, seen * alpha),
+        depth: -2, zIndex: node.zIndex,
+        ...(node.shapePath ? { path: node.shapePath } : {}),
+      });
+    }
+    const mine: LayerFrame = {
+      x: at.x, y: at.y, rot: roll,
+      // a local offset on the body stretches with it, so an attached hat stays put on the
+      // head through a squash rather than sliding off it
+      kx: node.transform.scale.x * turn.sx * k, ky: node.transform.scale.y * turn.sy * k,
+      cum: k * scaleOf(node), R: rx, head: { x: node.surface.yaw, y: node.surface.pitch },
+      squash: rx === 0 ? 1 : ry / rx, alpha, parentCum: k,
+    };
+    frames?.set(node.id, mine);
+    return mine;
+  };
+
   const walk = (parentId: string | null, f: LayerFrame) => {
-    const isRoot = parentId === rig.rootId;
     const rad = (f.rot * Math.PI) / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
     for (const node of childrenOf(rig, parentId)) {
       if (!node.visible) continue;
+      if (node.kind === 'body') { walk(node.id, mascot(node, f)); continue; }
       // a mapped layer rides the sphere; anything with no sphere under it is flat
       const p: Projected = node.surface.mapped && f.R > 0 ? projectToScreen(node, rig, f.R, f.head) : FLAT;
       if (!p.visible) continue;
@@ -640,7 +664,8 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
       // frame either way.
       const fo = node.surface.flatOffset;
       const lx = (p === FLAT ? 0 : p.x) + (fo ? fo.x * f.kx : 0);
-      const ly = (p === FLAT ? 0 : p.y * (isRoot ? f.squash : 1)) + (fo ? fo.y * f.ky : 0);
+      // a body's frame carries its squash; every other frame's is 1
+      const ly = (p === FLAT ? 0 : p.y * f.squash) + (fo ? fo.y * f.ky : 0);
       const ax = f.x + lx * cos - ly * sin;
       const ay = f.y + lx * sin + ly * cos;
       const rot = f.rot + node.transform.rotation;
@@ -685,7 +710,6 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
     }
   };
 
-  walk(rig.rootId, rootFrame);
   walk(null, worldFrame);
   out.sort((a, b) => a.zIndex - b.zIndex || a.depth - b.depth);
   return out;
@@ -984,7 +1008,7 @@ export const sceneAt = (project: Project, t: number, view: Viewport): SceneItem[
  * never show a value the preview doesn't actually render. */
 export function valueAt(project: Project, nodeId: string, path: string, t: number): KeyValue | undefined {
   const tl = activeTimeline(project);
-  const track = activeTrackFor(tl, nodeId, path, t);
+  const track = activeTrackFor(tl, nodeId, path, t, project.rig);
   const sampleT = track?.blockId ? blockSampleTime(project, tl, track.blockId, t) : t;
   const sampled = track && sampleTrack(track, sampleT);
   if (sampled !== undefined) return sampled;

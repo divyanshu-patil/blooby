@@ -3,14 +3,17 @@ import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaul
 import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
 import { activeTrackFor, evaluateRig, lerpAngle, lerpValue, sampleTrack, valueAt } from './scene';
 import {
-  duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
+  addMascot as addMascotIn, duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
+  saveMascotTemplate as saveMascotTemplateIn,
   setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
   type AppearanceRange, type AttachMode, type ReorderTo,
 } from './layers';
+import { laneOf, mascotOf, type MascotKind } from './mascot';
+import { presetTargets } from './defaults';
 import { compOf } from './comp';
 import { naturalOutline } from './path';
 import type { MorphMode } from './easing';
-import { blockAt, blocksEnd, blockStarts, derivedDuration, mergeTracksForClip, relayoutBlocks } from './timeline';
+import { blockAt, blocksEnd, blockStarts, derivedDuration, insertBlock, mergeTracksForClip, relayoutBlocks } from './timeline';
 import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } from './gallery';
 import { fetchCatalog } from './catalog';
 import { defaultValues, directTransition, machineOf, nextTransition, slug, type DirectOptions } from './stateMachine';
@@ -120,8 +123,13 @@ export interface Editor {
    */
   tweenProperty: (nodeId: string, property: string, target: KeyValue, durationMs: number, easing: EasingCurve) => void;
 
+  /** A new mascot — a look, or a saved one by template id — selected. Returns its body id. */
+  addMascot: (kind: MascotKind | { templateId: string }, opts?: { name?: string; x?: number; y?: number }) => string;
+  saveMascotTemplate: (bodyId: string, name?: string) => void;
+
   loadCatalog: () => Promise<void>;
-  addBlock: (presetId: string, index?: number) => void;
+  /** `mascotId` puts the clip in that mascot's lane, the preset animating that mascot */
+  addBlock: (presetId: string, index?: number, mascotId?: string) => void;
   /** the shared engine behind "another timeline from this project" and "a gallery
    * animation" as a clip source (§8/§12/§13) — one copy-tracks-in-as-a-block routine.
    * Only tracks whose nodeId exists in *this* project's rig are ever copied in, which is
@@ -413,7 +421,7 @@ export const useEditor = create<Editor>((set, get) => ({
 
   trackFor(nodeId, property) {
     const { project, playhead } = get();
-    return activeTrackFor(at(project), nodeId, property, playhead);
+    return activeTrackFor(at(project), nodeId, property, playhead, project.rig);
   },
 
   setValue(nodeId, property, value, label) {
@@ -427,7 +435,7 @@ export const useEditor = create<Editor>((set, get) => ({
         // scoped to whichever clip the playhead is in (a proper clip override, per spec
         // §15) — never a global track, or it would leak into every other clip that
         // doesn't animate this property, including a brand-new one added later.
-        const t: Track = { id: uid('t'), nodeId, property, keyframes: [], blockId: blockAt(at(p), playhead)?.id };
+        const t: Track = { id: uid('t'), nodeId, property, keyframes: [], blockId: blockAt(at(p), playhead, laneOf(p.rig, at(p), nodeId))?.id };
         upsertKeyframe(t, playhead, value);
         at(p).tracks.push(t);
       } else {
@@ -445,7 +453,7 @@ export const useEditor = create<Editor>((set, get) => ({
    */
   toggleKeyframe(nodeId, property) {
     const { playhead, project } = get();
-    const track = activeTrackFor(activeTimeline(project), nodeId, property, playhead);
+    const track = activeTrackFor(activeTimeline(project), nodeId, property, playhead, project.rig);
     // 1ms, matching writeKeyframe's own idea of "the same keyframe"
     const here = track?.keyframes.find((k) => Math.abs(k.time - playhead) < 1);
     if (!track || !here) { get().addKeyframeNow(nodeId, property); return; }
@@ -476,7 +484,7 @@ export const useEditor = create<Editor>((set, get) => ({
         const v = read(p, p.rig, nodeId, property);
         if (v === undefined) return;
         // same clip-scoping as setValue's autoKey branch — see its comment
-        at(p).tracks.push({ id: uid('t'), nodeId, property, blockId: blockAt(at(p), playhead)?.id, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
+        at(p).tracks.push({ id: uid('t'), nodeId, property, blockId: blockAt(at(p), playhead, laneOf(p.rig, at(p), nodeId))?.id, keyframes: [{ id: uid('k'), time: playhead, value: v, easingOut: { type: 'preset', name: 'easeInOut' } }] });
       }
     });
   },
@@ -562,7 +570,8 @@ export const useEditor = create<Editor>((set, get) => ({
   },
 
   deleteNode(id) {
-    get().commit((p) => { removeLayer(p, id); });
+    const { playhead } = get();
+    get().commit((p) => { removeLayer(p, id, playhead); });
     set({ selection: get().selection.filter((s) => get().project.rig.nodes[s]) });
   },
 
@@ -576,8 +585,12 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => {
       for (const src of nodes) {
         const n = structuredClone(src);
-        if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
         if (n.parentId !== null && !p.rig.nodes[n.parentId]) n.parentId = p.rig.rootId;
+        // a limb tucks just behind its own mascot's body — behind the first mascot's only
+        // when it belongs to the first mascot
+        const owner = n.kind === 'limb' ? mascotOf(p.rig, n.parentId) : undefined;
+        if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
+        else if (owner && owner.id !== p.rig.rootId) n.zIndex = owner.zIndex - 0.5 + n.zIndex * 0.01;
         p.rig.nodes[n.id] = n;
         if (opts?.appearAt && opts.appearAt > 0) setAppearanceIn(p, n.id, { startMs: opts.appearAt }, opts.appearAt);
       }
@@ -647,38 +660,47 @@ export const useEditor = create<Editor>((set, get) => ({
     }
   },
 
-  addBlock(presetId, index) {
+  addMascot(kind, opts) {
+    let id = '';
+    get().commit((p) => {
+      const tpl = typeof kind === 'string' ? kind : p.mascotTemplates?.find((t) => t.id === kind.templateId);
+      if (tpl) id = addMascotIn(p, tpl, opts);
+    });
+    if (id) set({ selection: [id], selectedBlockId: null });
+    return id;
+  },
+
+  saveMascotTemplate(bodyId, name) {
+    get().commit((p) => { saveMascotTemplateIn(p, bodyId, name); });
+  },
+
+  addBlock(presetId, index, mascotId) {
     const { project, catalog } = get();
     const own = project.presets.find((p) => p.id === presetId);
     const preset = own ?? catalog.find((p) => p.id === presetId);
     if (!preset) return;
     const blockId = uid('b');
+    // the first mascot's lane has no id; any other is named by its body
+    const lane = mascotId && mascotId !== project.rig.rootId && project.rig.nodes[mascotId]?.kind === 'body' ? mascotId : undefined;
     const at0 = index ?? at(project).blocks.length;
     get().commit((p) => {
       const tl = at(p);
       // a catalogue preset becomes part of the file the moment it is used, so the saved
       // project keeps working offline and blockSampleTime can still find its natural span
       if (!own) p.presets = [...p.presets, preset];
-      const block: Block = { id: blockId, presetId, name: preset.name, durationMs: preset.durationMs };
-      const next = [...tl.blocks];
-      next.splice(at0, 0, block);
-      // place tracks at the new block's start, then let relayout settle everything
-      let start = 0;
-      for (let i = 0; i < at0; i++) start += next[i].durationMs;
+      const block: Block = { id: blockId, presetId, name: preset.name, durationMs: preset.durationMs, ...(lane ? { mascotId: lane } : {}) };
+      // where everything the preset names lands on this mascot — decided before its layers
+      // arrive, so a part the mascot already has is reused rather than doubled
+      const to = presetTargets(p.rig, preset, lane);
+      const start = insertBlock(tl, block, at0);
       for (const t of preset.tracks) {
         tl.tracks.push({
-          id: uid('t'), nodeId: t.nodeId, property: t.property, blockId,
+          id: uid('t'), nodeId: to(t.nodeId), property: t.property, blockId,
           keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time + start })),
         });
       }
       // with the rig, so a preset that brings its own layers (an arm, a sticker) adds them
-      attachPresetEffects(tl, preset, blockId, p.rig);
-      const shifted = tl.blocks.slice(at0).map((b) => b.id);
-      if (shifted.length) {
-        const set2 = new Set(shifted);
-        for (const t of tl.tracks) if (t.blockId && set2.has(t.blockId)) for (const k of t.keyframes) k.time += preset.durationMs;
-      }
-      tl.blocks = next;
+      attachPresetEffects(tl, preset, blockId, p.rig, lane);
       tl.timelineDurationMs = derivedDuration(tl);
     });
   },
@@ -695,17 +717,8 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => {
       const tl = at(p);
       const block: Block = { id: blockId, presetId: '', name: source.label, durationMs, gallerySource: source.gallerySource };
-      const next = [...tl.blocks];
-      next.splice(at0, 0, block);
-      let start = 0;
-      for (let i = 0; i < at0; i++) start += next[i].durationMs;
+      const start = insertBlock(tl, block, at0);
       tl.tracks.push(...mergeTracksForClip(source.timeline.tracks, validIds, blockId, start, () => uid('t')));
-      const shifted = tl.blocks.slice(at0).map((b) => b.id);
-      if (shifted.length) {
-        const set2 = new Set(shifted);
-        for (const t of tl.tracks) if (t.blockId && set2.has(t.blockId)) for (const k of t.keyframes) k.time += durationMs;
-      }
-      tl.blocks = next;
       tl.timelineDurationMs = derivedDuration(tl);
     });
     set({ selectedBlockId: blockId });
@@ -742,11 +755,8 @@ export const useEditor = create<Editor>((set, get) => ({
     const newId = uid('b');
     get().commit((p) => {
       const tl2 = at(p);
-      const next = [...tl2.blocks];
-      next.splice(idx + 1, 0, { ...original, id: newId });
-      // open a duration-sized gap right after the original for the copy to sit in
-      const shiftAfter = new Set(tl2.blocks.slice(idx + 1).map((b) => b.id));
-      for (const t of tl2.tracks) if (t.blockId && shiftAfter.has(t.blockId)) for (const k of t.keyframes) k.time += original.durationMs;
+      // open a duration-sized gap right after the original, in its own lane, for the copy
+      insertBlock(tl2, { ...original, id: newId }, idx + 1);
       // the copy's own keyframes land exactly one clip-duration after the original's —
       // same offset-within-block, translated forward by durationMs (no window lookup
       // needed since it's landing immediately adjacent, not somewhere arbitrary)
@@ -757,7 +767,6 @@ export const useEditor = create<Editor>((set, get) => ({
         });
       }
       for (const m of ownMods) tl2.modifiers.push({ ...m, id: uid('m'), blockId: newId });
-      tl2.blocks = next;
       tl2.timelineDurationMs = derivedDuration(tl2);
     });
     set({ selectedBlockId: newId });
@@ -1320,12 +1329,12 @@ function boundToStrip<T extends { blockId?: string; endMs?: number }>(tl: Timeli
 
 export function writeKeyframe(p: Project, nodeId: string, property: string, time: number, value: KeyValue, easing: EasingCurve) {
   const tl = at(p);
-  let track = activeTrackFor(tl, nodeId, property, time);
+  let track = activeTrackFor(tl, nodeId, property, time, p.rig);
   if (!track) {
-    // scoped to whichever clip `time` falls in (a clip override, not a global track that
-    // would leak into every other clip) — undefined blockId (global) only when this
-    // timeline has no blocks at all, the pre-clip free-keyframe workflow.
-    const owner = blockAt(tl, time);
+    // scoped to whichever clip of this layer's lane `time` falls in (a clip override, not
+    // a global track that would leak into every other clip) — undefined blockId (global)
+    // only when that lane has no blocks at all, the pre-clip free-keyframe workflow.
+    const owner = blockAt(tl, time, laneOf(p.rig, tl, nodeId));
     track = { id: uid('t'), nodeId, property, keyframes: [], blockId: owner?.id };
     tl.tracks.push(track);
     // A brand-new track with one keyframe is constant *everywhere within its own scope*
