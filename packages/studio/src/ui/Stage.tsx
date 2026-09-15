@@ -19,7 +19,7 @@ import { activeTimeline } from '../core/types';
 import { DEFAULT_BG, useStageBg } from './stageBg';
 import type { Rig, RigNode, Vec2 } from '../core/types';
 
-type Mode = 'move' | 'scale' | 'rotate' | 'turn' | 'limb' | 'pan';
+type Mode = 'move' | 'scale' | 'rotate' | 'turn' | 'limb' | 'bend' | 'pan';
 
 interface Drag {
   mode: Mode;
@@ -273,6 +273,25 @@ export function Stage() {
     let id = targetOf(item.id);
     if (!selection.includes(item.id) || selection.length > 1) select([item.id]);
 
+    // Check for limb bend handle click
+    if (selection.length === 1) {
+      const node = project.rig.nodes[id];
+      if (node?.limb && !node.limb.c) {
+        const f = frames.get(node.parentId ?? WORLD);
+        if (f) {
+          const hose = rubberHose(hoseInputOf(node.limb, (v) => toFrame(f, v), f.cum));
+          if (hose && hose.centreline.length) {
+            const mid = hose.centreline[Math.floor(hose.centreline.length / 2)];
+            const midComp = toFrame(f, mid);
+            if (Math.hypot(p.x - midComp.x, p.y - midComp.y) < 10 * unit()) {
+              drag.current = { mode: 'bend', id, ox: p.x, oy: p.y, frame: f, start: { bend: node.limb.bend } };
+              return;
+            }
+          }
+        }
+      }
+    }
+
     // Alt/Option-drag leaves the original where it was and drags a copy away
     if (e.altKey) {
       const copy = duplicateLayer(id);
@@ -342,6 +361,19 @@ export function Stage() {
     const node = useEditor.getState().project.rig.nodes[d.id];
     if (!node) return;
 
+    if (d.mode === 'bend' && d.frame) {
+      const l = node.limb!;
+      const a = toFrame(d.frame, l.a);
+      const b = toFrame(d.frame, l.b);
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const length = Math.hypot(dx, dy);
+      if (length > 0) {
+        const nx = -dy / length, ny = dx / length;
+        const delta = (p.x - d.ox) * nx + (p.y - d.oy) * ny;
+        setValue(d.id, 'limb.bend', round2(d.start.bend + delta * 0.01), `bend.${d.id}`);
+      }
+      return;
+    }
     if (d.mode === 'turn') {
       // gentle enough that a full sweep of the stage doesn't blow straight past ±90°
       const yaw = clamp(d.start.yaw + (p.x - d.ox) * 0.18, -89, 89);

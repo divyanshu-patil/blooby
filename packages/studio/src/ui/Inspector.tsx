@@ -515,11 +515,13 @@ function NothingSelected() {
 function LimbSection({ node }: { node: RigNode }) {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
+  const updateNode = useEditor((s) => s.updateNode);
   const l = node.limb;
   if (!l) return null;
   const hose = valueAt(project, node.id, 'limb.hose', playhead) as number;
   const labels: Record<string, [string, string]> = l.type === 'leg'
-    ? { a: ['Hip X', 'Hip Y'], b: ['Knee X', 'Knee Y'], c: ['Ankle X', 'Ankle Y'] }
+    ? l.c ? { a: ['Hip X', 'Hip Y'], b: ['Knee X', 'Knee Y'], c: ['Ankle X', 'Ankle Y'] }
+          : { a: ['Hip X', 'Hip Y'], b: ['Ankle X', 'Ankle Y'] }
     : { a: ['Shoulder X', 'Shoulder Y'], b: ['Hand X', 'Hand Y'] };
   return (
     <>
@@ -531,6 +533,26 @@ function LimbSection({ node }: { node: RigNode }) {
       <PropRow nodeId={node.id} property="limb.taper" />
       {l.type === 'leg' && (
         <>
+          <div className="row">
+            <span className="prop-label" style={{ width: 52 }}>Knee</span>
+            <button className="btn sm" aria-pressed={!!l.c}
+              onClick={() => {
+                const update = (n: RigNode) => {
+                  const limb = { ...n.limb! };
+                  if (limb.c) {
+                    limb.b = limb.c;
+                    limb.c = undefined;
+                  } else {
+                    limb.c = limb.b;
+                    limb.b = { x: (limb.a.x + limb.c.x) / 2, y: (limb.a.y + limb.c.y) / 2 };
+                  }
+                  n.limb = limb;
+                };
+                updateNode(node.id, update, `limb.knee.${node.id}`);
+              }}>
+              {l.c ? 'Remove Knee' : 'Add Knee'}
+            </button>
+          </div>
           <div className="divider" />
           <PropRow nodeId={node.id} property="limb.foot.angle" />
           <PropRow nodeId={node.id} property="limb.foot.length" />
