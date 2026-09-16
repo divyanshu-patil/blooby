@@ -1,6 +1,7 @@
 # Working in this repo
 
-A map, so you can go straight to the file instead of grepping for it. If something here
+A map, so you can go straight to the file instead of grepping for it. How data flows
+between those files (render pipeline, ownership, presets, copilot): `AGENT_MAP.md`. If something here
 contradicts the code, the code is right — fix this file in the same change.
 
 ## Shape
@@ -38,15 +39,16 @@ Everything else reads a `Project`.
 | one animation | `Timeline` | a project has several; each is one **state** |
 | a placed preset | `Block` | clip on the strip |
 | a freeform object | `RigNode` (`primitive` / `svgLayer` / `limb` / `group`) | `parentId: null` = world, child of the body = attached |
-| a mascot | a `body` `RigNode` + parts with a `role` | several per project; `rig.rootId` is the first, and keeps the legacy ids |
+| a mascot | a `body` `RigNode` + parts with a `role` (`face` is a group holding the eyes and hands) | several per project; `rig.rootId` is the first, and keeps the legacy ids |
 | a mascot's clips | `Block.mascotId` | its lane; no id is the first mascot's lane |
 | words | `RigNode.text` (`TextStyle`) | a layer; on an arc or along another layer's outline via `text.path` |
 | a drawn curve | `RigNode.curve` + `shapePath` | a shape layer; `guide: true` keeps it out of exports |
 | draw order | `RigNode.zIndex` | the ONLY ordering — `layerOrder()`, `reorderLayer()` |
 | when it is on screen | `Appearance` | on the timeline, scoped like an effect |
 | keyframes | `Track` / `Keyframe` | |
-| procedural motion | `Modifier` | shake, float, stretch, pendulum |
-| particles | `Emitter` / `EmitterPart` | zzz, tears, confetti |
+| procedural motion | `Modifier` | shake, float, stretch, pendulum, walk, follow, jelly; nodeId `CAMERA_ID` for the camera |
+| a layer's look | `RigNode.effects` / `blend` / `mask` / `gradient` / `depth` | drawn in `ui/Mascot.tsx`; inspector `ui/StyleSections.tsx` |
+| particles | `Emitter` / `EmitterPart` | zzz, tears, confetti; `path: 'burst'` physics + `attract` |
 | the state machine | `StateMachineDef` | inputs + transitions; states are the timelines |
 
 ### Core
@@ -64,6 +66,10 @@ Everything else reads a `Project`.
 | `core/showcase.ts` | the showcase presets, several-mascot ones included (they bring their own layers + ranges) |
 | `core/textPresets.ts` | curved-text and letters-arriving presets; `textPresetOnto` plays one on the selected text |
 | `core/layers.ts` | **every layer operation** — order, attach, group, duplicate, appearance, SVG/shape/limb/text/curve makers, `addMascot`. Store and copilot both call it |
+| `core/squish.ts` | squish presets — keyframe actions written at the playhead (`applySquish`) |
+| `core/appPresets.ts` | the ten app-screen presets (refresh, search, empty states, tap to start…) |
+| `core/cinematicPresets.ts` | the ten cinematic presets (portal, morph, walk + parallax, particles, liquid, glitch, doodle, title, card flip, showreel) and `sequence()` |
+| `core/effects.ts` | the layer effect stack (`EFFECTS`): glow, blur, shadow, RGB split, slices, scanlines, flicker, jitter, echo, goo |
 | `core/mascot.ts` | what a mascot is: `makeMascot`, roles, `mascotOf`, lanes, `retargetId` (a preset onto another mascot) |
 | `core/text.ts` | text layout and glyph placement — lines, arcs, along a path, per-letter motion |
 | `core/fonts.ts` | Google Fonts via Fontsource: catalogue, lazy loading, opentype.js metrics and outlines |
@@ -100,7 +106,8 @@ rather than a new one-off input.
 
 ### Copilot
 
-`copilot/tools.ts` is the contract: one entry in `TOOL_NAMES`, a `validate` case, a
+`copilot/agent.ts` is the loop (inspect → act → preview → finish), its read/UI tools, preset search and
+discovery. `copilot/tools.ts` is the edit contract: one entry in `TOOL_NAMES`, a `validate` case, a
 `describe` case and an `applyCalls` case. `copilot/prompt.ts` builds the system prompt.
 See `COPILOT.md`.
 

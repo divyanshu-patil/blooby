@@ -391,3 +391,54 @@ And against a real model, when you have a daemon or a key:
 ```sh
 pnpm --filter @blooby/studio copilot:test -- gpt-oss:120b "make it blink twice then look surprised"
 ```
+
+## The agent loop (copilot/agent.ts)
+
+The panel no longer asks for one JSON batch and waits for Apply. `runAgent` loops: each
+step the model returns `{ plan, status, calls, done }`; `status` is shown live, `plan` never
+is. Calls run in order and every result goes back as `RESULTS` before the next step.
+
+- **Edit tools** are the `TOOL_NAMES` above, validated per call and applied with
+  `applyCalls` straight away. A rejected call is reported back and not applied.
+- **Agent tools** (`AGENT_TOOL_DOCS`) read and move the UI: `find_functions`,
+  `call_editor`, `search_presets`, `get_preset`, `inspect_project`, `get_layer`,
+  `get_values`, `preview`, `play`, `get_editor_state`, `set_playhead`, `select_layers`,
+  `open_tab`, `finish`.
+- **Discovery is not hand-written.** `find_functions` parses `interface Editor` out of
+  `core/store.ts?raw` (names, parameters, doc comments) and splits `TOOL_DOCS` per tool.
+  Document a new store action on the interface and the agent can find it. `call_editor`
+  refuses `loadProject`, `resetProject`, `commit`, `restoreProject`, `undo`, `redo`.
+- **Presets are read as data.** `presetTags` derives tags from tracks, layers and effects
+  (hand/leg roles, squash from opposite scale or `squish.*`, `trim.*` → draw, text paths,
+  extra bodies → multiple mascots). `get_preset` returns keyframes as `[ms, value, easing]`.
+- **Tokens are shown, never capped.** `chatJson(..., { onTokens })` streams the reply
+  (NDJSON) where the browser talks to Ollama directly, and the count updates per token;
+  through the backend it updates per step. Only `maxSteps` (default 40) stops a run that
+  never calls finish. Older step messages are shortened so a long run does not resend every
+  early result in full.
+- **Critique** still runs once, when the model tries to finish with edits made.
+- **Checkpoints.** A run's `Turn.run` keeps `before` and `after` project snapshots.
+  Revert and Reapply call `store.restoreProject`, which is a single undo step each.
+
+New write tools for this round: `set_face`, `add_face`, `pin_limb`, `apply_squish_preset`,
+`add_rule`. New properties reach the model through `PROPS`: `anchor.x/y`, `squish.x/y`,
+`trim.start/end`.
+
+Tests: `copilot/agent.test.ts` (scripted model via `vi.mock('./client')`) and
+`copilot/crossFeature.test.ts` (end-to-end project, revert, reapply, "slower").
+
+New write tools: `show_layer_in_state` (a layer made in another state is absent here),
+`set_role`, `set_pose` (core/poses.ts). `normaliseCall` also splits a nodeId written as
+`<layer>.<property>`, and a move/remove on a missing keyframe reports the track's real key
+times — the prompt's Keyframes list is a snapshot from the start of a run.
+
+Motion systems: `set_layer_effect` (the stack in `core/effects.ts`: glow, blur, shadow,
+rgbSplit, slices, scanlines, flicker, jitter, echo, goo — params keyed as
+`effect.<kind>.<param>`), `set_layer_style` (blend, mask, gradient, depth). `add_emitter`
+takes `path: "burst"` with velocity/drag/gravity/turbulence, `attract` (onto a layer or a
+word) and `colorTo`. `add_modifier` has `walk`, `follow`, `jelly`, and accepts nodeId
+`"camera"` for a camera shake. `pin_limb` takes `point` (hip / knee / foot…). Per-letter keys
+are `text.char.<i>.<x|y|rotation|scale|opacity>`; `trim.offset`, `stroke.taper`,
+`depth.z/rotateX/rotateY` and `camera.zoom` are ordinary `PROPS` rows. The ten cinematic
+presets (`core/cinematicPresets.ts`) are found by `search_presets` like any other and are the
+best worked examples of these systems to read with `get_preset`.

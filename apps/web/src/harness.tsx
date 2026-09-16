@@ -10,7 +10,7 @@
  */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AssetPreview, Editor } from '@blooby/studio';
+import { AssetPreview, Editor, useEditor } from '@blooby/studio';
 import '@blooby/studio/index.css';
 import '@blooby/studio/kit.css';
 import '@blooby/studio/tour.css';
@@ -31,5 +31,8 @@ function Harness() {
     </div>
   );
 }
+
+// dev-only, like this whole page: lets a headless check set up a scene through the real store
+(window as unknown as { __editor: typeof useEditor }).__editor = useEditor;
 
 createRoot(document.getElementById('root')!).render(<StrictMode><Harness /></StrictMode>);

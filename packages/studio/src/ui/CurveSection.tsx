@@ -1,4 +1,5 @@
 import { useEditor } from '../core/store';
+import { PropRow } from './bits';
 import { valueAt } from '../core/scene';
 import { curveFromPath, insertPoint, reverseCurve } from '../core/curve';
 import { pathSampler, mapPath } from '../core/path';
@@ -50,6 +51,13 @@ export function CurveSection({ node }: { node: RigNode }) {
         <button className="btn sm" title="Run it the other way — text on it starts from the other end"
           onClick={() => editCurve(node.id, (cv) => reverseCurve(cv), `rev.${node.id}`)}>Reverse</button>
       </div>
+      <div className="divider" />
+      <PropRow nodeId={node.id} property="trim.start" label="Start offset" />
+      <PropRow nodeId={node.id} property="trim.end" label="End offset" />
+      <PropRow nodeId={node.id} property="trim.offset" label="Slide along" />
+      <PropRow nodeId={node.id} property="stroke.taper" label="Brush taper" />
+      <p className="hint">The part of the line that is drawn, 0–1 along it. Key End 0 → 1 to draw it on; then Start 0 → 1 to draw it off. Start past End runs it backwards.</p>
+      <div className="divider" />
       <label className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Drawn dashed in the editor and left out of every export">
         <input type="checkbox" checked={!!node.guide} onChange={(e) => updateNode(node.id, (n) => { n.guide = e.target.checked || undefined; })} />
         Guide only — not exported

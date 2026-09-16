@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { HexColorPicker } from './ColorPicker';
 import { useEditor } from '../core/store';
 import { compOf, presetPreviewProject } from '../core/defaults';
 import { sceneAt } from '../core/scene';
@@ -211,9 +212,10 @@ function PresetChip({ project, preset, onOpen, onRename, onColor, onPublish }: {
         const name = prompt('Rename preset', preset.name);
         if (name?.trim()) onRename(name);
       }}>
-      <input type="color" className="chip-color" title="Accent color — shows on this preset's clips"
-        value={preset.color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
-        onChange={(e) => onColor(e.target.value)} />
+      <span className="chip-color-wrap" title="Accent color — shows on this preset's clips"
+        onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        <HexColorPicker label="Preset accent" value={preset.color ?? '#8c8577'} onChange={onColor} />
+      </span>
       <MascotThumb className="glyph" scene={live ?? glyphScene(project, preset)} view={compOf(project)} box={live ? box : undefined} />
       <span className="chip-name">{preset.name}</span>
       <span className="chip-tag">{preset.tagline ?? ''}</span>

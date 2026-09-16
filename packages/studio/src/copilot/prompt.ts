@@ -1,9 +1,10 @@
+import { EFFECTS } from '../core/effects';
 import { blockStarts, blocksEnd, fmtSec, laneOfBlock } from '../core/timeline';
 import { mascotRoster, TOOL_DOCS } from './tools';
 import { laneOfMascot, mascotLabel } from '../core/mascot';
 import { curveFromPath } from '../core/curve';
 import { ANIMATION_CRAFT } from './craft';
-import { activeTimeline } from '../core/types';
+import { activeTimeline, ANY_STATE } from '../core/types';
 import { NUMERIC_PROPS, PROPS } from '../core/props';
 import { conditionText, machineOf } from '../core/stateMachine';
 import { appearanceSpans } from '../core/scene';
@@ -50,7 +51,7 @@ function layerLine(p: Project, n: RigNode, z: number): string {
   const shape = n.shapePath && !n.curve ? shapeById(shapeIdOf(n.shapePath) ?? '')?.id ?? 'custom outline' : undefined;
   if (shape) bits.push(`shape ${shape}`);
   if (n.limb) {
-    const names = POINT_NAME[n.limb.type];
+    const names = n.limb.type === 'arm' && n.limb.c ? { a: 'shoulder', b: 'elbow', c: 'hand' } : POINT_NAME[n.limb.type];
     bits.push(limbPoints(n.limb).map((k) => `${names[k]} ${r(n.limb![k]!.x)},${r(n.limb![k]!.y)}`).join(' '));
     bits.push(`rubber hose ${n.limb.hose >= 0.5 ? 'on' : 'off'}, length ${n.limb.length}, bend ${n.limb.bend}, thickness ${n.limb.thickness}`);
   }
@@ -79,13 +80,18 @@ const EFFECT_PROPERTY_DOCS = NUMERIC_PROPS
   })
   .join('\n');
 
-const PROPERTY_DOCS = NUMERIC_PROPS
-  .filter((path) => PROPS[path].on === 'node')
-  .map((path) => {
-    const [min, max, , unit] = PROPS[path].range!;
-    return `  ${path.padEnd(24)} ${min}..${max}${unit ? ` ${unit}` : ''}  ${PROPS[path].help}`;
-  })
-  .join('\n');
+const PROPERTY_DOCS = [
+  ...NUMERIC_PROPS
+    .filter((path) => PROPS[path].on === 'node' && !PROPS[path].group)
+    .map((path) => {
+      const [min, max, , unit] = PROPS[path].range!;
+      return `  ${path.padEnd(24)} ${min}..${max}${unit ? ` ${unit}` : ''}  ${PROPS[path].help}`;
+    }),
+  // the generated families, once each as a pattern
+  `  text.char.<i>.<x|y|rotation|scale|opacity>  one letter's own offset (i = 0-based letter index); set text charOrient to face the way it flies`,
+  `  effect.<kind>.<param>    a layer effect's param, for an effect the layer has (set_layer_effect adds one):`,
+  ...Object.entries(EFFECTS).map(([kind, spec]) => `      ${kind}: ${Object.entries(spec.params).map(([k, p]) => `${k} ${p[0]}..${p[1]}${p[3]}`).join(', ')} \u2014 ${spec.blurb}`),
+].join('\n');
 
 const round = (v: unknown) => (typeof v === 'number' ? String(Math.round(v * 1000) / 1000) : JSON.stringify(v));
 
@@ -168,7 +174,7 @@ ${lines.length ? lines.join('\n') : '  (nothing animated yet)'}`;
  *   last. Without it a follow-up like "make it scale more" reads as a fresh request and
  *   the copilot builds a second clip beside the first instead of changing it.
  */
-export function systemPrompt(p: Project, made: string[] = [], playhead = 0): string {
+export function systemPrompt(p: Project, made: string[] = [], playhead = 0, protocol?: string): string {
   const tl = activeTimeline(p);
   // built-in preset contents are not worth the tokens; the ones a user asks to edit are
   const custom = p.presets.filter((x) => x.source === 'custom');
@@ -225,7 +231,7 @@ States: ${p.timelines.map((t) => `"${t.name}"`).join(', ')}.
 State machine — states are the timelines above. REUSE these, never redeclare them:
   Inputs: ${machineOf(p).inputs.map((i) => `${i.name} (${i.type}, default ${JSON.stringify(i.value)})`).join(', ') || 'none yet'}
   Transitions: ${machineOf(p).transitions.map((t) => {
-    const name = (id: string) => p.timelines.find((x) => x.id === id)?.name ?? '?';
+    const name = (id: string) => (id === ANY_STATE ? 'ANY state' : p.timelines.find((x) => x.id === id)?.name ?? '?');
     return `${name(t.from)} -> ${name(t.to)} when ${t.conditions.map((c) => conditionText(c, machineOf(p).inputs)).join(t.logic === 'OR' ? ' or ' : ' and ')}`;
   }).join('; ') || 'none yet'}
 When the user describes BEHAVIOUR ("look at me when I'm typing", "get excited above 80
@@ -236,7 +242,7 @@ ${timelineDump(p)}
 ${custom.length ? `\nPresets you or the user authored, in full — edit_preset replaces these tracks wholesale,
 so carry over anything you are not deliberately changing:\n${custom.map((x) => `  "${x.name}" (${fmtSec(x.durationMs)})\n${x.tracks.map((t) => `    ${t.nodeId}.${t.property}: ${keys(t)}`).join('\n')}`).join('\n')}` : ''}
 
-Answer with one JSON object and nothing else — no prose, no markdown fence. Fill the keys
+${protocol ?? `Answer with one JSON object and nothing else — no prose, no markdown fence. Fill the keys
 in this order, because each one depends on the one before it:
   {
     "plan": "<what the request means, which of the recipes below it matches, what is
@@ -246,7 +252,7 @@ in this order, because each one depends on the one before it:
     "calls": [ { "name": "<tool>", "args": { ... } } ]
   }
 
-Tools:
+`}Tools:
 ${TOOL_DOCS}
 
 ${ANIMATION_CRAFT}

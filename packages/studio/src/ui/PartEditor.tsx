@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { HexColorPicker } from './ColorPicker';
 import { SHAPE_LIBRARY, shapeById, type ShapeLibraryEntry } from '../core/emitters';
 import { cssColor, hexColor, parseHex } from '../core/color';
 import { useEditor } from '../core/store';
@@ -78,10 +79,8 @@ export function PartEditor({ emitter }: { emitter: Emitter }) {
                     drawn in. Hiding it behind "auto" meant there was no visible way to
                     recolour a glyph at all — picking a colour simply switches it off auto,
                     which is what picking a colour means. */}
-                <input type="color" className="swatch" aria-label="Colour of this piece"
-                  title={p.color === undefined ? 'Taking the emitter colour — pick one to override it' : 'Its own colour'}
-                  value={hexColor(p.color ?? emitter.color)}
-                  onChange={(e) => patch(p.id, (x) => { x.color = { ...parseHex(e.target.value), a: 1 }; })} />
+                <HexColorPicker label="This piece" value={hexColor(p.color ?? emitter.color)}
+                  onChange={(hex) => patch(p.id, (x) => { x.color = { ...parseHex(hex), a: 1 }; })} />
                 <button className="btn ghost sm" aria-pressed={p.color === undefined}
                   title={p.color === undefined ? 'Using the emitter colour' : 'Go back to the emitter colour'}
                   onClick={() => patch(p.id, (x) => { if (x.color === undefined) x.color = { ...emitter.color }; else delete x.color; })}>

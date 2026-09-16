@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { sceneAt } from '../core/scene';
-import { compOf, defaultProject } from '../core/defaults';
+import { compOf, defaultProject, presetPreviewProject } from '../core/defaults';
 import { MascotThumb } from '../ui/Mascot';
-import { activeTimeline } from '../core/types';
 import type { Preset, Project } from '../core/types';
 
 /**
@@ -28,13 +27,8 @@ export function AssetThumb({ preset, at = 0 }: { preset: Preset | null; at?: num
   const scene = useMemo(() => {
     if (!preset?.tracks) return null;
     try {
-      const base = defaultProject();
-      const tl = activeTimeline(base);
-      const temp: Project = {
-        ...base,
-        timelines: [{ ...tl, tracks: preset.tracks, modifiers: [], blocks: [] }],
-        activeTimelineId: tl.id,
-      };
+      // the editor's own construction, so a preset's hands, legs, shapes and effects come too
+      const temp: Project = presetPreviewProject(defaultProject(), preset);
       return sceneAt(temp, at, compOf(temp));
     } catch { return null; }
   }, [preset, at]);

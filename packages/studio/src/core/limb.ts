@@ -45,7 +45,8 @@ const SAMPLES = 29;
 const CAP = 9;
 
 /** The points a user drags: exactly two for a hand, three for a leg. Never a Bézier. */
-export const limbPoints = (l: LimbRig): ('a' | 'b' | 'c')[] => (l.type === 'leg' && l.c ? ['a', 'b', 'c'] : ['a', 'b']);
+/** a limb's points, in order: hip/shoulder, knee/elbow when it has one, then ankle/hand */
+export const limbPoints = (l: LimbRig): ('a' | 'b' | 'c')[] => (l.c ? ['a', 'b', 'c'] : ['a', 'b']);
 
 const add = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x + b.x, y: a.y + b.y });
 const sub = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x - b.x, y: a.y - b.y });
@@ -265,7 +266,7 @@ export function rubberHose(input: HoseInput): HoseResult | null {
 
 /** The input a limb node's own dials and points describe, placed by `place` and scaled. */
 export function hoseInputOf(l: LimbRig, place: (p: Vec2) => Vec2, scale: number): HoseInput {
-  const pts = l.type === 'leg' && l.c ? [l.a, l.b, l.c] : [l.a, l.b];
+  const pts = l.c ? [l.a, l.b, l.c] : [l.a, l.b];
   return {
     points: pts.map(place),
     thickness: l.thickness * scale,

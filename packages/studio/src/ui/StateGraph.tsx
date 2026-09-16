@@ -1,140 +1,215 @@
+import { useMemo, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
-import { conditionText, machineOf, transitionHolds, defaultValues } from '../core/stateMachine';
-import type { SmTransition } from '../core/types';
+import { conditionText, defaultValues, machineOf, nextTransition } from '../core/stateMachine';
+import { sceneAt, type SceneItem } from '../core/scene';
+import { compOf } from '../core/comp';
+import { MascotThumb } from './Mascot';
+import { ANY_STATE, type SmTransition, type Vec2 } from '../core/types';
 
 /**
- * The machine as a picture: states as nodes, transitions as labelled edges (§6).
+ * The machine as a node editor: states as nodes, rules and transitions as wires.
  *
- * The label on an edge is its condition — `isTyping == true`, `energy > 80` — because an
- * unlabelled arrow between two states says nothing you couldn't already see in the list.
- * An edge whose conditions currently hold is drawn live, so flipping an input in the
- * panel below shows you *why* the mascot moved, not just that it did.
+ * "Any state" is where rules start. A wire from it is a RULE — "when mood == 2, play Dance" —
+ * and holds whichever state is current, so nobody has to draw Idle → Dance, Happy → Dance
+ * and Sad → Dance by hand. A wire between two states is an ordinary transition, tried first.
+ *
+ * Drag a node by its body to move it (the layout is saved with the project); drag from its
+ * port — the dot on its right — onto a state to wire it; click a wire to edit it below; click
+ * a state without moving it to show it on the stage. A wire whose condition holds right now
+ * is drawn live, so flipping an input shows WHY the mascot moved.
  */
 
 const W = 360;
-const NODE_W = 92;
-const NODE_H = 30;
-
-function layout(count: number) {
-  // a circle reads better than a row past three states, and a row is clearer below that
-  if (count <= 3) {
-    return (i: number) => ({ x: W / 2 + (i - (count - 1) / 2) * 118, y: 46 + (i % 2) * 62 });
-  }
-  const r = Math.min(120, 46 + count * 9);
-  return (i: number) => ({
-    x: W / 2 + r * Math.sin((i / count) * Math.PI * 2),
-    y: 24 + r + 6 - r * Math.cos((i / count) * Math.PI * 2),
-  });
-}
-
-/** Where an edge leaves/meets a node box, so arrows touch the box rather than its centre. */
-function edgePoint(from: { x: number; y: number }, to: { x: number; y: number }) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const len = Math.hypot(dx, dy) || 1;
-  // scale to the box's own half-extent along that direction
-  const t = Math.min(Math.abs((NODE_W / 2 + 4) / (dx / len || 1e-6)), Math.abs((NODE_H / 2 + 4) / (dy / len || 1e-6)));
-  return { x: from.x + (dx / len) * t, y: from.y + (dy / len) * t };
-}
+const ANY = { w: 84, h: 34 };
+const NODE = { w: 150, h: 48 };
+const box = (id: string) => (id === ANY_STATE ? ANY : NODE);
 
 export function StateGraph({ selectedId, onSelect }: { selectedId: string | null; onSelect: (t: SmTransition | null) => void }) {
   const project = useEditor((s) => s.project);
   const live = useEditor((s) => s.inputs);
   const setActiveTimeline = useEditor((s) => s.setActiveTimeline);
+  const addStateTransition = useEditor((s) => s.addStateTransition);
+  const setStateNodePosition = useEditor((s) => s.setStateNodePosition);
+  const svg = useRef<SVGSVGElement>(null);
+  const [wire, setWire] = useState<{ from: string; x: number; y: number } | null>(null);
+  const moving = useRef<{ id: string; dx: number; dy: number; x0: number; y0: number; moved: boolean } | null>(null);
   const m = machineOf(project);
   const values = { ...defaultValues(project), ...live };
+  const states = project.timelines;
 
-  const pos = layout(project.timelines.length);
-  const at = new Map(project.timelines.map((t, i) => [t.id, pos(i)]));
-  const height = Math.max(...[...at.values()].map((p) => p.y), 100) + NODE_H;
+  // where each node is: its saved place, else the default — Any on the left, states in a column
+  const pos = (id: string): Vec2 => {
+    const saved = m.layout?.[id];
+    if (saved) return saved;
+    if (id === ANY_STATE) return { x: 8, y: Math.max(10, (states.length * (NODE.h + 12)) / 2 - ANY.h / 2) };
+    const i = states.findIndex((t) => t.id === id);
+    return { x: 190, y: 10 + Math.max(0, i) * (NODE.h + 12) };
+  };
+  const ids = [ANY_STATE, ...states.map((t) => t.id)];
+  const height = Math.max(100, ...ids.map((id) => pos(id).y + box(id).h + 10));
+  const centre = (id: string) => { const p = pos(id), b = box(id); return { x: p.x + b.w / 2, y: p.y + b.h / 2 }; };
+  const port = (id: string) => { const p = pos(id), b = box(id); return { x: p.x + b.w, y: p.y + b.h / 2 }; };
+  // what the machine would do next from the state on the stage, so that wire lights up
+  const firing = nextTransition(project, project.activeTimelineId, values);
 
-  const edges = m.transitions.filter((t) => at.has(t.from) && at.has(t.to));
-  // two edges between the same pair must not sit on top of each other
-  const pairSeen = new Map<string, number>();
+  // a small still of each state, at the middle of its own timeline
+  const thumbs = useMemo(() => new Map<string, SceneItem[]>(states.map((tl) => {
+    const p = { ...project, activeTimelineId: tl.id };
+    try { return [tl.id, sceneAt(p, tl.timelineDurationMs / 2, compOf(p))]; } catch { return [tl.id, []]; }
+  })), [project, states]);
+
+  const toSvg = (e: { clientX: number; clientY: number }) => {
+    const ctm = svg.current?.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
+    return { x: p.x, y: p.y };
+  };
+  const stateAt = (x: number, y: number) => states.find((tl) => {
+    const p = pos(tl.id);
+    return x >= p.x - 8 && x <= p.x + NODE.w + 8 && y >= p.y && y <= p.y + NODE.h;
+  });
+
+  const startWire = (from: string) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    svg.current?.setPointerCapture?.(e.pointerId);
+    setWire({ from, ...toSvg(e) });
+  };
+  const startMove = (id: string) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    svg.current?.setPointerCapture?.(e.pointerId);
+    const p = toSvg(e), at = pos(id);
+    moving.current = { id, dx: p.x - at.x, dy: p.y - at.y, x0: p.x, y0: p.y, moved: false };
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const p = toSvg(e);
+    if (wire) { setWire({ ...wire, ...p }); return; }
+    const mv = moving.current;
+    if (!mv) return;
+    if (!mv.moved && Math.hypot(p.x - mv.x0, p.y - mv.y0) < 3) return;
+    mv.moved = true;
+    const b = box(mv.id);
+    setStateNodePosition(mv.id, { x: Math.min(W - b.w, Math.max(0, p.x - mv.dx)), y: Math.max(0, p.y - mv.dy) });
+  };
+  const onUp = (e: React.PointerEvent) => {
+    const mv = moving.current;
+    moving.current = null;
+    // a click, not a drag: show that state on the stage
+    if (mv && !mv.moved && mv.id !== ANY_STATE) setActiveTimeline(mv.id);
+    if (!wire) return;
+    const p = toSvg(e);
+    const target = stateAt(p.x, p.y);
+    const from = wire.from;
+    setWire(null);
+    if (!target || target.id === from) return;
+    addStateTransition(from, target.id);
+    const made = machineOf(useEditor.getState().project).transitions.at(-1);
+    if (made) onSelect(made);
+  };
+
+  const label = (t: SmTransition) => t.conditions.map((c) => conditionText(c, m.inputs)).join(t.logic === 'OR' ? ' or ' : ' and ') || 'no condition';
+  const short = (s: string, n = 22) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+  const valid = m.transitions.filter((t) => states.some((s) => s.id === t.to) && (t.from === ANY_STATE || states.some((s) => s.id === t.from)));
+  // several wires between the same two nodes: fan their labels out
+  const nth = new Map<string, number>();
 
   return (
-    <div className="graph-wrap" style={{ overflow: 'auto' }}>
-      <svg viewBox={`0 0 ${W} ${height + 12}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="State machine graph">
+    <div className="graph-wrap sm-graph" style={{ overflow: 'auto' }}>
+      <svg ref={svg} viewBox={`0 0 ${W} ${height}`} style={{ width: '100%', height: 'auto', display: 'block', touchAction: 'none' }}
+        role="img" aria-label="State machine node editor" onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { moving.current = null; setWire(null); }}>
         <defs>
-          <marker id="sm-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M0 0 L8 4 L0 8 z" fill="var(--line)" />
-          </marker>
-          <marker id="sm-arrow-live" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M0 0 L8 4 L0 8 z" fill="var(--signal)" />
-          </marker>
+          {(['', '-live', '-sel'] as const).map((k) => (
+            <marker key={k} id={`sm-arrow${k}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0 0 L8 4 L0 8 z" fill={k === '-live' ? 'var(--signal)' : k === '-sel' ? 'var(--ink)' : 'var(--muted)'} />
+            </marker>
+          ))}
         </defs>
 
-        {edges.map((t) => {
-          const a = at.get(t.from)!;
-          const b = at.get(t.to)!;
-          const key = [t.from, t.to].sort().join('|');
-          const nth = pairSeen.get(key) ?? 0;
-          pairSeen.set(key, nth + 1);
-
-          const holds = transitionHolds(t, values) && project.activeTimelineId === t.from;
+        {valid.map((t) => {
           const selected = t.id === selectedId;
-          const stroke = selected ? 'var(--hot)' : holds ? 'var(--signal)' : 'var(--line)';
-          const label = t.conditions.map((c) => conditionText(c, m.inputs)).join(t.logic === 'OR' ? ' OR ' : ' AND ');
-
-          if (t.from === t.to) {
-            // a self-edge: a small loop above the box, so it is visible rather than a dot
-            const d = `M ${a.x - 14} ${a.y - NODE_H / 2} C ${a.x - 30} ${a.y - 56}, ${a.x + 30} ${a.y - 56}, ${a.x + 14} ${a.y - NODE_H / 2}`;
-            return (
-              <g key={t.id} onClick={() => onSelect(selected ? null : t)} style={{ cursor: 'pointer' }}>
-                <path d={d} fill="none" stroke={stroke} strokeWidth={selected || holds ? 1.8 : 1} markerEnd={`url(#sm-arrow${holds ? '-live' : ''})`} />
-                <text x={a.x} y={a.y - 58} textAnchor="middle" fontSize="8.5" fill={holds ? 'var(--signal)' : 'var(--muted)'}>{label}</text>
-              </g>
-            );
-          }
-
-          const p1 = edgePoint(a, b);
-          const p2 = edgePoint(b, a);
-          // bow each parallel edge a little further out, alternating sides
-          const bow = 18 + nth * 16;
-          const mx = (p1.x + p2.x) / 2;
-          const my = (p1.y + p2.y) / 2;
-          const nx = -(p2.y - p1.y);
-          const ny = p2.x - p1.x;
-          const nl = Math.hypot(nx, ny) || 1;
-          const side = a.x <= b.x ? 1 : -1;
-          const cx = mx + (nx / nl) * bow * side;
-          const cy = my + (ny / nl) * bow * side;
-
+          const holds = firing ? (firing.id === t.id || firing.id.startsWith(`${t.id}@`)) : false;
+          const stroke = selected ? 'var(--ink)' : holds ? 'var(--signal)' : 'var(--muted)';
+          const a = port(t.from), c = centre(t.to), tp = pos(t.to);
+          // into the target's nearer side, so a node moved left of its source still reads
+          const into = a.x <= c.x ? { x: tp.x - 2, y: c.y } : { x: tp.x + NODE.w + 2, y: c.y };
+          const k = `${t.from}>${t.to}`;
+          const n = nth.get(k) ?? 0;
+          nth.set(k, n + 1);
+          const bend = Math.max(40, Math.abs(into.x - a.x) / 2);
+          const c2x = a.x <= c.x ? into.x - bend : into.x + bend;
+          const d = `M ${a.x} ${a.y} C ${a.x + bend} ${a.y + n * 14}, ${c2x} ${into.y + n * 14}, ${into.x} ${into.y}`;
+          const text = label(t);
           return (
-            <g key={t.id} onClick={() => onSelect(selected ? null : t)} style={{ cursor: 'pointer' }}>
-              <path d={`M ${p1.x} ${p1.y} Q ${cx} ${cy} ${p2.x} ${p2.y}`} fill="none" stroke="transparent" strokeWidth={12} />
-              <path d={`M ${p1.x} ${p1.y} Q ${cx} ${cy} ${p2.x} ${p2.y}`} fill="none"
-                stroke={stroke} strokeWidth={selected || holds ? 1.8 : 1}
-                strokeDasharray={t.conditions.length ? undefined : '3 3'}
-                markerEnd={`url(#sm-arrow${holds ? '-live' : ''})`} />
-              {/* the quadratic's own midpoint, not the chord's — the label sits on the curve */}
-              <text x={(p1.x + 2 * cx + p2.x) / 4} y={(p1.y + 2 * cy + p2.y) / 4 - 3} textAnchor="middle"
-                fontSize="8.5" fill={selected ? 'var(--hot)' : holds ? 'var(--signal)' : 'var(--muted)'}>
-                {label.length > 34 ? `${label.slice(0, 32)}…` : label}
-                <title>{label}</title>
+            <g key={t.id} className="sm-wire" onPointerDown={(e) => e.stopPropagation()} onClick={() => onSelect(selected ? null : t)} style={{ cursor: 'pointer' }}>
+              <path d={d} fill="none" stroke="transparent" strokeWidth={12} />
+              <path d={d} fill="none" stroke={stroke} strokeWidth={selected || holds ? 1.8 : 1}
+                strokeDasharray={t.conditions.length ? undefined : '3 3'} markerEnd={`url(#sm-arrow${selected ? '-sel' : holds ? '-live' : ''})`} />
+              <text x={(a.x + into.x) / 2} y={(a.y + into.y) / 2 - 4 + n * 12} textAnchor="middle" fontSize="8.5" fill={stroke}
+                paintOrder="stroke" stroke="var(--field)" strokeWidth={3}>
+                {short(text, 20)}
+                <title>{`${t.from === ANY_STATE ? 'From any state' : states.find((x) => x.id === t.from)?.name} → ${states.find((x) => x.id === t.to)?.name} when ${text}`}</title>
               </text>
             </g>
           );
         })}
 
-        {project.timelines.map((tl) => {
-          const p = at.get(tl.id)!;
-          const active = tl.id === project.activeTimelineId;
-          const initial = tl.id === (m.initialStateId ?? project.timelines[0].id);
+        {wire && (() => {
+          const a = port(wire.from);
+          return <path d={`M ${a.x} ${a.y} L ${wire.x} ${wire.y}`} stroke="var(--ink)" strokeWidth={1.4}
+            strokeDasharray="4 3" fill="none" pointerEvents="none" markerEnd="url(#sm-arrow-sel)" />;
+        })()}
+
+        {/* any state: where rules start */}
+        {(() => {
+          const p = pos(ANY_STATE);
           return (
-            <g key={tl.id} onClick={() => setActiveTimeline(tl.id)} style={{ cursor: 'pointer' }}>
-              <rect x={p.x - NODE_W / 2} y={p.y - NODE_H / 2} width={NODE_W} height={NODE_H} rx={7}
-                fill={active ? 'var(--signal)' : 'var(--field)'} stroke={active ? 'var(--signal)' : 'var(--line)'} />
-              <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize="10.5" fontWeight={600}
-                fill={active ? '#fff' : 'var(--ink-2)'}>
-                {tl.name.length > 13 ? `${tl.name.slice(0, 12)}…` : tl.name}
-              </text>
-              {initial && <circle cx={p.x - NODE_W / 2 + 6} cy={p.y - NODE_H / 2 + 6} r={2.5} fill={active ? '#fff' : 'var(--hot)'}><title>Initial state</title></circle>}
+            <g>
+              <g onPointerDown={startMove(ANY_STATE)} style={{ cursor: 'grab' }}>
+                <rect x={p.x} y={p.y} width={ANY.w} height={ANY.h} rx={17} fill="var(--panel)" stroke="var(--ink-2)" strokeDasharray="4 3" />
+                <text x={p.x + ANY.w / 2 - 4} y={p.y + ANY.h / 2 + 3.5} textAnchor="middle" fontSize="10" fontWeight={600} fill="var(--ink-2)">Any state</text>
+                <title>Rules start here: whatever state is current, when the condition holds, go to the target. Drag to move.</title>
+              </g>
+              <circle className="sm-port" cx={p.x + ANY.w} cy={p.y + ANY.h / 2} r={5.5} fill="var(--ink)"
+                onPointerDown={startWire(ANY_STATE)} style={{ cursor: 'crosshair' }}>
+                <title>Drag onto a state to add a rule into it</title>
+              </circle>
+            </g>
+          );
+        })()}
+
+        {states.map((tl) => {
+          const p = pos(tl.id);
+          const active = tl.id === project.activeTimelineId;
+          const initial = tl.id === (m.initialStateId ?? states[0].id);
+          const scene = thumbs.get(tl.id) ?? [];
+          return (
+            <g key={tl.id}>
+              <g onPointerDown={startMove(tl.id)} style={{ cursor: 'grab' }}>
+                <rect x={p.x} y={p.y} width={NODE.w} height={NODE.h} rx={8}
+                  fill={active ? 'var(--signal-soft)' : 'var(--panel)'} stroke={active ? 'var(--ink)' : 'var(--line)'} strokeWidth={active ? 1.5 : 1} />
+                <foreignObject x={p.x + 5} y={p.y + 5} width={38} height={38} pointerEvents="none">
+                  <div style={{ width: 38, height: 38, borderRadius: 6, background: 'var(--field)', overflow: 'hidden' }}>
+                    {scene.length > 0 && <MascotThumb scene={scene} view={compOf(project)} pad={6} />}
+                  </div>
+                </foreignObject>
+                <text x={p.x + 50} y={p.y + 20} fontSize="11" fontWeight={600} fill="var(--ink)" pointerEvents="none">
+                  {initial ? '★ ' : ''}{short(tl.name, 13)}
+                </text>
+                <text x={p.x + 50} y={p.y + 35} fontSize="9" fill="var(--muted)" pointerEvents="none">
+                  {(tl.timelineDurationMs / 1000).toFixed(1)}s{tl.loop ? ' · loops' : ''}{active ? ' · on stage' : ''}
+                </text>
+                <title>{`${tl.name}${initial ? ' — the machine starts here' : ''}. Click to show it on the stage; drag to move it.`}</title>
+              </g>
+              <circle className="sm-port" cx={p.x + NODE.w} cy={p.y + NODE.h / 2} r={4.5} fill="var(--muted)"
+                onPointerDown={startWire(tl.id)} style={{ cursor: 'crosshair' }}>
+                <title>{`Drag onto another state for a transition out of ${tl.name} only`}</title>
+              </circle>
             </g>
           );
         })}
       </svg>
-      {!edges.length && <p className="hint">No transitions yet — add one below and it appears here as a labelled arrow.</p>}
+      {!valid.length && (
+        <p className="hint">Drag from <b>Any state</b>'s dot onto a state to add a rule — “when this input is… play that state”. Drag nodes to arrange them.</p>
+      )}
     </div>
   );
 }

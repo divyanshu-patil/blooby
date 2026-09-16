@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { HexColorPicker } from './ColorPicker';
 import { useEditor } from '../core/store';
 import { COMP_MAX, COMP_MIN, COMP_PRESETS, compOf } from '../core/comp';
 import { activeTimeline } from '../core/types';
@@ -80,7 +81,7 @@ export function CompositionDialog() {
           <div className="comp-swatches">
             <button className="sw checker" aria-pressed={bg === 'transparent'} title="Transparent — no backdrop in exports" onClick={() => setBg('transparent')} />
             {BACKDROPS.map((col) => <button key={col} className="sw" aria-pressed={bg === col} title={col} style={{ background: col }} onClick={() => setBg(col)} />)}
-            <input type="color" aria-label="Custom backdrop" value={bg === 'transparent' ? '#17161b' : bg} onChange={(e) => setBg(e.target.value)} />
+            <HexColorPicker label="Custom backdrop" value={bg === 'transparent' ? '#17161b' : bg} onChange={setBg} />
           </div>
         </div>
 

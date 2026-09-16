@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useEditor } from '../core/store';
 import { PROP_RANGE } from '../core/props';
 import { activeTimeline } from '../core/types';
@@ -16,6 +16,7 @@ const ICONS = {
   lock: 'M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3',
   unlock: 'M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 6.8-1.2',
   plus: 'M12 5v14 M5 12h14',
+  pin: 'M12 16v6 M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z',
   shape: 'M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7L12 3Z',
   svg: 'M8 7l-5 5 5 5 M16 7l5 5-5 5 M14 4l-4 16',
   hand: 'M5 18c3-2 5-5 6-9 M11 9c1-3 3-4 5-3 M16 6c2 0 3 2 2 4-.8 1.6-2.4 2-4 1.6',
@@ -135,7 +136,11 @@ const fmtNum = (v: number) => (Number.isInteger(v) ? String(v) : String(Math.rou
  * `nodeId` can be an array — every write applies to every id in it, so selecting both
  * eyes and dragging one slider moves both, in lock-step, as one undo step.
  */
-export function PropRow({ nodeId, property, label }: { nodeId: string | string[]; property: string; label?: string }) {
+export function PropRow({ nodeId, property, label, linkTo }: {
+  nodeId: string | string[]; property: string; label?: string;
+  /** another property that moves with this one, keeping their ratio — scale X with scale Y */
+  linkTo?: string;
+}) {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const setValue = useEditor((s) => s.setValue);
@@ -151,7 +156,18 @@ export function PropRow({ nodeId, property, label }: { nodeId: string | string[]
   const [min, max, step] = PROP_RANGE[property] ?? [-100, 100, 1];
   const driver = track ? (track.blockId ? 'clip' : 'keyframes') : 'base';
 
-  const writeAll = (n: number) => { for (const id of ids) setValue(id, property, n, `multi.${property}`); };
+  const writeAll = (n: number) => {
+    for (const id of ids) {
+      if (linkTo) {
+        // the partner keeps its proportion to this one; from 0 it simply follows
+        const mine = valueAt(project, id, property, playhead), other = valueAt(project, id, linkTo, playhead);
+        if (typeof mine === 'number' && typeof other === 'number') {
+          setValue(id, linkTo, Math.round((Math.abs(mine) > 1e-6 ? other * (n / mine) : n) * 1000) / 1000, `multi.${property}`);
+        }
+      }
+      setValue(id, property, n, `multi.${property}`);
+    }
+  };
   const toggleAll = () => { for (const id of ids) toggleKeyframe(id, property); };
 
   return (
@@ -215,4 +231,27 @@ export function KeyNav({ nodeId, property, onToggle }: {
       )}
     </span>
   );
+}
+
+/**
+ * Close an open menu, popover or tray when the pointer goes down anywhere outside it, or on
+ * Escape. `inside` is every element that counts as the menu — its trigger too, so a click on
+ * the trigger toggles it rather than closing and reopening. Capture phase, so a canvas that
+ * stops propagation still closes it.
+ */
+export function useDismiss(open: boolean, close: () => void, inside: RefObject<Element | null>[]) {
+  const latest = useRef(close);
+  latest.current = close;
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!inside.some((r) => r.current?.contains(t))) latest.current();
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') latest.current(); };
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', key); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 }

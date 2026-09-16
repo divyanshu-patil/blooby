@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import { it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { check } from '../core/testkit';
@@ -163,7 +164,7 @@ it('and is not faked as a rounded rectangle', check(!byName('Pic')));
 
 // --- GIF / MP4 / PNG render through the same Shapes, so they carry the same paint -------
 {
-  const svg = renderToStaticMarkup(Shapes({ scene: sceneAt(p, 500, view) }));
+  const svg = renderToStaticMarkup(createElement(Shapes, { scene: sceneAt(p, 500, view) }));
   it('the raster renderer draws the stroke', check(/stroke="rgba\(/.test(svg)));
   it('and each imported path with its own colour', check(svg.includes('rgba(255,0,0,') && svg.includes('rgba(0,0,255,')));
   it('and no NaN anywhere in the frame', check(!svg.includes('NaN')));

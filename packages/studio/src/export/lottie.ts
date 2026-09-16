@@ -1,3 +1,4 @@
+import { EFFECTS } from '../core/effects';
 import { compOf } from '../core/comp';
 import { sceneAt, type SceneItem } from '../core/scene';
 import { flattenPath, pathFromPoints, pathToBezier, primitivePath, splitSubpaths } from '../core/path';
@@ -39,12 +40,17 @@ export interface LottieOptions {
 
 type Vec = number[];
 
+/** Lottie's blend-mode numbers */
+const BLEND_MODE: Record<string, number> = { normal: 0, multiply: 1, screen: 2, overlay: 3, difference: 10, add: 16 };
+
 interface Chan {
   p: Vec[]; s: Vec[]; r: Vec[]; o: Vec[]; c: Vec[];
   /** the layer fill's own opacity, apart from the layer's */
   fo: Vec[];
   /** the layer stroke: colour, its own opacity, width in the shape's own units */
   sc: Vec[]; so: Vec[]; sw: Vec[];
+  /** trim path start/end, percent */
+  ts: Vec[]; te: Vec[]; tof: Vec[];
   /** a pill's own width/height and corner radius, in composition units */
   wh: Vec[]; rr: Vec[];
 }
@@ -155,6 +161,8 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
   };
 
   const skipped: string[] = [];
+  /** layers with an effect Lottie has no form for, and which */
+  const unsupported = new Map<string, Set<string>>();
   /** faces whose outlines were not loaded, so their text went out as live text */
   const missingFaces = new Set<string>();
   /** every font a live text layer names, so the descriptor lists exactly those */
@@ -218,7 +226,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
      */
     const pill = !outlines && first.shape !== 'ellipse';
 
-    const ch: Chan = { p: [], s: [], r: [], o: [], c: [], fo: [], sc: [], so: [], sw: [], wh: [], rr: [] };
+    const ch: Chan = { p: [], s: [], r: [], o: [], c: [], fo: [], sc: [], so: [], sw: [], wh: [], rr: [], ts: [], te: [], tof: [] };
     const present: boolean[] = [];
     let last: SceneItem = first;
     // seeded with the FIRST stroke it ever has, so the frames before it appears hold that
@@ -256,6 +264,21 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       // back out (a pill is resized, not scaled, so it needs nothing)
       const k = pill ? 1 : Math.sqrt(Math.max(1e-6, Math.abs(sx * sy)));
       ch.sw.push([round((st?.width ?? stroked?.width ?? 0) / k, 3)]);
+      // Lottie's trim path takes percent and draws start > end reversed, as the editor does
+      ch.ts.push([round((cur.trim?.start ?? 0) * 100, 2)]);
+      ch.te.push([round((cur.trim?.end ?? 1) * 100, 2)]);
+      ch.tof.push([round((cur.trim?.offset ?? 0) * 360, 2)]);
+    }
+    const trims = ch.ts.some(([v], i) => v > 0 || ch.te[i][0] < 100 || ch.tof[i][0] !== 0);
+    // what a Lottie player cannot draw: kept in the project and in raster exports, and named here
+    for (const scene of frames) {
+      const it = scene.find((s) => s.id === id);
+      if (!it) continue;
+      const lost = [
+        ...(it.fx?.list ?? []).filter((e) => !EFFECTS[e.kind].lottie).map((e) => EFFECTS[e.kind].label.toLowerCase()),
+        ...(it.gradient ? ['gradient fill'] : []), ...(it.clip ? ['mask'] : []), ...(it.goo ? ['goo'] : []), ...(it.taper ? ['stroke taper'] : []),
+      ];
+      if (lost.length) { unsupported.set(first.name, new Set([...(unsupported.get(first.name) ?? []), ...lost])); break; }
     }
 
     const geometry: Record<string, unknown>[] = outlines
@@ -290,10 +313,11 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       // an imported path's own stroke width is a fraction of the layer's size, which the
       // layer transform already scales — so in the shape's own units it is constant
       unit: Math.sqrt(w0 * h0),
+      ...(trims ? { trim: { s: count(prop(ch.ts, EPS.o, 0)), e: count(prop(ch.te, EPS.o, 0)), o: count(prop(ch.tof, EPS.r, 0)) } } : {}),
     };
 
     layers.push({
-      ddd: 0, ind: n + 1, ty: 4, nm: nameOf(first), sr: 1, ao: 0, bm: 0,
+      ddd: 0, ind: n + 1, ty: 4, nm: nameOf(first), sr: 1, ao: 0, bm: BLEND_MODE[first.blend ?? 'normal'] ?? 0,
       ks,
       shapes: paintGroups(first.name, geometry, outlines ?? [], layerPaint),
       ip: 0, op: total + 1, st: 0,
@@ -325,7 +349,10 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     keyframeCount,
     skipped,
     baked: [...baked],
-    warnings: [...missingFaces].map((f) => `${f} was not loaded, so its text is live text: a player will draw it in a font of its own`),
+    warnings: [
+      ...[...missingFaces].map((f) => `${f} was not loaded, so its text is live text: a player will draw it in a font of its own`),
+      ...[...unsupported].map(([name, what]) => `${name}: ${[...what].join(', ')} cannot be written into a Lottie file — it plays in the editor and the GIF/MP4/PNG exports only`),
+    ],
   };
 }
 
@@ -351,7 +378,7 @@ function glyphLayers(
 ): Record<string, unknown>[] {
   interface Slot { ch: string; p: Vec[]; r: Vec[]; s: Vec[]; o: Vec[]; on: boolean[]; size: number; items: (SceneItem | undefined)[] }
   const slots = new Map<string, Slot>();
-  const ch: Chan = { p: [], s: [], r: [], o: [], c: [], fo: [], sc: [], so: [], sw: [], wh: [], rr: [] };
+  const ch: Chan = { p: [], s: [], r: [], o: [], c: [], fo: [], sc: [], so: [], sw: [], wh: [], rr: [], ts: [], te: [], tof: [] };
   const present: boolean[] = [];
   let last = first;
   let stroked: SceneItem['stroke'] | undefined = frames.map((scene) => scene.find((s) => s.id === id)?.stroke).find(Boolean);
@@ -457,6 +484,8 @@ interface LayerPaint {
   stroke?: { c: Animated; o: Animated; w: Animated; lc: number; lj: number };
   /** the shape's own size unit, sqrt(w0·h0) — what an imported path's stroke width is a fraction of */
   unit: number;
+  /** a trim path over the geometry, when any frame shows less than the whole line */
+  trim?: { s: Animated; e: Animated; o: Animated };
 }
 
 const staticColor = (c: ColorStop) => ({ a: 0, k: [round(c.r / 255, 4), round(c.g / 255, 4), round(c.b / 255, 4), 1] });
@@ -493,6 +522,8 @@ function paintGroups(name: string, geometry: Record<string, unknown>[], outlines
   return runs.reverse().map((run, i) => {
     const o = run.outline;
     const items: Record<string, unknown>[] = [...run.shapes];
+    // a modifier acts on the shapes listed before it, so it sits between them and the paint
+    if (paint.trim) items.push({ ty: 'tm', s: paint.trim.s, e: paint.trim.e, o: paint.trim.o, m: 1, nm: 'trim', hd: false });
     if (o?.stroke) {
       items.push({ ty: 'st', c: staticColor(o.stroke), o: { a: 0, k: round(o.stroke.a * 100, 2) }, w: { a: 0, k: round((o.strokeWidth ?? 0) * paint.unit, 3) },
         lc: paint.stroke?.lc ?? 2, lj: paint.stroke?.lj ?? 2, ml: 4, bm: 0, nm: 'stroke', hd: false });

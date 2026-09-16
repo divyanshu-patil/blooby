@@ -245,7 +245,7 @@ import { activeTimeline } from '../core/types';
 
   const shut = openness().keyframes[1];
   it('a keyframe the prompt lists validates for editing', check(validate(P(), { name: 'move_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', fromMs: shut.time, toMs: shut.time + 60 } }) === null));
-  it('a time nothing sits on is refused, and says where to look', check(/Keyframes/.test(validate(P(), { name: 'remove_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', atMs: shut.time + 7000 } }) ?? '')));
+  it('a time nothing sits on is refused, and says where to look', check(/its keys are at \d/.test(validate(P(), { name: 'remove_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', atMs: shut.time + 7000 } }) ?? '')));
 
   applyCalls([{ name: 'move_keyframe', args: { nodeId: 'eyeL', property: 'eye.openness', fromMs: shut.time, toMs: shut.time + 60 } }]);
   it('move_keyframe retimes it and keeps the track sorted', check(openness().keyframes.some((k) => Math.round(k.time) === Math.round(shut.time + 60))

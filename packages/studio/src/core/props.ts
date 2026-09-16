@@ -1,3 +1,4 @@
+import { EFFECTS } from './effects';
 import type { ColorStop, Emitter, KeyValue, Modifier, Rig, RigNode, Timeline, Vec2 } from './types';
 import { CAMERA_ID } from './types';
 
@@ -12,8 +13,15 @@ function limbPoint(node: RigNode, which: string): Vec2 | undefined {
 }
 
 /** One place that knows how a property path maps onto the rig. */
+/** `text.char.<index>.<x|y|rotation|scale|opacity>` — one letter's own offset */
+const CHAR_PATH = /^text\.char\.(\d+)\.(x|y|rotation|scale|opacity)$/;
+
 export function getProp(node: RigNode, path: string): KeyValue | undefined {
   if (path.startsWith('limb.')) return getLimbProp(node, path);
+  if (path.startsWith('effect.')) {
+    const [, kind, param] = path.split('.');
+    return node.effects?.find((e) => e.kind === kind)?.params[param];
+  }
   if (path.startsWith('text.')) return getTextProp(node, path);
   switch (path) {
     case 'surface.yaw': return node.surface.yaw;
@@ -24,6 +32,18 @@ export function getProp(node: RigNode, path: string): KeyValue | undefined {
     case 'transform.scale.y': return node.transform.scale.y;
     case 'transform.rotation': return node.transform.rotation;
     case 'transform.length': return node.transform.length ?? 1;
+    case 'anchor.x': return node.anchor?.x ?? 0;
+    case 'anchor.y': return node.anchor?.y ?? 0;
+    case 'squish.x': return node.squish?.x ?? 1;
+    case 'squish.y': return node.squish?.y ?? 1;
+    case 'trim.start': return node.trim?.start ?? 0;
+    case 'trim.end': return node.trim?.end ?? 1;
+    case 'trim.offset': return node.trim?.offset ?? 0;
+    case 'stroke.taper': return node.stroke?.taper ?? 0;
+    case 'gradient.angle': return node.gradient?.angle;
+    case 'depth.z': return node.depth?.z ?? 0;
+    case 'depth.rotateX': return node.depth?.rotateX ?? 0;
+    case 'depth.rotateY': return node.depth?.rotateY ?? 0;
     case 'eye.openness': return node.eye?.openness;
     case 'eye.distanceFromCenter': return node.eye?.distanceFromCenter;
     case 'size.x': return node.size.x;
@@ -109,7 +129,13 @@ function getTextProp(node: RigNode, path: string): KeyValue | undefined {
     case 'text.chars.progress': return t.chars?.progress ?? 1;
     case 'text.chars.stagger': return t.chars?.stagger ?? 0.5;
     case 'text.chars.kind': return t.chars?.kind ?? 'none';
-    default: return undefined;
+    default: {
+      const m = CHAR_PATH.exec(path);
+      if (!m) return undefined;
+      const o = t.charOffsets?.[+m[1]];
+      const k = m[2] as 'x' | 'y' | 'rotation' | 'scale' | 'opacity';
+      return o?.[k] ?? (k === 'scale' || k === 'opacity' ? 1 : 0);
+    }
   }
 }
 
@@ -125,6 +151,12 @@ function setTextProp(node: RigNode, path: string, v: KeyValue): void {
   }
   const n = v as number;
   if (typeof n !== 'number' || !Number.isFinite(n)) return;
+  const cm = CHAR_PATH.exec(path);
+  if (cm) {
+    const i = +cm[1], k = cm[2];
+    t.charOffsets = { ...t.charOffsets, [i]: { ...t.charOffsets?.[i], [k]: n } };
+    return;
+  }
   const path2 = { mode: 'straight' as const, ...t.path };
   switch (path) {
     case 'text.font.weight': t.font = { ...t.font, weight: Math.min(900, Math.max(100, n)) }; break;
@@ -147,6 +179,13 @@ function setTextProp(node: RigNode, path: string, v: KeyValue): void {
 export function setProp(node: RigNode, path: string, v: KeyValue): void {
   const n = v as number;
   if (path.startsWith('limb.')) { setLimbProp(node, path, n); return; }
+  if (path.startsWith('effect.')) {
+    // an animated param on an effect the layer has; a track cannot conjure the effect itself
+    const [, kind, param] = path.split('.');
+    const fx = node.effects?.find((e) => e.kind === kind);
+    if (fx && typeof n === 'number') fx.params = { ...fx.params, [param]: n };
+    return;
+  }
   if (path.startsWith('text.')) { setTextProp(node, path, v); return; }
   switch (path) {
     case 'surface.yaw': node.surface.yaw = n; break;
@@ -157,6 +196,18 @@ export function setProp(node: RigNode, path: string, v: KeyValue): void {
     case 'transform.scale.y': node.transform.scale.y = n; break;
     case 'transform.rotation': node.transform.rotation = n; break;
     case 'transform.length': node.transform.length = n; break;
+    case 'anchor.x': node.anchor = { x: n, y: node.anchor?.y ?? 0 }; break;
+    case 'anchor.y': node.anchor = { x: node.anchor?.x ?? 0, y: n }; break;
+    case 'squish.x': node.squish = { x: n, y: node.squish?.y ?? 1 }; break;
+    case 'squish.y': node.squish = { x: node.squish?.x ?? 1, y: n }; break;
+    case 'trim.start': node.trim = { start: Math.min(1, Math.max(0, n)), end: node.trim?.end ?? 1 }; break;
+    case 'trim.end': node.trim = { start: node.trim?.start ?? 0, end: Math.min(1, Math.max(0, n)), ...(node.trim?.offset ? { offset: node.trim.offset } : {}) }; break;
+    case 'trim.offset': node.trim = { start: node.trim?.start ?? 0, end: node.trim?.end ?? 1, offset: n }; break;
+    case 'stroke.taper': node.stroke = { ...node.stroke, taper: Math.min(1, Math.max(0, n)) }; break;
+    case 'gradient.angle': if (node.gradient) node.gradient = { ...node.gradient, angle: n }; break;
+    case 'depth.z': node.depth = { rotateX: 0, rotateY: 0, ...node.depth, z: n }; break;
+    case 'depth.rotateX': node.depth = { z: 0, rotateY: 0, ...node.depth, rotateX: n }; break;
+    case 'depth.rotateY': node.depth = { z: 0, rotateX: 0, ...node.depth, rotateY: n }; break;
     case 'eye.openness': if (node.eye) node.eye.openness = n; break;
     case 'eye.distanceFromCenter': if (node.eye) node.eye.distanceFromCenter = n; break;
     case 'size.x': node.size.x = n; break;
@@ -182,6 +233,7 @@ export function getCameraProp(rig: Rig, path: string): number {
     case 'camera.distance': return rig.camera.distance;
     case 'camera.offset.x': return rig.camera.offset.x;
     case 'camera.offset.y': return rig.camera.offset.y;
+    case 'camera.zoom': return rig.camera.zoom ?? 1;
     default: return 0;
   }
 }
@@ -192,6 +244,7 @@ export function setCameraProp(rig: Rig, path: string, v: number): void {
     case 'camera.distance': rig.camera.distance = v; break;
     case 'camera.offset.x': rig.camera.offset.x = v; break;
     case 'camera.offset.y': rig.camera.offset.y = v; break;
+    case 'camera.zoom': rig.camera.zoom = Math.min(20, Math.max(0.05, v)); break;
   }
 }
 
@@ -283,6 +336,9 @@ export interface PropSpec {
   /** Switches at each keyframe rather than interpolating between them — words and font
    *  names have no halfway. */
   discrete?: true;
+  /** one of a generated family (a letter's offsets, an effect's params): listed to the
+   *  copilot once, as a pattern, rather than row by row */
+  group?: string;
 }
 
 export const PROPS: Record<string, PropSpec> = {
@@ -306,6 +362,30 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'In-plane 2D roll in degrees. This is a tilt of the drawing, not a rotation around the sphere \u2014 8\u00b0 reads as a cheeky head-tilt.' },
   'transform.length': { on: 'node', label: 'Length', range: [0.1, 4, 0.01, '\u00d7'],
     help: 'Stretches the feature along its own long axis. 1 is normal; on an eye this is what makes it tall and round rather than wide.' },
+  'anchor.x': { on: 'node', label: 'Anchor X', range: [-400, 400, 1, 'px'],
+    help: 'The pivot for rotation, scale and squish, px right of the layer centre. 0 is the centre. Put it at the bottom of the body (anchor.y = its radius) and a squash stays on the ground.' },
+  'anchor.y': { on: 'node', label: 'Anchor Y', range: [-400, 400, 1, 'px'],
+    help: 'The pivot, px below the layer centre. Moving the anchor does not move the layer; it changes what it turns and squashes around.' },
+  'squish.x': { on: 'node', label: 'Squish X', range: [0.4, 1.8, 0.01, '\u00d7'],
+    help: 'Squash-and-stretch width, multiplied onto scale. 1 is neutral. A squash is squish.x 1.1 with squish.y 0.9; a stretch the reverse. Keep them within ±25%.' },
+  'squish.y': { on: 'node', label: 'Squish Y', range: [0.4, 1.8, 0.01, '\u00d7'],
+    help: 'Squash-and-stretch height, multiplied onto scale. 1 is neutral. Moves opposite to squish.x so the volume reads as kept.' },
+  'trim.start': { on: 'node', label: 'Start offset', range: [0, 1, 0.01, ''],
+    help: 'Curves and outlines: where the visible stroke begins, 0-1 along the line. With trim.end it draws a line on: start 0, end 0 → 1 over 600-900ms. start > end draws the same span reversed.' },
+  'trim.end': { on: 'node', label: 'End offset', range: [0, 1, 0.01, ''],
+    help: 'Curves and outlines: where the visible stroke ends, 0-1 along the line. 1 is the whole line. Animate 0 → 1 to draw on; animate trim.start 0 → 1 afterwards to draw off.' },
+  'trim.offset': { on: 'node', label: 'Offset along', range: [-2, 2, 0.01, ''],
+    help: 'Curves: slides the drawn stretch along the line, wrapping round a closed path. Animate 0 \u2192 1 to run a dash round a ring.' },
+  'stroke.taper': { on: 'node', label: 'Taper', range: [0, 1, 0.01, ''],
+    help: 'Stroke width varies along the line like a brush: 0 even, 1 thin at both ends and full width in the middle.' },
+  'gradient.angle': { on: 'node', label: 'Gradient angle', range: [-360, 360, 1, '\u00b0'],
+    help: 'Direction of a layer\u2019s gradient fill (set_gradient gives it one). Animate it to sweep a rim light round.' },
+  'depth.z': { on: 'node', label: 'Depth Z', range: [-600, 3000, 1, 'px'],
+    help: '2.5D depth of a layer in the world: + is further away \u2014 smaller, and it pans and zooms less with the camera (parallax). 0 is the stage plane; -300 is near the lens.' },
+  'depth.rotateX': { on: 'node', label: 'Rotate X', range: [-360, 360, 1, '\u00b0'],
+    help: '3D-style tilt about the layer\u2019s horizontal axis: it foreshortens vertically and flips past 90\u00b0.' },
+  'depth.rotateY': { on: 'node', label: 'Rotate Y', range: [-360, 360, 1, '\u00b0'],
+    help: '3D-style turn about the vertical axis \u2014 a card flip: it narrows to an edge at 90\u00b0 and shows its mirrored back past it. On a mascot it spins the sphere, carrying the face round the back.' },
   'eye.openness': { on: 'node', label: 'Openness', range: [0, 1, 0.01, ''],
     help: 'Eyes only. 0 is fully closed, 1 fully open. A blink is 1 \u2192 0 \u2192 1 over about 120 ms.' },
   'eye.distanceFromCenter': { on: 'node', label: 'Eye distance', range: [-80, 80, 0.5, '\u00b0'],
@@ -408,10 +488,12 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'Perspective, as a field-of-view angle. 0 is flat/orthographic; higher makes the sphere bulge and features near the rim fall away faster.' },
   'camera.distance': { on: 'camera', label: 'Distance', range: [1.2, 20, 0.1, 'R'],
     help: 'How far the camera sits from the sphere, measured in sphere radii.' },
-  'camera.offset.x': { on: 'camera', label: 'Pan X', range: [-300, 300, 1, 'px'],
-    help: 'Pans the whole view horizontally, in pixels.' },
-  'camera.offset.y': { on: 'camera', label: 'Pan Y', range: [-300, 300, 1, 'px'],
+  'camera.offset.x': { on: 'camera', label: 'Pan X', range: [-5000, 5000, 1, 'px'],
+    help: 'Pans the whole view horizontally, in pixels. To TRACK a mascot walking right, key it going negative by the distance walked. Layers with depth.z pan less (parallax).' },
+  'camera.offset.y': { on: 'camera', label: 'Pan Y', range: [-5000, 5000, 1, 'px'],
     help: 'Pans the whole view vertically, in pixels.' },
+  'camera.zoom': { on: 'camera', label: 'Zoom', range: [0.05, 20, 0.01, '\u00d7'],
+    help: 'Zooms the whole view about the composition centre. 1 is none; 1 \u2192 1.3 over 800ms is a push-in. Deeper layers (depth.z) zoom less.' },
 
   /* --- effects: an emitter or a modifier, keyed by its own id instead of a node's ---
    * `fx.` rather than the bare field name so nothing can collide with a node property,
@@ -426,6 +508,20 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'Emitter only. How many may be alive at a time — on an orbit, how many sit on the ring.' },
   'fx.spin': { on: 'effect', label: 'Spin', range: [-720, 720, 5, '\u00b0'],
     help: 'Emitter only. Degrees each thing turns over one full life.' },
+  'fx.velocity': { on: 'effect', label: 'Velocity', range: [0, 3000, 5, 'u/s'],
+    help: 'Burst emitters: launch speed of each particle, rig units per second. 300-900 is an explosion.' },
+  'fx.velocityJitter': { on: 'effect', label: 'Velocity spread', range: [0, 1, 0.01, ''],
+    help: 'Burst emitters: how much launch speeds differ, 0 all the same, 1 from nothing to double.' },
+  'fx.angle': { on: 'effect', label: 'Direction', range: [-360, 360, 1, '\u00b0'],
+    help: 'Burst emitters: the centre of the launch directions in degrees; -90 is up, 90 down.' },
+  'fx.spread': { on: 'effect', label: 'Spread', range: [0, 360, 1, '\u00b0'],
+    help: 'Burst emitters: the fan of launch directions round Direction; 360 is every way.' },
+  'fx.drag': { on: 'effect', label: 'Drag', range: [0, 10, 0.05, '/s'],
+    help: 'Burst emitters: how fast particles slow down; 1-3 makes an explosion ease out and hang.' },
+  'fx.gravity': { on: 'effect', label: 'Gravity', range: [-3000, 3000, 10, 'u/s\u00b2'],
+    help: 'Burst emitters: a steady pull down (+) or up (-) — droplets falling, sparks rising.' },
+  'fx.turbulence': { on: 'effect', label: 'Turbulence', range: [0, 200, 1, 'u'],
+    help: 'Burst emitters: noise that stirs each particle off its line.' },
   'fx.bow': { on: 'effect', label: 'Bow', range: [-200, 200, 1, 'px'],
     help: 'Emitter only. Sideways bend of the path — what makes a tear curve instead of falling flat.' },
   'fx.fadeStart': { on: 'effect', label: 'Fade at', range: [0, 1, 0.01, ''],
@@ -455,6 +551,23 @@ export const PROPS: Record<string, PropSpec> = {
   'fx.amplitude': { on: 'effect', label: 'Amplitude', range: [0, 200, 1, ''],
     help: 'Modifier only. How far it travels at full amount, in the unit that modifier moves.' },
 };
+// generated families: every effect param, and each letter's own offsets
+for (const [kind, spec] of Object.entries(EFFECTS)) {
+  for (const [param, [min, max, step, unit]] of Object.entries(spec.params)) {
+    PROPS[`effect.${kind}.${param}`] = { on: 'node', label: `${spec.label} ${param}`, range: [min, max, step, unit], group: 'effect',
+      help: `${spec.label} effect: ${param}. ${spec.blurb}` };
+  }
+}
+const CHAR_RANGE: Record<string, [number, number, number, string]> = {
+  x: [-800, 800, 1, 'px'], y: [-800, 800, 1, 'px'], rotation: [-720, 720, 1, '\u00b0'], scale: [0, 5, 0.01, '\u00d7'], opacity: [0, 1, 0.01, ''],
+};
+for (let i = 0; i < 32; i++) {
+  for (const [k, range] of Object.entries(CHAR_RANGE)) {
+    PROPS[`text.char.${i}.${k}`] = { on: 'node', label: `Letter ${i + 1} ${k}`, range, group: 'char',
+      help: `Text layers: letter ${i} (0-based, spaces counted, line breaks not) offset \u2014 x/y px, rotation deg, scale and opacity multipliers.` };
+  }
+}
+
 
 /** Every animatable property of an emitter or a modifier. */
 export const EFFECT_PROPS: string[] = Object.keys(PROPS).filter((k) => PROPS[k].on === 'effect');
@@ -485,7 +598,8 @@ export const PROP_RANGE: Record<string, [number, number, number, string]> =
  */
 export const PROP_ALIAS: Record<string, string> = (() => {
   const byTail: Record<string, string[]> = {};
-  for (const path of Object.keys(PROPS)) {
+  // the generated families (a letter's rotation, an effect's radius) are never what a short name means
+  for (const path of Object.keys(PROPS).filter((p) => !PROPS[p].group)) {
     for (const tail of [path.slice(path.indexOf('.') + 1), path.slice(path.lastIndexOf('.') + 1)]) {
       if (tail === path) continue;
       (byTail[tail] ??= []).push(path);

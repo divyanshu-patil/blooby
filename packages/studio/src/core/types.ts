@@ -63,6 +63,10 @@ export interface TextStyle {
   reveal?: { start: number; end?: number };
   /** per-character motion, driven by a keyframable 0 → 1 `progress` */
   chars?: { kind: TextCharAnim; progress: number; stagger: number };
+  /** per-letter offsets on top of the layout, by letter index — animatable as text.char.<i>.<x|y|rotation|scale|opacity> */
+  charOffsets?: Record<number, { x?: number; y?: number; rotation?: number; scale?: number; opacity?: number }>;
+  /** turn each letter to face the way its offset is moving (letters flying on curved paths) */
+  charOrient?: boolean;
 }
 
 /**
@@ -111,7 +115,7 @@ export interface LimbRig {
   a: Vec2;
   /** hand (arm) or knee (leg) */
   b: Vec2;
-  /** ankle — legs only */
+  /** the end past a joint: a leg's ankle below its knee (b), or an arm's hand past its elbow (b) */
   c?: Vec2;
   /** 0 = a rigid limb of straight segments, 1 = a smooth rubber hose. Animatable, so a
    *  limb can go floppy mid-clip; the toggle writes 0 or 1. */
@@ -128,6 +132,14 @@ export interface LimbRig {
   length: number;
   /** legs: the foot at the ankle */
   foot?: { angle: number; length: number; width: number };
+  /**
+   * Where the foot is planted, in WORLD (composition-centred) px — set by pinning. While
+   * it is set the limb's end point is drawn here whatever the body does, and the knee
+   * follows the hip→foot line, so the mascot moves and the foot stays on the ground.
+   */
+  pin?: Vec2;
+  /** any other point held in WORLD px — a hip or a knee that stays where it was put */
+  pins?: Partial<Record<'a' | 'b' | 'c', Vec2>>;
 }
 
 export interface RigNode {
@@ -155,6 +167,46 @@ export interface RigNode {
     /** eye/primitive: elongation along the major (vertical) axis */
     length?: number;
   };
+
+  /**
+   * The pivot rotation, scale and squish happen around, in the layer's own unscaled px from
+   * its centre (CSS transform-origin). {0,0} — or absent — is the centre, as it always was.
+   * Moving it never moves the layer at rest; it changes what a roll or a squash swings about.
+   */
+  anchor?: Vec2;
+
+  /**
+   * Squash and stretch as its own dial, multiplied onto `transform.scale` — so a squish
+   * preset can be dropped over a clip that already animates scale without fighting it.
+   * {1,1} (or absent) is neutral. Clamped 0.4–1.8 where it is read.
+   */
+  squish?: Vec2;
+
+  /**
+   * The visible stretch of an outline's stroke, as fractions of its length (a trim path).
+   * start 0 / end 1 is the whole line. start > end is not an error: it is the same span
+   * drawn the other way round, so a draw-on can run backwards through it.
+   */
+  trim?: { start: number; end: number; offset?: number };
+
+  /**
+   * The layer's effect stack, drawn in order: glow, blur, shadow, rgb split, slices,
+   * scanlines, flicker, jitter, echo, goo. One of each kind per layer; every numeric param is
+   * animatable as `effect.<kind>.<param>` (see EFFECTS in core/effects.ts).
+   */
+  effects?: LayerEffect[];
+  /** how the layer composites over what is under it */
+  blend?: BlendMode;
+  /** a gradient paint instead of the flat fill: two or more stops, linear at `angle` or radial */
+  gradient?: { type: 'linear' | 'radial'; angle: number; stops: { at: number; color: ColorStop }[] };
+  /** clip this layer (and what it holds) to another layer's outline, as it is drawn — or to outside it */
+  mask?: { nodeId: string; invert?: boolean };
+  /**
+   * 2.5D: depth away from the camera (px; + is further, smaller, slower to pan) for a layer in
+   * the world, and turns about the layer's own X and Y axes in degrees (a card flip). On a
+   * mascot, rotateY turns the sphere, carrying its features round the back.
+   */
+  depth?: { z: number; rotateX: number; rotateY: number };
 
   /** Base geometry in rig units. body: x = radius. eye/primitive: x = width, y = height. */
   size: Vec2;
@@ -190,7 +242,8 @@ export interface RigNode {
    *  drives it). Undefined means on, fully opaque. */
   fill?: { enabled?: boolean; opacity?: number };
   /** Stroke paint. Undefined means no stroke — which is every layer before this existed. */
-  stroke?: { enabled?: boolean; color?: ColorStop; opacity?: number; width?: number; lineCap?: LineCap; lineJoin?: LineJoin };
+  /** taper: 0 an even line; up to 1 thin at both ends and full width in the middle, like a brush stroke */
+  stroke?: { enabled?: boolean; color?: ColorStop; opacity?: number; width?: number; lineCap?: LineCap; lineJoin?: LineJoin; taper?: number };
 
   limb?: LimbRig;
 
@@ -241,8 +294,20 @@ export interface RigNode {
 /** Every outline core/path.ts can generate. `custom` is what hand-editing produces. */
 export type ShapeKind = 'circle' | 'pill' | 'rect' | 'polygon' | 'star' | 'pebble' | 'capsule' | 'roundedRect' | 'blob' | 'octopus';
 
+export type BlendMode = 'normal' | 'screen' | 'multiply' | 'overlay' | 'add' | 'difference';
+export type EffectKind = 'glow' | 'blur' | 'shadow' | 'rgbSplit' | 'slices' | 'scanlines' | 'flicker' | 'jitter' | 'echo' | 'goo';
+export interface LayerEffect {
+  kind: EffectKind;
+  enabled?: boolean;
+  /** numeric params by name — each kind's list and ranges are in core/effects.ts */
+  params: Record<string, number>;
+  color?: ColorStop;
+}
+
 export interface Rig {
   id: string;
+  /** set on an EVALUATED rig only: the time it was evaluated at, for effects that move on their own clock (flicker, jitter, slices) */
+  clockMs?: number;
   nodes: Record<string, RigNode>;
   rootId: string;
   camera: {
@@ -251,13 +316,15 @@ export interface Rig {
     /** eye distance in body radii */
     distance: number;
     offset: Vec2;
+    /** zoom about the composition centre, 1 = none — a push-in is zoom 1 → 1.3 */
+    zoom?: number;
   };
 }
 
 export type EasingCurve =
   | { type: 'linear' }
   /** `hold` keeps the value until the next keyframe and then cuts — a shape switch */
-  | { type: 'preset'; name: 'easeIn' | 'easeOut' | 'easeInOut' | 'bounce' | 'elastic' | 'hold' }
+  | { type: 'preset'; name: 'easeIn' | 'easeOut' | 'easeInOut' | 'bounce' | 'elastic' | 'hold' | 'spring' | 'anticipate' | 'overshoot' }
   | { type: 'bezier'; p1: Vec2; p2: Vec2 };
 
 /** A string value is an SVG path `d` — see core/path.ts, which morphs between two. */
@@ -268,6 +335,13 @@ export interface Keyframe {
   time: number;
   value: KeyValue;
   easingOut: EasingCurve;
+  /**
+   * Set on a key that a Bounce or Elastic easing generated: the id of the key whose curve it
+   * belongs to. Picking another easing on that key removes these again.
+   */
+  bakedFrom?: string;
+  /** On the key a Bounce/Elastic was picked for — the curve it now stands for as points */
+  bakedAs?: 'bounce' | 'elastic';
 }
 
 export interface Track {
@@ -302,6 +376,15 @@ export const MODIFIERS = {
   pendulum: { label: 'Pendulum', maxFrequency: 6,
     blurb: 'Swings it back and forth on one axis, like a hanging weight. Rotation by default; the axis is a dial.',
     help: 'Swings the node back and forth on ONE axis, like a hanging weight \u2014 set `axis` to "rotation" (default), "x", "y", "yaw" or "pitch". frequency 0.3-1.5 Hz, amplitude 6-20.' },
+  walk: { label: 'Walk', maxFrequency: 4,
+    blurb: 'A procedural walk cycle: travels, bobs, plants each foot and swings the arms. On a mascot with legs.',
+    help: 'Walks a MASCOT (nodeId = its body): it travels amplitude px per step (negative walks left), frequency steps per second (1.5-2.5), feet planted on the ground during each stance, knees bend, arms swing opposite, body bobs and leans. Legs need knees. Use set_effect_range for when it walks.' },
+  follow: { label: 'Follow-through', maxFrequency: 6,
+    blurb: 'Secondary motion: the layer lags behind its mascot and springs back past its rest — faces, hands, antennae.',
+    help: 'Follow-through on a PART (the face, a hand, a hat): when its mascot moves, it lags and overshoots like it is on a spring. frequency is the spring (2-5 Hz, lower = floppier), amplitude the lag strength 20-100.' },
+  jelly: { label: 'Jelly', maxFrequency: 8,
+    blurb: 'Soft-body deformation: the outline stretches with speed, splats flat on impact and wobbles back.',
+    help: 'Soft body on a MASCOT or shape: its OUTLINE deforms from its own vertical motion \u2014 stretched when moving fast, flattened and widened at the bottom when it lands (volume kept), then wobbles. amplitude 20-100 (strength), frequency 3-6 Hz (wobble).' },
 } as const;
 
 /** Which single property a pendulum swings. Rotation is the one that reads as a pendulum. */
@@ -336,10 +419,13 @@ export interface Modifier {
    */
   startMs?: number;
   endMs?: number;
+  /** walk only: a finished walk keeps the mascot where it got to until here (same clock as
+   *  startMs) instead of for the rest of its scope — how a walk inside a longer sequence ends */
+  holdUntilMs?: number;
 }
 
 /** How an emitted particle travels. */
-export type EmitterPath = 'arc' | 'orbit' | 'fall';
+export type EmitterPath = 'arc' | 'orbit' | 'fall' | 'burst';
 
 /**
  * Where an emitter's path begins or ends.
@@ -446,6 +532,22 @@ export interface Emitter {
 
   /** 0–1 of a particle's life, where it starts fading out */
   fadeStart: number;
+  /**
+   * `path: "burst"` physics — every particle is born at once and flies: out at `velocity`
+   * (rig units/s, ± velocityJitter), `angle` ± spread/2 degrees, slowed by `drag` (per second),
+   * pulled by `gravity`, stirred by `turbulence`. Closed form, so any instant is exact.
+   */
+  velocity?: number;
+  velocityJitter?: number;
+  angle?: number;
+  spread?: number;
+  drag?: number;
+  gravity?: number;
+  turbulence?: number;
+  /** particles fly to points spread over another layer's shape — an assembly */
+  attract?: { nodeId: string; startMs: number; durationMs: number; fill?: boolean };
+  /** colour at the end of a particle's life; it lerps from `color` */
+  colorTo?: ColorStop;
   scaleFrom: number;
   scaleTo: number;
   /** degrees over a full life */
@@ -669,8 +771,12 @@ export interface SmCondition {
  * `from`/`to` are timeline ids, not names, so renaming a state cannot break an edge.
  * Names are resolved once, at export.
  */
+/** `SmTransition.from` for a rule that fires from whatever state is current. */
+export const ANY_STATE = '*';
+
 export interface SmTransition {
   id: string;
+  /** a state (timeline) id, or ANY_STATE — "when this holds, go to `to`", from anywhere */
   from: string;
   to: string;
   conditions: SmCondition[];
@@ -692,6 +798,8 @@ export interface SmTransition {
  */
 export interface StateMachineDef {
   id: string;
+  /** where each state (and ANY_STATE) sits in the state editor's graph, once moved by hand */
+  layout?: Record<string, Vec2>;
   /** a timeline id; falls back to the first timeline when unset or stale */
   initialStateId?: string;
   inputs: SmInput[];

@@ -4,26 +4,29 @@ import { namedEasing, EASING_NAMES } from '../core/easing';
 import { blockAt, blocksEnd, insertBlock, relayoutBlocks } from '../core/timeline';
 import { activeTrackFor, sceneAt, valueAt } from '../core/scene';
 import { setProp } from '../core/props';
-import { laneOf, laneOfMascot, makeMascot, MASCOT_KINDS, mascotLabel, mascotOf, nextMascotName, type MascotKind } from '../core/mascot';
+import { SQUISH_PRESETS, applySquish, squishPreset } from '../core/squish';
+import { applyPose, findPose, POSES } from '../core/poses';
+import { EFFECT_KINDS, EFFECTS, makeEffect } from '../core/effects';
+import { faceOf, makeFace, laneOf, laneOfMascot, makeMascot, MASCOT_KINDS, mascotLabel, mascotOf, nextMascotName, type MascotKind } from '../core/mascot';
 import { curveFromPath, curveToPath, moveAnchor, nearestOnCurve, removePoint, reverseCurve, type Curve } from '../core/curve';
 import { layoutLines, TEXT_DEFAULTS } from '../core/text';
 import { metricsFor } from '../core/fonts';
 import { naturalOutline } from '../core/path';
 import { presetTargets } from '../core/defaults';
-import { activeTimeline, MODIFIER_KINDS, MODIFIERS } from '../core/types';
+import { activeTimeline, ANY_STATE, CAMERA_ID, MODIFIER_KINDS, MODIFIERS } from '../core/types';
 import { defaultValueFor, directTransition, machineOf, OPERATORS } from '../core/stateMachine';
 import { libraryOutline, shapeById, SHAPE_LIBRARY } from '../core/emitters';
 import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
 import {
   addMascot, duplicateLayer, isInside, layerOrder, makeCurveLayer, makeGroup, makeLimb, makeShapeLayer, makeSvgLayer, makeTextLayer,
-  nextName, placeUnder, removeLayer, reorderLayer, setAppearance, setAttachment, setMorph, textName, topZ, writeValue,
+  limbParent, nextName, ownLayer, pinLimbPoint, rolesFor, setRole, showLayerIn, pinLimb, placeUnder, removeLayer, reorderLayer, setAppearance, setAttachment, setFaceRole, setMorph, textName, topZ, writeValue,
   type AppearanceRange,
 } from '../core/layers';
 import { looksLikeSvg } from '../core/svg';
 import { COMP_MAX, COMP_MIN, COMP_PRESETS, compOf } from '../core/comp';
 import { MORPH_MODE_NAMES, type MorphMode } from '../core/easing';
 import { parseHex } from '../core/color';
-import type { ColorStop, ConditionOp, EasingCurve, InputType, InputValue, KeyValue, LineCap, LineJoin, ModifierKind, Project, RigNode, SmCondition, Vec2 } from '../core/types';
+import type { BlendMode, EffectKind, ColorStop, ConditionOp, EasingCurve, InputType, InputValue, KeyValue, LineCap, LineJoin, ModifierKind, Project, RigNode, SmCondition, Vec2 } from '../core/types';
 
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
@@ -47,6 +50,10 @@ export const TOOL_NAMES = [
   'set_text_curve', 'set_text_path', 'set_text_path_offset', 'animate_text',
   'add_curve', 'add_curve_point', 'move_curve_point', 'remove_curve_point', 'close_curve', 'reverse_curve',
   'set_layer_parent', 'set_layer_order',
+  // faces, planted feet, squish presets, any-state rules — see TOOL_DOCS
+  'set_face', 'add_face', 'pin_limb', 'apply_squish_preset', 'add_rule', 'show_layer_in_state', 'set_role', 'set_pose',
+  // effect stack, compositing, gradients
+  'set_layer_effect', 'set_layer_style',
 ] as const;
 
 /** The JSON the model must produce. Ollama enforces this shape server-side via `format`. */
@@ -99,8 +106,16 @@ edit_preset           { preset, name?, durationMs?, tracks? }  // tracks REPLACE
 To change a keyframe's VALUE or easing, call add_keyframe at the same atMs \u2014 it overwrites in place.
 
 add_emitter           { name, glyphs, path?, fromNode?, fromX?, fromY?, toNode?, toX?, toY?,
-                        color?, size?, bow?, rateMs?, lifeMs?, count?, fadeStart?, spin?,
-                        wobble?, radiusX?, radiusY?, startMs?, endMs? }
+                        color?, colorTo?, size?, bow?, rateMs?, lifeMs?, count?, fadeStart?, spin?,
+                        wobble?, radiusX?, radiusY?, startMs?, endMs?, parts?,
+                        velocity?, velocityJitter?, angle?, spread?, drag?, gravity?, turbulence?,
+                        attract?: { node, startMs, durationMs, fill? } }
+                      // path "burst": EVERY particle (count, up to 2000) is born at startMs and explodes out at
+                      // velocity (units/s) in angle ± spread/2 (deg, -90 up), slowing by drag, pulled by gravity,
+                      // stirred by turbulence; lifeMs is how long they last. attract: from its startMs (clip time)
+                      // each flies to a point on that layer's outline (fill: over its area) — an assembly,
+                      // even onto a layer that is still invisible. colorTo lerps the colour over the life.
+                      // Give glyphs [] and parts [{ shape: "dot" }] for plain dots.
                       // little things leaving the mascot: zzz, \u266a, tears, confetti, orbiting objects.
                       // glyphs is an array cycled one per particle, e.g. ["z","z","Z"].
                       // path: "arc" drifts (zzz, notes) \u00b7 "fall" drops (tears, confetti)
@@ -249,7 +264,44 @@ reverse_curve         { nodeId }                               // runs it the ot
 set_layer_parent      { nodeId, parent }                       // a layer or a mascot to ride; null = the world.
                       // Keeps its place on screen. Mascots may only follow mascots.
 set_layer_order       { nodeId, above?, below?, to?: "front"|"back" }
-                      // above/below another layer or MASCOT — a mascot moves as one, parts and all`.trim()
+                      // above/below another layer or MASCOT — a mascot moves as one, parts and all
+
+FACE, FEET, SQUISH, RULES
+set_face              { nodeId, face: true|false }             // make a shape or group the mascot's FACE: the eyes
+                      // (and hands) move onto it, nothing jumps. A face moves, rolls, scales and LOOKS
+                      // (its surface.yaw / surface.pitch) apart from the body. false gives them back.
+add_face              { mascot? }                              // a face group for a mascot whose face was deleted
+pin_limb              { nodeId, pinned: true|false, point? }   // point: "hip"|"knee"|"ankle"|"shoulder"|"elbow"|"hand" (default the end).
+                      // A pinned point stays where it is in the world; the limb stretches to reach it, never below its length.
+                      // Plant a leg's foot on the ground where it is now:
+                      // the body can move, roll, squash and scale and the foot stays. false lifts it, no jump.
+apply_squish_preset   { nodeId, preset, atMs? }                // writes squish.x/squish.y keyframes starting at atMs
+                      // (default: the playhead). preset: ${SQUISH_PRESETS.map((x) => `"${x.name}"`).join(', ')}.
+                      // Plain keyframes afterwards. anchor.y = the body's radius squashes from the feet.
+add_rule              { input, operator?, value?, state, durationMs?, easing? }
+                      // "when <input> <operator> <value>, play <state>" FROM WHATEVER STATE IS CURRENT —
+                      // one rule, never an edge per state. mood == 2 → Dance is add_rule { input: "mood",
+                      // value: 2, state: "Dance" }. add_input first when the input does not exist.
+show_layer_in_state   { nodeId, everywhere? }                  // a layer made in ANOTHER state is not on screen here
+                      // (layers belong to the state they were made in). This brings it into this state,
+                      // or with everywhere: true into every state. Layers listed "not on screen in this state".
+set_role              { nodeId, role: ""|"face"|"eyeL"|"eyeR"|"armL"|"armR"|"legL"|"legR"|"body" }
+                      // the part a layer plays; a hand made a leg gains a knee, a world shape made "body" is a mascot
+set_pose              { mascot?, pose, atMs? }                 // move every hand and foot of a mascot into a named pose:
+                      // ${POSES.map((x) => `"${x.name}"`).join(', ')}. With atMs it is keyframes.
+set_layer_effect      { nodeId, kind, params?: { … }, color?, enabled?, remove? }
+                      // adds or updates ONE effect of a kind on a layer. kind: ${EFFECT_KINDS.join(', ')}.
+                      // params by kind: ${EFFECT_KINDS.map((k) => `${k}(${Object.keys(EFFECTS[k].params).join(',')})`).join(' ')}.
+                      // Each param then keys as effect.<kind>.<param> with add_keyframe. goo on a mascot or group melts
+                      // it and the shapes inside it together; echo draws fading trails (motion blur at delay 20-40).
+set_layer_style       { nodeId, blend?, mask?: { node, invert? } | null, gradient?: { type, angle, stops: [[r,g,b], …] } | null, charOrient? }
+                      // blend: normal|screen|add|multiply|overlay|difference. mask clips the layer (and all it holds) to
+                      // another layer's outline as drawn — hide the mask layer to make it a pure cutter. charOrient on text
+                      // turns letters to face the way their text.char.<i>.x/y offsets move them.
+The camera: add_modifier { nodeId: "camera", kind: "shake" } shakes the view; camera.zoom and camera.offset.x/y
+key through add_keyframe with nodeId "${CAMERA_ID}". Layers in the world have depth.z (parallax) and depth.rotateX/Y.
+Also animatable through set_property / add_keyframe: anchor.x/anchor.y (the pivot), squish.x/squish.y,
+trim.start/trim.end (how much of a curve's line is drawn — key trim.end 0 → 1 to draw it on).`.trim()
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 /** A property the copilot may write: on a node, and a number. */
@@ -504,6 +556,16 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
 
   const id = findNode(p, a.nodeId);
   if (id) a.nodeId = id;
+  else if (typeof a.nodeId === 'string' && a.nodeId.includes('.')) {
+    // "body.transform.scale.x" — a layer and a property written as one path, the way the
+    // Keyframes list prints them. Split at the first dot that leaves a real layer and a
+    // real property.
+    const s = a.nodeId;
+    for (let i = s.indexOf('.'); i > 0; i = s.indexOf('.', i + 1)) {
+      const node = findNode(p, s.slice(0, i)), path = resolveProp(s.slice(i + 1));
+      if (node && path && (a.property === undefined || resolveProp(a.property) === path)) { a.nodeId = node; a.property = path; break; }
+    }
+  }
   // a mascot by label or number becomes its body id; "follows" names one too
   for (const k of ['mascot', 'follows'] as const) {
     const m = typeof a[k] === 'string' || typeof a[k] === 'number' ? mascotRef(p, a[k]) : undefined;
@@ -619,7 +681,7 @@ function plannedLayers(p: Project, call: ToolCall): RigNode[] {
   const root = p.rig.rootId;
   if (type === 'hand' || type === 'leg') {
     const sides: (-1 | 1)[] = a.side === 'left' ? [-1] : a.side === 'right' ? [1] : [-1, 1];
-    return sides.map((s) => makeLimb(type === 'hand' ? 'arm' : 'leg', s, root, str(a.name) && sides.length === 1 ? { name: str(a.name)! } : {}));
+    return sides.map((s) => makeLimb(type === 'hand' ? 'arm' : 'leg', s, limbParent(p.rig, root, type === 'hand' ? 'arm' : 'leg'), str(a.name) && sides.length === 1 ? { name: str(a.name)! } : {}));
   }
   if (type === 'group') return [placed(p, makeGroup(null, { name: str(a.name) ?? 'Group' }), a)];
   const shape = str(a.shape) && shapeById(str(a.shape)!) ? str(a.shape)! : 'circle';
@@ -701,14 +763,17 @@ export function validate(p: Project, call: ToolCall): string | null {
       const at = call.name === 'move_keyframe' ? a.fromMs : a.atMs;
       if (num(at) === undefined) return `${call.name === 'move_keyframe' ? 'fromMs' : 'atMs'} must be a number`;
       if (call.name === 'move_keyframe' && num(a.toMs) === undefined) return 'toMs must be a number';
-      return findKeyframe(p, a.nodeId, a.property, at)
-        ? null
-        : `no keyframe on ${String(a.nodeId)} ${String(a.property)} at ${String(at)}ms \u2014 use the times listed under "Keyframes"`;
+      if (findKeyframe(p, a.nodeId, a.property, at)) return null;
+      // say where the keys ARE now: after a few edits the list in the prompt is out of date
+      const times = activeTimeline(p).tracks.filter((t) => t.nodeId === String(a.nodeId) && t.property === String(a.property))
+        .flatMap((t) => t.keyframes.map((k) => Math.round(k.time)));
+      return `no keyframe on ${String(a.nodeId)} ${String(a.property)} at ${String(at)}ms \u2014 ${times.length ? `its keys are at ${times.join(', ')}ms` : 'that property has no keys; use add_keyframe'}`;
     }
     case 'add_preset_to_timeline':
       return findPreset(p, a.preset) ? null : `no preset "${String(a.preset)}"`;
     case 'add_modifier': {
-      const bad = node(a.nodeId);
+      // the camera shakes and floats like a layer
+      const bad = a.nodeId === CAMERA_ID || a.nodeId === 'camera' ? null : node(a.nodeId);
       if (bad) return bad;
       return MODIFIER_KINDS.includes(a.kind as ModifierKind) ? null : `kind must be one of ${MODIFIER_KINDS.join(', ')}`;
     }
@@ -743,8 +808,10 @@ export function validate(p: Project, call: ToolCall): string | null {
     }
     case 'add_emitter': {
       if (!str(a.name)) return 'add_emitter needs a name';
-      if (!Array.isArray(a.glyphs) || !a.glyphs.length) return 'add_emitter needs a non-empty glyphs array, e.g. ["z","z","Z"]';
-      if (a.path !== undefined && !['arc', 'orbit', 'fall'].includes(String(a.path))) return 'path must be arc, orbit or fall';
+      if (!Array.isArray(a.glyphs) || (!a.glyphs.length && !Array.isArray(a.parts))) return 'add_emitter needs a non-empty glyphs array, e.g. ["z","z","Z"], or parts';
+      if (a.path !== undefined && !['arc', 'orbit', 'fall', 'burst'].includes(String(a.path))) return 'path must be arc, orbit, fall or burst';
+      const att = a.attract as Record<string, unknown> | undefined;
+      if (att && !findNode(p, att.node ?? att.nodeId)) return `no layer "${String(att.node ?? att.nodeId)}" to attract to`;
       for (const k of ['fromNode', 'toNode'] as const) {
         if (a[k] !== undefined && !findNode(p, a[k])) return `no layer "${String(a[k])}" for ${k}`;
       }
@@ -995,6 +1062,40 @@ export function validate(p: Project, call: ToolCall): string | null {
       if (ref !== undefined) return layerOf(p, ref) || mascotRef(p, ref) ? null : `no layer or mascot "${String(ref)}"`;
       return a.to === 'front' || a.to === 'back' ? null : 'give above, below, or to: "front" | "back"';
     }
+    case 'set_face': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      return ['primitive', 'group', 'svgLayer'].includes(n.kind) ? null : `${n.name} is a ${n.kind} — only a shape, SVG or group can be a face`;
+    }
+    case 'add_face': return a.mascot === undefined || mascotRef(p, a.mascot) ? null : noMascot(p, a.mascot);
+    case 'pin_limb': return layerOf(p, a.nodeId)?.limb ? null : `"${String(a.nodeId)}" is not a hand or a leg`;
+    case 'apply_squish_preset':
+      if (!layerOf(p, a.nodeId)) return `no layer "${String(a.nodeId)}"`;
+      return squishPreset(String(a.preset ?? '')) ? null : `no squish preset "${String(a.preset)}" — one of ${SQUISH_PRESETS.map((x) => x.name).join(', ')}`;
+    case 'show_layer_in_state': return layerOf(p, a.nodeId) ? null : `no layer "${String(a.nodeId)}"`;
+    case 'set_layer_effect':
+      if (!layerOf(p, a.nodeId)) return `no layer "${String(a.nodeId)}"`;
+      return EFFECT_KINDS.includes(a.kind as EffectKind) ? null : `effect kind must be one of ${EFFECT_KINDS.join(', ')}`;
+    case 'set_layer_style': {
+      if (!layerOf(p, a.nodeId)) return `no layer "${String(a.nodeId)}"`;
+      if (a.blend !== undefined && !['normal', 'screen', 'add', 'multiply', 'overlay', 'difference'].includes(String(a.blend))) return 'blend must be normal, screen, add, multiply, overlay or difference';
+      const mk = a.mask as Record<string, unknown> | null | undefined;
+      if (mk && !findNode(p, mk.node ?? mk.nodeId)) return `no layer "${String(mk.node ?? mk.nodeId)}" to mask with`;
+      return null;
+    }
+    case 'set_role': {
+      const n = layerOf(p, a.nodeId);
+      if (!n) return `no layer "${String(a.nodeId)}"`;
+      return rolesFor(n).includes(String(a.role ?? '')) ? null : `${n.name} cannot play "${String(a.role)}" — it can be ${rolesFor(n).map((r) => `"${r}"`).join(', ')}`;
+    }
+    case 'set_pose':
+      if (a.mascot !== undefined && !mascotRef(p, a.mascot)) return noMascot(p, a.mascot);
+      return findPose(String(a.pose ?? '')) ? null : `no pose "${String(a.pose)}" — one of ${POSES.map((x) => x.name).join(', ')}`;
+    case 'add_rule': {
+      if (!findState(p, a.state)) return `no state "${String(a.state)}" — add_timeline first`;
+      const c = conditionOf(p, { input: a.input, operator: a.operator ?? '==', value: a.value });
+      return typeof c === 'string' ? c : null;
+    }
     case 'morph_between':
       if (!findExpression(p, a.from)) return `no expression "${String(a.from)}"`;
       if (!findExpression(p, a.to)) return `no expression "${String(a.to)}"`;
@@ -1152,6 +1253,16 @@ export function describe(p: Project, call: ToolCall): string {
       : `${name(a.nodeId)} rides ${name(findNode(p, a.parent) ?? mascotRef(p, a.parent)?.id ?? a.parent)}, staying where it is`;
     case 'set_layer_order': return a.above !== undefined ? `${name(a.nodeId)} in front of ${name(findNode(p, a.above) ?? a.above)}`
       : a.below !== undefined ? `${name(a.nodeId)} behind ${name(findNode(p, a.below) ?? a.below)}` : `${name(a.nodeId)} to the ${a.to}`;
+    case 'set_face': return a.face === false ? `Make ${name(a.nodeId)} an ordinary layer again` : `Make ${name(a.nodeId)} the face — the eyes ride it`;
+    case 'add_face': return `Give ${a.mascot !== undefined ? `mascot ${String(a.mascot)}` : 'the mascot'} a face`;
+    case 'pin_limb': return a.pinned === false ? `Unpin ${name(a.nodeId)}` : `Pin ${name(a.nodeId)} to the ground`;
+    case 'apply_squish_preset': return `${squishPreset(String(a.preset))?.name ?? a.preset} on ${name(a.nodeId)}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ' at the playhead'}`;
+    case 'set_layer_effect': return a.remove ? `Remove ${String(a.kind)} from ${name(a.nodeId)}` : `${EFFECTS[a.kind as EffectKind]?.label ?? a.kind} on ${name(a.nodeId)}`;
+    case 'set_layer_style': return `Style ${name(a.nodeId)}: ${Object.keys(a).filter((k) => k !== 'nodeId').join(', ')}`;
+    case 'show_layer_in_state': return `Show ${name(a.nodeId)} ${a.everywhere ? 'in every state' : 'in this state'}`;
+    case 'set_role': return `Make ${name(a.nodeId)} the ${String(a.role) || 'ordinary layer'}`;
+    case 'set_pose': return `Pose ${a.mascot !== undefined ? `mascot ${String(a.mascot)}` : 'the mascot'}: ${findPose(String(a.pose))?.name ?? a.pose}${a.atMs !== undefined ? ` at ${at(a.atMs)}` : ''}`;
+    case 'add_rule': return `When ${a.input} ${a.operator ?? '=='} ${a.value ?? ''} → play ${String(a.state)}, from any state`;
     default: return call.name;
   }
 }
@@ -1185,6 +1296,7 @@ export function applyCalls(calls: ToolCall[]) {
           for (const n of plannedLayers(p, call)) {
             if (n.kind !== 'limb') n.zIndex = topZ(p.rig);
             p.rig.nodes[n.id] = n;
+            ownLayer(p, n.id);
           }
           break;
         }
@@ -1232,7 +1344,10 @@ export function applyCalls(calls: ToolCall[]) {
         case 'set_hand_points':
         case 'set_leg_points': {
           const id = nid(a.nodeId);
-          const map = LIMB_POINTS[call.name === 'set_hand_points' ? 'arm' : 'leg'] as Record<string, string>;
+          // an arm with an elbow has three points: shoulder, elbow, hand
+          const map = (call.name === 'set_hand_points'
+            ? (p.rig.nodes[id]?.limb?.c ? { shoulder: 'a', elbow: 'b', hand: 'c' } : LIMB_POINTS.arm)
+            : LIMB_POINTS.leg) as Record<string, string>;
           for (const [word, key] of Object.entries(map)) {
             const pt = ptOf(a[word]);
             if (!pt) continue;
@@ -1395,6 +1510,7 @@ export function applyCalls(calls: ToolCall[]) {
           const [node] = plannedLayers(p, call);
           node.zIndex = topZ(p.rig);
           p.rig.nodes[node.id] = node;
+          ownLayer(p, node.id);
           const m = a.attach !== undefined ? mascotRef(p, a.attach) : undefined;
           if (m) {
             // x/y were meant from the mascot, not the canvas centre
@@ -1497,6 +1613,7 @@ export function applyCalls(calls: ToolCall[]) {
           if (!node) break;
           node.zIndex = topZ(p.rig);
           p.rig.nodes[node.id] = node;
+          ownLayer(p, node.id);
           const target = a.attach !== undefined ? (mascotRef(p, a.attach) ?? layerOf(p, a.attach)) : undefined;
           if (target) placeUnder(p, node.id, target.id, playhead, false);
           break;
@@ -1549,7 +1666,7 @@ export function applyCalls(calls: ToolCall[]) {
         }
         case 'add_modifier':
           activeTimeline(p).modifiers.push({
-            id: uid('m'), nodeId: String(a.nodeId), kind: a.kind as 'shake',
+            id: uid('m'), nodeId: a.nodeId === 'camera' ? CAMERA_ID : String(a.nodeId), kind: a.kind as 'shake',
             amount: num(a.amount) ?? 100, frequency: num(a.frequency) ?? 6,
             amplitude: num(a.amplitude) ?? 6, seed: num(a.seed), phase: num(a.phase),
           });
@@ -1604,7 +1721,17 @@ export function applyCalls(calls: ToolCall[]) {
             glyphs: (a.glyphs as unknown[]).map(String),
             color: rgb ? { r: rgb[0] ?? 0, g: rgb[1] ?? 0, b: rgb[2] ?? 0, a: 1 } : { r: 108, g: 106, b: 128, a: 1 },
             size: num(a.size) ?? 26,
-            path: (a.path as 'arc' | 'orbit' | 'fall') ?? 'arc',
+            path: (a.path as 'arc' | 'orbit' | 'fall' | 'burst') ?? 'arc',
+            ...(colorOf(a.colorTo) ? { colorTo: colorOf(a.colorTo) } : {}),
+            ...Object.fromEntries((['velocity', 'velocityJitter', 'angle', 'spread', 'drag', 'gravity', 'turbulence'] as const)
+              .filter((k) => num(a[k]) !== undefined).map((k) => [k, num(a[k])])),
+            ...(a.attract && typeof a.attract === 'object' ? { attract: {
+              nodeId: findNode(p, (a.attract as Record<string, unknown>).node ?? (a.attract as Record<string, unknown>).nodeId)!,
+              startMs: num((a.attract as Record<string, unknown>).startMs) ?? 1000,
+              durationMs: Math.max(50, num((a.attract as Record<string, unknown>).durationMs) ?? 1200),
+              fill: (a.attract as Record<string, unknown>).fill !== false,
+            } } : {}),
+            ...(Array.isArray(a.parts) ? { parts: (a.parts as Record<string, unknown>[]).map((pt, i) => ({ id: `pt${i}`, shapeId: String(pt.shape ?? 'dot'), weight: 1, speed: 1, sizeScale: num(pt.size) ?? 1, spin: num(pt.spin) ?? 0, ...(colorOf(pt.color) ? { color: colorOf(pt.color) } : {}) })) } : {}),
             from: { nodeId: findNode(p, a.fromNode), x: num(a.fromX) ?? 40, y: num(a.fromY) ?? -34 },
             to: { nodeId: findNode(p, a.toNode), x: num(a.toX) ?? 110, y: num(a.toY) ?? -150 },
             bow: num(a.bow) ?? 20,
@@ -1612,7 +1739,7 @@ export function applyCalls(calls: ToolCall[]) {
             ...(num(a.radiusY) !== undefined ? { radiusY: num(a.radiusY) } : {}),
             rateMs: Math.max(40, num(a.rateMs) ?? 600),
             lifeMs: Math.max(120, num(a.lifeMs) ?? 1800),
-            count: Math.max(1, Math.round(num(a.count) ?? 3)),
+            count: Math.max(1, Math.min(2000, Math.round(num(a.count) ?? 3))),
             fadeStart: Math.min(1, Math.max(0, num(a.fadeStart) ?? 0.5)),
             scaleFrom: num(a.scaleFrom) ?? 0.5, scaleTo: num(a.scaleTo) ?? 1.25,
             spin: num(a.spin) ?? 0,
@@ -1702,6 +1829,77 @@ export function applyCalls(calls: ToolCall[]) {
             logic: a.logic === 'OR' ? 'OR' : 'AND',
             durationMs: num(a.durationMs) ?? to.transitionMs ?? 300,
             easing: easingOf(a.easing),
+          });
+          break;
+        }
+        case 'set_face': setFaceRole(p, nid(a.nodeId), a.face !== false, playhead); break;
+        case 'add_face': {
+          const m = a.mascot !== undefined ? mascotRef(p, a.mascot) : p.rig.nodes[p.rig.rootId];
+          if (!m || faceOf(p.rig, m.id)) break;
+          const id = p.rig.nodes[`${m.id}.face`] ? uid('face') : `${m.id}.face`;
+          const face = makeFace(id, m.id);
+          delete face.role;
+          p.rig.nodes[id] = face;
+          setFaceRole(p, id, true, playhead);
+          break;
+        }
+        case 'set_layer_effect': {
+          const n = p.rig.nodes[nid(a.nodeId)];
+          const kind = a.kind as EffectKind;
+          if (!n) break;
+          if (a.remove) { n.effects = n.effects?.filter((e) => e.kind !== kind); if (!n.effects?.length) delete n.effects; break; }
+          let fx = n.effects?.find((e) => e.kind === kind);
+          if (!fx) { fx = makeEffect(kind); n.effects = [...(n.effects ?? []), fx]; }
+          if (a.params && typeof a.params === 'object') {
+            for (const [k, v] of Object.entries(a.params as Record<string, unknown>)) if (k in EFFECTS[kind].params && num(v) !== undefined) fx.params[k] = num(v)!;
+          }
+          if (colorOf(a.color)) fx.color = colorOf(a.color);
+          if (typeof a.enabled === 'boolean') fx.enabled = a.enabled;
+          break;
+        }
+        case 'set_layer_style': {
+          const n = p.rig.nodes[nid(a.nodeId)];
+          if (!n) break;
+          if (a.blend !== undefined) { if (a.blend === 'normal') delete n.blend; else n.blend = a.blend as BlendMode; }
+          if (a.mask === null) delete n.mask;
+          else if (a.mask && typeof a.mask === 'object') {
+            const mk = a.mask as Record<string, unknown>;
+            n.mask = { nodeId: findNode(p, mk.node ?? mk.nodeId)!, ...(mk.invert ? { invert: true } : {}) };
+          }
+          if (a.gradient === null) delete n.gradient;
+          else if (a.gradient && typeof a.gradient === 'object') {
+            const g = a.gradient as Record<string, unknown>;
+            const cols = (Array.isArray(g.stops) ? g.stops : []).map(colorOf).filter((c): c is ColorStop => !!c);
+            if (cols.length >= 2) n.gradient = { type: g.type === 'radial' ? 'radial' : 'linear', angle: num(g.angle) ?? 90, stops: cols.map((color, i) => ({ at: i / (cols.length - 1), color })) };
+          }
+          if (typeof a.charOrient === 'boolean' && n.text) n.text.charOrient = a.charOrient;
+          break;
+        }
+        case 'show_layer_in_state': showLayerIn(p, nid(a.nodeId), a.everywhere === true ? 'everywhere' : 'here'); break;
+        case 'set_role': setRole(p, nid(a.nodeId), String(a.role ?? ''), playhead); break;
+        case 'set_pose': {
+          const m = a.mascot !== undefined ? mascotRef(p, a.mascot) : p.rig.nodes[p.rig.rootId];
+          if (m) applyPose(p, m.id, String(a.pose), num(a.atMs) ?? playhead, num(a.atMs) !== undefined);
+          break;
+        }
+        case 'pin_limb': {
+          const id = nid(a.nodeId);
+          const word = String(a.point ?? '').toLowerCase();
+          const l = p.rig.nodes[id]?.limb;
+          const key = ({ hip: 'a', shoulder: 'a', knee: 'b', elbow: 'b', ankle: l?.c ? 'c' : 'b', hand: l?.c ? 'c' : 'b', foot: l?.c ? 'c' : 'b' } as Record<string, 'a' | 'b' | 'c'>)[word];
+          if (key) pinLimbPoint(p, id, key, a.pinned !== false, playhead);
+          else pinLimb(p, id, a.pinned !== false, playhead);
+          break;
+        }
+        case 'apply_squish_preset': applySquish(p, nid(a.nodeId), String(a.preset), num(a.atMs) ?? playhead); break;
+        case 'add_rule': {
+          const m = (p.stateMachine ??= machineOf(p));
+          const to = findState(p, a.state)!;
+          const c = conditionOf(p, { input: a.input, operator: a.operator ?? '==', value: a.value }) as SmCondition;
+          if (m.transitions.some((t) => t.from === ANY_STATE && t.to === to.id && JSON.stringify(t.conditions) === JSON.stringify([c]))) break;
+          m.transitions.push({
+            id: uid('sm'), from: ANY_STATE, to: to.id, conditions: [c], logic: 'AND',
+            durationMs: num(a.durationMs) ?? to.transitionMs ?? 300, easing: easingOf(a.easing),
           });
           break;
         }

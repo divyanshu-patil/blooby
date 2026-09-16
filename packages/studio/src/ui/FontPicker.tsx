@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDismiss } from './bits';
 import {
   catalogOffline, cssFamily, fontCatalog, fontError, fontStatus, fontWeightUsed, previewFont, searchFonts, weightsOf,
   type CatalogFont,
@@ -24,6 +25,8 @@ const WEIGHT_NAME: Record<number, string> = {
  */
 export function FontPicker({ value, onPick }: { value: FontRef; onPick: (family: string) => void }) {
   const [open, setOpen] = useState(false);
+  const pickRef = useRef<HTMLDivElement>(null);
+  useDismiss(open, () => setOpen(false), [pickRef]);
   const [list, setList] = useState<CatalogFont[] | null>(null);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
@@ -40,7 +43,7 @@ export function FontPicker({ value, onPick }: { value: FontRef; onPick: (family:
   const results = useMemo(() => (list ? searchFonts(list, query, category || undefined).slice(0, 80) : []), [list, query, category]);
 
   return (
-    <div className="font-pick">
+    <div className="font-pick" ref={pickRef}>
       <button className="font-current" aria-expanded={open} onClick={() => setOpen((v) => !v)}
         title="Choose a Google font">
         <span className="font-current-name" style={{ fontFamily: cssFamily(value), fontWeight: value.weight, fontStyle: value.style }}>{value.family}</span>

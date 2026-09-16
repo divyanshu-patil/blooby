@@ -1,20 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useEditor } from '../core/store';
-import { cssColor, hexColor, oklchToRgb, parseHex, rgbToOklch } from '../core/color';
+import { cssColor, hexColor, oklchToRgb, readHex, rgbToOklch } from '../core/color';
 import { appearanceSpans, valueAt } from '../core/scene';
 import { activeTimeline, CAMERA_ID, MODIFIERS, type ColorStop, type LineCap, type LineJoin, type RigNode } from '../core/types';
-import { KeyNav, NumberField, Panel, PropRow } from './bits';
+import { Icon, KeyNav, NumberField, Panel, PropRow } from './bits';
 import { ShapeEditor } from './ShapeEditor';
+import { ColorPicker } from './ColorPicker';
 import { Collapsible } from './Collapsible';
 import { RangeBar } from './RangeBar';
 import { INK, BONE } from '../core/defaults';
 import { compOf } from '../core/comp';
-import { mascotLabel } from '../core/mascot';
+import { mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
 import { openComposition } from './CompositionDialog';
 import { TextLayoutSection, TextLettersSection, TextPathSection, TextSection } from './TextSections';
 import { CurveSection } from './CurveSection';
-import { MascotFollowSection, MascotRigSection } from './MascotSections';
-import { attachmentOf, isInside } from '../core/layers';
+import { CompositeSection, DepthSection, EffectsSection, GradientSection } from './StyleSections';
+import { MascotFollowSection, MascotRigSection, RoleSection, SquishSection } from './MascotSections';
+import { attachmentOf, isInside, layerOrder } from '../core/layers';
 import { limbPoints } from '../core/limb';
 import { blockStarts, fmtSec } from '../core/timeline';
 import { EASING_NAMES, easingLabel, namedEasing } from '../core/easing';
@@ -50,14 +52,15 @@ export function ColorField({ value, onChange, onToggleTrack, keyNavFor, property
   const set = (patch: Partial<typeof lch>) => onChange({ ...oklchToRgb({ ...lch, ...patch }), a: value.a });
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      <div className="prop">
+      <div className="prop" style={{ gridTemplateColumns: 'min-content 1fr 132px' }}>
         {onToggleTrack && keyNavFor
           ? <KeyNav nodeId={keyNavFor} property={property} onToggle={onToggleTrack} />
           : <span />}
         <label className="prop-label"><span className="t">{label}</span></label>
-        <input type="color" value={hexColor(value)} aria-label={`${label} colour`}
-          onChange={(e) => onChange({ ...parseHex(e.target.value), a: value.a })}
-          style={{ width: '100%', height: 23, border: '1px solid var(--line)', borderRadius: 5, background: 'none', padding: 1 }} />
+        <div style={{ display: 'flex', gap: 4, minWidth: 0 }}>
+          <ColorPicker value={value} onChange={onChange} label={label} />
+          <HexInput value={value} onChange={onChange} label={label} />
+        </div>
       </div>
       {!compact && (
         <>
@@ -85,6 +88,29 @@ export function ColorField({ value, onChange, onToggleTrack, keyNavFor, property
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * A colour as text: #RRGGBB, #RGB, or #RRGGBBAA with the alpha carried separately. What you
+ * type is kept while it is half-written; a valid value is committed, an invalid one is
+ * marked and dropped on blur, so a typo never lands on the layer.
+ */
+function HexInput({ value, onChange, label }: { value: ColorStop; onChange: (c: ColorStop) => void; label: string }) {
+  const shown = hexColor(value).toUpperCase() + (value.a < 1 ? Math.round(value.a * 255).toString(16).padStart(2, '0').toUpperCase() : '');
+  const [draft, setDraft] = useState<string | null>(null);
+  const parsed = draft === null ? null : readHex(draft);
+  return (
+    <input className="txt prop-hex" spellCheck={false} aria-label={`${label} hex`} aria-invalid={draft !== null && !parsed}
+      value={draft ?? shown} style={{ flex: 1, minWidth: 0, fontFamily: 'var(--mono, ui-monospace, monospace)', textTransform: 'uppercase' }}
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const c = readHex(e.target.value);
+        if (c) onChange(c.a === undefined ? { ...c, a: value.a } : c as ColorStop);
+      }}
+      onBlur={() => setDraft(null)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { setDraft(null); e.currentTarget.blur(); } }} />
   );
 }
 
@@ -163,9 +189,15 @@ export function NodeInspector() {
       )}
       {curve && <Collapsible title="Curve" storageKey="insp-curve"><CurveSection node={node} /></Collapsible>}
       {mascot && <Collapsible title="Rig" storageKey="insp-rig"><MascotRigSection node={node} /></Collapsible>}
+      {(node.kind === 'primitive' || node.kind === 'group' || node.kind === 'svgLayer') && !curve && (
+        <Collapsible title="Role" storageKey="insp-role" defaultOpen={node.role === 'face'}><RoleSection node={node} /></Collapsible>
+      )}
       <Collapsible title="Transform" storageKey="insp-transform">
         <TransformSection node={node} isRoot={mascot} />
       </Collapsible>
+      {node.kind !== 'limb' && node.kind !== 'eye' && (
+        <Collapsible title="Squish" storageKey="insp-squish" defaultOpen={mascot}><SquishSection node={node} /></Collapsible>
+      )}
       {node.kind === 'limb' && (
         <Collapsible title={node.limb?.type === 'leg' ? 'Leg' : 'Hand'} storageKey="insp-limb">
           <LimbSection node={node} />
@@ -185,6 +217,21 @@ export function NodeInspector() {
         <Collapsible title="Stroke" storageKey={curve ? 'insp-curve-stroke' : 'insp-stroke'} defaultOpen={curve}>
           <StrokeSection node={node} />
         </Collapsible>
+      )}
+      {node.kind !== 'group' && (
+        <Collapsible title={`Effects${node.effects?.length ? ` · ${node.effects.length}` : ''}`} storageKey="insp-effects" defaultOpen={!!node.effects?.length}>
+          <EffectsSection node={node} />
+        </Collapsible>
+      )}
+      {node.kind === 'group' && (
+        <Collapsible title="Effects" storageKey="insp-effects-g" defaultOpen={!!node.effects?.length}><EffectsSection node={node} /></Collapsible>
+      )}
+      <Collapsible title="Compositing" storageKey="insp-composite" defaultOpen={!!node.blend || !!node.mask}><CompositeSection node={node} /></Collapsible>
+      {drawsPaint && node.kind !== 'limb' && node.kind !== 'text' && (
+        <Collapsible title="Gradient" storageKey="insp-gradient" defaultOpen={!!node.gradient}><GradientSection node={node} /></Collapsible>
+      )}
+      {node.kind !== 'limb' && (
+        <Collapsible title="3D" storageKey="insp-depth" defaultOpen={!!node.depth}><DepthSection node={node} /></Collapsible>
       )}
       {mascot && (
         <Collapsible title="Follow" storageKey="insp-follow" defaultOpen={!!node.parentId}>
@@ -222,7 +269,14 @@ function TransformSection({ node, isRoot }: { node: RigNode; isRoot: boolean }) 
           <PropRow nodeId={node.id} property="surface.yaw" label="Head yaw" />
           <PropRow nodeId={node.id} property="surface.pitch" label="Head pitch" />
         </>
-      ) : node.kind === 'limb' ? null : node.surface.mapped ? (
+      ) : node.kind === 'limb' ? null : node.role === 'face' ? (
+        <>
+          <PropRow nodeId={node.id} property="flatOffset.x" label="Position X" />
+          <PropRow nodeId={node.id} property="flatOffset.y" label="Position Y" />
+          <PropRow nodeId={node.id} property="surface.yaw" label="Look yaw" />
+          <PropRow nodeId={node.id} property="surface.pitch" label="Look pitch" />
+        </>
+      ) : node.surface.mapped ? (
         <>
           <PropRow nodeId={node.id} property="surface.yaw" />
           <PropRow nodeId={node.id} property="surface.pitch" />
@@ -233,11 +287,17 @@ function TransformSection({ node, isRoot }: { node: RigNode; isRoot: boolean }) 
           <PropRow nodeId={node.id} property="flatOffset.y" label="Position Y" />
         </>
       )}
-      <PropRow nodeId={node.id} property="transform.scale.x" />
-      <PropRow nodeId={node.id} property="transform.scale.y" />
+      <ScaleRows node={node} isRoot={isRoot} />
       {node.kind !== 'limb' && <PropRow nodeId={node.id} property="transform.rotation" label={isRoot ? 'Roll' : 'Rotation'} />}
       <PropRow nodeId={node.id} property="opacity" />
       <PropRow nodeId={node.id} property="visible" label="Presence" />
+      {node.kind !== 'limb' && (
+        <Collapsible title="Anchor" storageKey="insp-anchor" defaultOpen={false}>
+          <PropRow nodeId={node.id} property="anchor.x" />
+          <PropRow nodeId={node.id} property="anchor.y" />
+          <p className="hint">What it turns, scales and squishes around. Drag the crosshair on the stage, or type it here.</p>
+        </Collapsible>
+      )}
       {node.kind !== 'limb' && node.kind !== 'group' && node.kind !== 'text' && !node.curve && (
         <Collapsible title="Size" storageKey="insp-size" defaultOpen={false}>
           {node.kind !== 'body' && <PropRow nodeId={node.id} property="transform.length" />}
@@ -245,6 +305,35 @@ function TransformSection({ node, isRoot }: { node: RigNode; isRoot: boolean }) 
           {!isRoot && <PropRow nodeId={node.id} property="size.y" label="Height" />}
         </Collapsible>
       )}
+    </>
+  );
+}
+
+/** Scale X and Y, linked or not (remembered in this browser), and for a mascot one Size dial
+ *  plus "Apply as base size": bake the scale into the real size and start again from 1. */
+function ScaleRows({ node, isRoot }: { node: RigNode; isRoot: boolean }) {
+  const [linked, setLinked] = useState(() => { try { return localStorage.getItem('blooby.linkScale') !== '0'; } catch { return true; } });
+  const project = useEditor((s) => s.project);
+  const playhead = useEditor((s) => s.playhead);
+  const applyScaleAsBase = useEditor((s) => s.applyScaleAsBase);
+  const toggle = () => { const v = !linked; setLinked(v); try { localStorage.setItem('blooby.linkScale', v ? '1' : '0'); } catch { /* private mode */ } };
+  const sx = valueAt(project, node.id, 'transform.scale.x', playhead) as number;
+  const sy = valueAt(project, node.id, 'transform.scale.y', playhead) as number;
+  const scaled = Math.abs(sx - 1) > 1e-3 || Math.abs(sy - 1) > 1e-3;
+  return (
+    <>
+      <PropRow nodeId={node.id} property="transform.scale.x" linkTo={linked ? 'transform.scale.y' : undefined} />
+      <PropRow nodeId={node.id} property="transform.scale.y" linkTo={linked ? 'transform.scale.x' : undefined} />
+      <div className="row" style={{ gap: 4 }}>
+        <button className="btn ghost sm" aria-pressed={linked} title={linked ? 'X and Y move together, keeping their ratio' : 'X and Y move separately'}
+          onClick={toggle}>{linked ? '🔗 Linked' : '⛓️‍💥 Unlinked'}</button>
+        <span className="spacer" />
+        {isRoot && node.kind === 'body' && (
+          <button className="btn sm" disabled={!scaled}
+            title={scaled ? `Make ${Math.round(sx * 100)}% × ${Math.round(sy * 100)}% the mascot's real size, so scale starts from 1 again — nothing moves` : 'Scale the mascot first'}
+            onClick={() => applyScaleAsBase(node.id)}>Apply as base size</button>
+        )}
+      </div>
     </>
   );
 }
@@ -514,27 +603,36 @@ function NothingSelected() {
  */
 function LimbSection({ node }: { node: RigNode }) {
   const project = useEditor((s) => s.project);
+  const pinLimb = useEditor((s) => s.pinLimb);
+  const pinLimbPoint = useEditor((s) => s.pinLimbPoint);
   const playhead = useEditor((s) => s.playhead);
   const updateNode = useEditor((s) => s.updateNode);
   const l = node.limb;
   if (!l) return null;
   const hose = valueAt(project, node.id, 'limb.hose', playhead) as number;
+  const joint = l.type === 'leg' ? 'Knee' : 'Elbow';
   const labels: Record<string, [string, string]> = l.type === 'leg'
     ? l.c ? { a: ['Hip X', 'Hip Y'], b: ['Knee X', 'Knee Y'], c: ['Ankle X', 'Ankle Y'] }
           : { a: ['Hip X', 'Hip Y'], b: ['Ankle X', 'Ankle Y'] }
-    : { a: ['Shoulder X', 'Shoulder Y'], b: ['Hand X', 'Hand Y'] };
+    : l.c ? { a: ['Shoulder X', 'Shoulder Y'], b: ['Elbow X', 'Elbow Y'], c: ['Hand X', 'Hand Y'] }
+          : { a: ['Shoulder X', 'Shoulder Y'], b: ['Hand X', 'Hand Y'] };
   return (
     <>
       <OnOffHose nodeId={node.id} on={hose >= 0.5} />
+      <LimbAttach node={node} />
+      <div className="row">
+        <span className="prop-label" style={{ flex: 1 }}>{l.type === 'leg' ? 'Foot' : 'Hand'}</span>
+        <button className="btn sm" aria-pressed={!!l.pin}
+          title={l.pin ? 'Let it follow the body again, from where it stands' : 'Plant it where it is: the body moves, it stays'}
+          onClick={() => pinLimb(node.id, !l.pin)}>{l.pin ? 'Unpin' : l.type === 'leg' ? 'Pin to ground' : 'Pin in place'}</button>
+      </div>
       <PropRow nodeId={node.id} property="limb.length" />
       <PropRow nodeId={node.id} property="limb.thickness" />
       <PropRow nodeId={node.id} property="limb.bend" />
       <PropRow nodeId={node.id} property="limb.roundness" />
       <PropRow nodeId={node.id} property="limb.taper" />
-      {l.type === 'leg' && (
-        <>
-          <div className="row">
-            <span className="prop-label" style={{ width: 52 }}>Knee</span>
+      <div className="row">
+            <span className="prop-label" style={{ width: 52 }}>{joint}</span>
             <button className="btn sm" aria-pressed={!!l.c}
               onClick={() => {
                 const update = (n: RigNode) => {
@@ -550,9 +648,11 @@ function LimbSection({ node }: { node: RigNode }) {
                 };
                 updateNode(node.id, update, `limb.knee.${node.id}`);
               }}>
-              {l.c ? 'Remove Knee' : 'Add Knee'}
+              {l.c ? `Remove ${joint}` : `Add ${joint}`}
             </button>
           </div>
+      {l.type === 'leg' && (
+        <>
           <div className="divider" />
           <PropRow nodeId={node.id} property="limb.foot.angle" />
           <PropRow nodeId={node.id} property="limb.foot.length" />
@@ -560,13 +660,49 @@ function LimbSection({ node }: { node: RigNode }) {
         </>
       )}
       <Collapsible title={`Points · ${limbPoints(l).length}`} storageKey="insp-limbpts" defaultOpen={false}>
-        {limbPoints(l).flatMap((k) => [
-          <PropRow key={`${k}x`} nodeId={node.id} property={`limb.${k}.x`} label={labels[k][0]} />,
-          <PropRow key={`${k}y`} nodeId={node.id} property={`limb.${k}.y`} label={labels[k][1]} />,
-        ])}
+        {limbPoints(l).flatMap((k, i, keys) => {
+          const on = i === keys.length - 1 ? !!l.pin : !!l.pins?.[k];
+          const name = labels[k][0].replace(/ X$/, '');
+          return [
+            <div key={`${k}pin`} className="row">
+              <span className="prop-label" style={{ flex: 1 }}>{name}</span>
+              <button className="btn ghost sm icon" aria-pressed={on} title={on ? `Unpin the ${name.toLowerCase()}` : `Pin the ${name.toLowerCase()} in the world — it stays while the body moves; the limb stretches to reach it`}
+                onClick={() => pinLimbPoint(node.id, k, !on)}><Icon name="pin" size={13} /></button>
+            </div>,
+            <PropRow key={`${k}x`} nodeId={node.id} property={`limb.${k}.x`} label={labels[k][0]} />,
+            <PropRow key={`${k}y`} nodeId={node.id} property={`limb.${k}.y`} label={labels[k][1]} />,
+          ];
+        })}
       </Collapsible>
       <p className="hint">Drag the {limbPoints(l).length} points on the stage — {l.type === 'leg' ? 'hip, knee and ankle' : 'shoulder and hand'}. They ride the body.</p>
     </>
+  );
+}
+
+/**
+ * What a limb's points ride: any part of any mascot — the body, the face, an eye, a shape on
+ * it — or the world. The shoulder or hip then moves with that part; nothing jumps when it is
+ * changed, because the points are re-expressed in the new part's frame.
+ */
+function LimbAttach({ node }: { node: RigNode }) {
+  const project = useEditor((s) => s.project);
+  const moveInto = useEditor((s) => s.moveInto);
+  const rig = project.rig;
+  const parts = layerOrder(rig).filter((n) => n.id !== node.id && n.kind !== 'limb' && n.kind !== 'text' && !n.curve && (n.kind === 'body' || mascotOf(rig, n.id)));
+  const label = (n: RigNode) => {
+    const m = mascotOf(rig, n.id);
+    const many = mascotsOf(rig).length > 1;
+    return n.kind === 'body' ? mascotLabel(rig, n) : `${many && m ? `${mascotLabel(rig, m)} / ` : ''}${n.name}`;
+  };
+  return (
+    <div className="row">
+      <span className="prop-label" style={{ flex: 1 }} title="The part its shoulder or hip rides — it moves with that part">Attached to</span>
+      <select className="sel" style={{ maxWidth: 150 }} aria-label="Attached to" value={node.parentId ?? ''}
+        onChange={(e) => moveInto(node.id, e.target.value || null)}>
+        <option value="">World</option>
+        {parts.map((n) => <option key={n.id} value={n.id}>{label(n)}</option>)}
+      </select>
+    </div>
   );
 }
 
@@ -703,6 +839,7 @@ export function CameraPanel({ bare }: { bare?: boolean } = {}) {
       <PropRow nodeId={CAMERA_ID} property="camera.distance" />
       <PropRow nodeId={CAMERA_ID} property="camera.offset.x" />
       <PropRow nodeId={CAMERA_ID} property="camera.offset.y" />
+      <PropRow nodeId={CAMERA_ID} property="camera.zoom" />
       <p className="hint">Perspective 0° is orthographic — features slide flat across the face. Open it up and the near side swells while the rim hides behind the silhouette.</p>
     </>
   );

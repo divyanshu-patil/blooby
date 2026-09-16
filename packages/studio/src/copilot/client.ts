@@ -108,24 +108,69 @@ export async function chatJson(
   schema: object,
   markKey: (key: string, status: KeyStatus, note?: string) => void,
   signal?: AbortSignal,
-): Promise<{ content: string; thinking?: string }> {
+  opts: {
+    /** called as the reply streams in, with the tokens generated so far — live usage */
+    onTokens?: (output: number) => void;
+    /** context window for local models; the agent's prompt needs more than a one-shot's */
+    numCtx?: number;
+  } = {},
+): Promise<{ content: string; thinking?: string; usage: { input: number; output: number } }> {
+  // streamed wherever the browser talks to Ollama itself; the backend hop answers whole
+  const stream = !!opts.onTokens && !usesBackend(s);
   const res = await call(s, '/api/chat', {
     method: 'POST',
     signal,
     body: JSON.stringify({
       model: resolveModel(s, s.model),
       messages,
-      stream: false,
+      stream,
       format: schema,
       // a preset with several tracks is a long reply; a default output budget cuts it
       // off mid-JSON, which reads downstream as "the model did not return JSON".
       // num_ctx is a local-model knob — cloud sizes its own context, so don't send it.
-      options: { temperature: 0.15, num_predict: 4096, ...(s.endpoint === 'cloud' ? {} : { num_ctx: 8192 }) },
+      options: { temperature: 0.15, num_predict: 4096, ...(s.endpoint === 'cloud' ? {} : { num_ctx: opts.numCtx ?? 8192 }) },
     }),
   }, markKey);
-  const data = await res.json();
+  let data: { message?: { content?: string; thinking?: string }; response?: string; prompt_eval_count?: number; eval_count?: number };
+  if (stream && res.body) {
+    // NDJSON: one chunk per line, about a token each; the last carries the real counts
+    let content = '', thinking = '', chunks = 0, buf = '';
+    let last: typeof data = {};
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const chunk = JSON.parse(line);
+          content += chunk.message?.content ?? chunk.response ?? '';
+          thinking += chunk.message?.thinking ?? '';
+          chunks++;
+          last = chunk;
+          opts.onTokens?.(chunks);
+        } catch { /* a partial line waits for the rest */ }
+      }
+    }
+    data = { ...last, message: { content, thinking } };
+  } else {
+    data = await res.json();
+    opts.onTokens?.(typeof data.eval_count === 'number' ? data.eval_count : 0);
+  }
   // reasoning models put their scratchpad in `thinking`; the UI shows it collapsed
-  return { content: data.message?.content ?? data.response ?? '', thinking: data.message?.thinking || undefined };
+  const content = data.message?.content ?? data.response ?? '';
+  // what the endpoint counted; a rough 4 characters a token when it says nothing
+  const sent = messages.reduce((n, m) => n + m.content.length, 0);
+  const usage = {
+    input: typeof data.prompt_eval_count === 'number' ? data.prompt_eval_count : Math.ceil(sent / 4),
+    output: typeof data.eval_count === 'number' ? data.eval_count : Math.ceil(content.length / 4),
+  };
+  return { content, thinking: data.message?.thinking || undefined, usage };
 }
 
 /**

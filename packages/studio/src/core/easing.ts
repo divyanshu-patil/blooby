@@ -46,6 +46,12 @@ export function applyEasing(curve: EasingCurve, t: number): number {
       }
       // a cut, not a curve: the value holds until the next keyframe lands
       if (curve.name === 'hold') return t >= 1 ? 1 : 0;
+      // a damped spring settling onto the target: overshoots, swings back, settles
+      if (curve.name === 'spring') return t >= 1 ? 1 : 1 - Math.exp(-6.5 * t) * Math.cos(13 * t);
+      // back-in: pulls away first — the anticipation before a move
+      if (curve.name === 'anticipate') { const s = 1.70158; return t * t * ((s + 1) * t - s); }
+      // back-out: passes the target and comes back to it
+      if (curve.name === 'overshoot') { const s = 1.70158, u = t - 1; return u * u * ((s + 1) * u + s) + 1; }
       if (curve.name === 'elastic') {
         if (t === 0 || t === 1) return t;
         const p = 0.3;
@@ -63,12 +69,15 @@ export function curveHandles(curve: EasingCurve): [Vec2, Vec2] {
   if (curve.type === 'preset' && PRESET_BEZIER[curve.name]) return PRESET_BEZIER[curve.name];
   if (curve.type === 'preset' && curve.name === 'bounce') return [{ x: 0.3, y: 1.4 }, { x: 0.6, y: 1 }];
   if (curve.type === 'preset' && curve.name === 'elastic') return [{ x: 0.2, y: 1.6 }, { x: 0.5, y: 0.9 }];
+  if (curve.type === 'preset' && curve.name === 'spring') return [{ x: 0.25, y: 1.45 }, { x: 0.5, y: 0.95 }];
+  if (curve.type === 'preset' && curve.name === 'anticipate') return [{ x: 0.36, y: -0.56 }, { x: 0.64, y: 1 }];
+  if (curve.type === 'preset' && curve.name === 'overshoot') return [{ x: 0.34, y: 1.56 }, { x: 0.64, y: 1 }];
   // the nearest a cubic gets to a step: flat, then everything at the very end
   if (curve.type === 'preset' && curve.name === 'hold') return [{ x: 1, y: 0 }, { x: 1, y: 0 }];
   return [{ x: 1 / 3, y: 1 / 3 }, { x: 2 / 3, y: 2 / 3 }];
 }
 
-export const EASING_NAMES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'bounce', 'elastic', 'hold'] as const;
+export const EASING_NAMES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'bounce', 'elastic', 'spring', 'anticipate', 'overshoot', 'hold'] as const;
 
 /**
  * How one shape becomes the next, as the easing on the outgoing shape keyframe.
@@ -118,7 +127,10 @@ export function easingShape(c: EasingCurve): KeyframeShape {
     case 'easeIn': return 'triangle-left';
     case 'easeOut': return 'triangle-right';
     case 'bounce':
-    case 'elastic': return 'spring';
+    case 'elastic':
+    case 'spring':
+    case 'overshoot':
+    case 'anticipate': return 'spring';
     case 'hold': return 'square';
     default: return 'diamond'; // easeInOut — the common case keeps the familiar shape
   }

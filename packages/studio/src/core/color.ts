@@ -56,3 +56,37 @@ export function parseHex(hex: string, a = 1): ColorStop {
   const s = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
   return { r: parseInt(s.slice(0, 2), 16) || 0, g: parseInt(s.slice(2, 4), 16) || 0, b: parseInt(s.slice(4, 6), 16) || 0, a };
 }
+
+/** #RGB, #RRGGBB or #RRGGBBAA (the # optional) → a colour; alpha only when it was written. */
+export function readHex(text: string): (Omit<ColorStop, 'a'> & { a?: number }) | null {
+  const h = text.trim().replace(/^#/, '');
+  if (!/^([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(h)) return null;
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const c = parseHex(full.slice(0, 6));
+  return full.length === 8 ? { ...c, a: Math.round((parseInt(full.slice(6, 8), 16) / 255) * 1000) / 1000 } : { r: c.r, g: c.g, b: c.b };
+}
+
+/** Hue 0–360, saturation and value 0–1 — the square-and-strip a colour picker is drawn as. */
+export type Hsv = { h: number; s: number; v: number };
+
+export function rgbToHsv({ r, g, b }: ColorStop): Hsv {
+  const R = r / 255, G = g / 255, B = b / 255;
+  const max = Math.max(R, G, B), min = Math.min(R, G, B), d = max - min;
+  let h = 0;
+  if (d) h = max === R ? ((G - B) / d) % 6 : max === G ? (B - R) / d + 2 : (R - G) / d + 4;
+  return { h: (h * 60 + 360) % 360, s: max ? d / max : 0, v: max };
+}
+
+export function hsvToRgb({ h, s, v }: Hsv, a = 1): ColorStop {
+  const f = (n: number) => {
+    const k = (n + h / 60) % 6;
+    return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1))));
+  };
+  return { r: f(5), g: f(3), b: f(1), a };
+}
+
+/** Soft pastels — the picker's presets, chosen to sit well on a mascot and on each other. */
+export const PASTELS: ColorStop[] = [
+  '#FFD1DC', '#FFB3C6', '#FFC8A2', '#FFE5A8', '#FFF4B8', '#D9F2B4', '#B8E8C8', '#B5EAD7',
+  '#B8E2F2', '#AEC6F2', '#C7CEEA', '#D7C4F2', '#F2C4E8', '#F2EFE9', '#E2DDD3', '#C9C3BA',
+].map((h) => parseHex(h));

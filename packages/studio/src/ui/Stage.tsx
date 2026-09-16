@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HexColorPicker } from './ColorPicker';
 import { useEditor, type Tool } from '../core/store';
 import { compOf } from '../core/comp';
-import { composeScene, evaluateRig, evaluateWithTransition, fromFrame, sceneFrames, toFrame, WORLD, type LayerFrame, type SceneItem } from '../core/scene';
+import { composeScene, evaluateRig, evaluateWithTransition, fromFrame, pinned, sceneFrames, stretchOf, toFrame, WORLD, type LayerFrame, type SceneItem } from '../core/scene';
 import { TrajectoryHandles } from './TrajectoryHandles';
 import { ShapeHandles } from './ShapeHandles';
 import { CurveHandles } from './CurveHandles';
@@ -19,7 +20,7 @@ import { activeTimeline } from '../core/types';
 import { DEFAULT_BG, useStageBg } from './stageBg';
 import type { Rig, RigNode, Vec2 } from '../core/types';
 
-type Mode = 'move' | 'scale' | 'rotate' | 'turn' | 'limb' | 'bend' | 'pan';
+type Mode = 'move' | 'scale' | 'rotate' | 'turn' | 'limb' | 'bend' | 'pan' | 'anchor';
 
 interface Drag {
   mode: Mode;
@@ -111,6 +112,7 @@ export function Stage() {
   const select = useEditor((s) => s.select);
   const setValue = useEditor((s) => s.setValue);
   const updateNode = useEditor((s) => s.updateNode);
+  const pinLimbPoint = useEditor((s) => s.pinLimbPoint);
   const editPoints = useEditor((s) => s.editPoints);
   const setEditPoints = useEditor((s) => s.setEditPoints);
   const duplicateLayer = useEditor((s) => s.duplicateLayer);
@@ -324,14 +326,46 @@ export function Stage() {
     };
   };
 
-  const startLimbPoint = (key: 'a' | 'b' | 'c') => (e: React.PointerEvent) => {
+  /** Where the selected layer's anchor is drawn, in its own rotated box, and the px one local
+   *  unit of anchor is along each axis there. */
+  const anchorOf = (id: string) => {
+    const node = rig.nodes[id];
+    const f = frames.get(node?.parentId ?? WORLD), mine = frames.get(id);
+    if (!node || !f || !mine || node.kind === 'limb') return null;
+    const st = stretchOf(node);
+    // a body's frame carries its own stretch per axis; any other layer's parent is uniform
+    const sxk = node.kind === 'body' ? mine.kx : mine.parentCum * st.x;
+    const syk = node.kind === 'body' ? mine.ky : mine.parentCum * st.y;
+    const a = node.anchor ?? { x: 0, y: 0 };
+    return { x: a.x * sxk, y: a.y * syk, sxk, syk, k: mine.parentCum, f, node, a };
+  };
+
+  const startAnchor = (e: React.PointerEvent) => {
     e.stopPropagation();
-    if (!selNode?.limb) return;
-    const node = rig.nodes[selNode.id];
+    if (!sel) return;
+    const id = targetOf(sel.id);
+    const at = anchorOf(id);
+    if (!at) return;
+    const p = toComp(e);
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    drag.current = {
+      mode: 'anchor', id, ox: p.x, oy: p.y,
+      start: {
+        ax: at.a.x, ay: at.a.y, sxk: at.sxk, syk: at.syk, k: at.k, cx: sel.cx, cy: sel.cy, rot: sel.rotation,
+        prot: at.f.rot, pkx: at.f.kx, pky: at.f.ky,
+        fx: at.node.surface.flatOffset?.x ?? 0, fy: at.node.surface.flatOffset?.y ?? 0,
+      },
+    };
+  };
+
+  const startLimbPoint = (key: 'a' | 'b' | 'c', limbId = selNode?.id) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    const node = limbId ? rig.nodes[limbId] : undefined;
+    if (!node?.limb) return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const p = toComp(e);
-    drag.current = { mode: 'limb', id: selNode.id, key, ox: p.x, oy: p.y, frame: frames.get(selNode.parentId ?? WORLD),
-      start: { x: node.limb![key]?.x ?? 0, y: node.limb![key]?.y ?? 0 } };
+    drag.current = { mode: 'limb', id: node.id, key, ox: p.x, oy: p.y, frame: frames.get(node.parentId ?? WORLD),
+      start: { x: node.limb[key]?.x ?? 0, y: node.limb[key]?.y ?? 0 } };
   };
 
   const onMove = (e: React.PointerEvent) => {
@@ -386,6 +420,16 @@ export function Stage() {
     if (d.mode === 'limb' && d.frame && d.key) {
       // the points ARE where the shoulder, hand, knee and ankle sit — the hose's length
       // decides the curve between them — so a drag writes the point straight back
+      // a planted foot moves its pin: that is where the ground is now
+      const l = node.limb;
+      const isEnd = !!l && d.key === limbPoints(l)[limbPoints(l).length - 1];
+      if (l && frames.get(WORLD) && (isEnd ? l.pin : l.pins?.[d.key])) {
+        const w = fromFrame(frames.get(WORLD)!, p);
+        const at = { x: round2(w.x), y: round2(w.y) };
+        const key = d.key;
+        updateNode(d.id, (n) => { if (!n.limb) return; if (isEnd) n.limb.pin = at; else n.limb.pins = { ...n.limb.pins, [key]: at }; }, `pin.${d.id}`);
+        return;
+      }
       const local = fromFrame(d.frame, p);
       setValue(d.id, `limb.${d.key}.x`, round2(local.x), `limb.${d.id}`);
       setValue(d.id, `limb.${d.key}.y`, round2(local.y), `limb.${d.id}`);
@@ -408,7 +452,8 @@ export function Stage() {
         }
         return;
       }
-      const onSphere = node.surface.mapped && f && f.R > 0 && project.rig.nodes[node.parentId ?? '']?.kind === 'body';
+      // on a sphere: the body's, or the face's that hands the body's down
+      const onSphere = node.surface.mapped && f && f.R > 0;
       if (onSphere && f) {
         // on any mascot's surface: the point under the pointer, as yaw and pitch on its sphere
         const a = (-f.rot * Math.PI) / 180;
@@ -438,6 +483,25 @@ export function Stage() {
       const uniform = e.shiftKey || node.kind === 'text' ? Math.max(kx, ky) : 0;
       setValue(d.id, 'transform.scale.x', clamp(d.start.sx * (uniform || kx), 0.03, 6), `scale.${d.id}`);
       setValue(d.id, 'transform.scale.y', clamp(d.start.sy * (uniform || ky), 0.03, 6), `scale.${d.id}`);
+      return;
+    }
+
+    if (d.mode === 'anchor') {
+      // the point under the pointer, in the layer's own unscaled px from its centre — and the
+      // position nudged by exactly what that pivot change would shift, so nothing moves
+      const q = rotate(p.x - d.start.cx, p.y - d.start.cy, (-d.start.rot * Math.PI) / 180);
+      const ax = round2(q.x / (d.start.sxk || 1)), ay = round2(q.y / (d.start.syk || 1));
+      const dax = (ax - d.start.ax) * d.start.k, day = (ay - d.start.ay) * d.start.k;
+      const r0 = (d.start.prot * Math.PI) / 180, r1 = (d.start.rot * Math.PI) / 180;
+      const s0 = rotate(dax, day, r0);
+      const s1 = rotate(dax * (d.start.sxk / (d.start.k || 1)), day * (d.start.syk / (d.start.k || 1)), r1);
+      const back = rotate(s0.x - s1.x, s0.y - s1.y, -r0);
+      setValue(d.id, 'anchor.x', ax, `anchor.${d.id}`);
+      setValue(d.id, 'anchor.y', ay, `anchor.${d.id}`);
+      if (!node.surface.mapped) {
+        setValue(d.id, 'flatOffset.x', round2(d.start.fx - back.x / (d.start.pkx || 1)), `anchor.${d.id}`);
+        setValue(d.id, 'flatOffset.y', round2(d.start.fy - back.y / (d.start.pky || 1)), `anchor.${d.id}`);
+      }
       return;
     }
 
@@ -600,7 +664,43 @@ export function Stage() {
                 stroke="var(--signal)" strokeWidth={1.25} />
               <circle className="handle" cx={(box.x0 + box.x1) / 2} cy={box.y0 - 24} r={5.5}
                 pointerEvents="all" onPointerDown={startHandle('rotate')} onPointerMove={onMove} onPointerUp={onUp} />
+              {(() => {
+                const at = anchorOf(targetOf(sel.id));
+                if (!at) return null;
+                return (
+                  <g className="anchor-handle" transform={`translate(${at.x} ${at.y})`} pointerEvents="all"
+                    onPointerDown={startAnchor} onPointerMove={onMove} onPointerUp={onUp}>
+                    <title>Anchor — what it turns, scales and squishes around. Drag to move it.</title>
+                    <circle r={9} fill="transparent" />
+                    <circle r={4.5} fill="none" stroke="var(--signal)" strokeWidth={1.25} />
+                    <line x1={-9} x2={9} y1={0} y2={0} stroke="var(--signal)" strokeWidth={1.25} />
+                    <line x1={0} x2={0} y1={-9} y2={9} stroke="var(--signal)" strokeWidth={1.25} />
+                  </g>
+                );
+              })()}
             </g>
+          </g>
+        )}
+
+        {/* posing: with a mascot (or any part of it that is not a limb) selected, every hand and
+            foot it has is a handle — drag them straight into a pose, no limb to select first */}
+        {!limbNode && current && mascotOf(project.rig, selection[0]) && showGuides && tool === 'select' && selection.length === 1 && (
+          <g className="pose-handles">
+            {Object.values(rig.nodes).filter((n) => n.limb && mascotOf(project.rig, n.id)?.id === current.id).map((n) => {
+              const f = frames.get(n.parentId ?? WORLD);
+              if (!f || !n.limb) return null;
+              const keys = limbPoints(n.limb).slice(1);
+              return keys.map((k, i) => {
+                const pt = n.limb!.pin && i === keys.length - 1 && frames.get(WORLD) ? toFrame(frames.get(WORLD)!, n.limb!.pin) : toFrame(f, n.limb![k]!);
+                const end = i === keys.length - 1;
+                return (
+                  <circle key={`${n.id}.${k}`} cx={pt.x} cy={pt.y} r={end ? 6 : 4.5} className={`limb-pt pose-pt${end ? ' end' : ''}`}
+                    pointerEvents="all" onPointerDown={startLimbPoint(k, n.id)} onPointerMove={onMove} onPointerUp={onUp}>
+                    <title>{`${n.name} — ${n.limb!.type === 'leg' ? (end ? 'foot' : 'knee') : (end ? 'hand' : 'elbow')}: drag to pose`}</title>
+                  </circle>
+                );
+              });
+            })}
           </g>
         )}
 
@@ -611,11 +711,14 @@ export function Stage() {
               const l = limbNode.limb!;
               // exactly on the points: the length shapes the curve between them, never
               // where they are
-              const drawn = (k: 'a' | 'b' | 'c') => toFrame(limbFrame, l[k]!);
-              const pts = limbPoints(l).map((k) => ({ k, at: drawn(k) }));
+              // where each point is drawn — a pinned one at its pin
+              const placed = pinned(hoseInputOf(l, (v) => toFrame(limbFrame, v), limbFrame.cum), l, frames.get(WORLD)!).points;
+              const keys = limbPoints(l);
+              const pts = keys.map((k, i) => ({ k, at: placed[i] }));
+              const isPinned = (k: 'a' | 'b' | 'c') => (k === keys[keys.length - 1] ? !!l.pin : !!l.pins?.[k]);
               // where the hose actually ends: short of the hand when it is out of reach,
               // because a rubber hose keeps its length rather than stretching
-              const end = rubberHose(hoseInputOf(l, (v) => toFrame(limbFrame, v), limbFrame.cum))?.end;
+              const end = rubberHose(pinned(hoseInputOf(l, (v) => toFrame(limbFrame, v), limbFrame.cum), l, frames.get(WORLD)!))?.end;
               const target = pts[pts.length - 1].at;
               const short = end && Math.hypot(end.x - target.x, end.y - target.y) > 2 ? end : null;
               return (
@@ -626,12 +729,25 @@ export function Stage() {
                       <title>Out of reach — the limb keeps its length. Lengthen it to reach.</title>
                     </line>
                   )}
-                  {pts.map(({ k, at }) => (
-                    <circle key={k} cx={at.x} cy={at.y} r={k === 'a' ? 6 : 7} className={`limb-pt limb-pt-${k}`}
-                      pointerEvents="all" onPointerDown={startLimbPoint(k)} onPointerMove={onMove} onPointerUp={onUp}>
-                      <title>{l.type === 'leg' ? { a: 'Hip', b: 'Knee', c: 'Ankle' }[k] : { a: 'Shoulder', b: 'Hand', c: '' }[k]}</title>
-                    </circle>
-                  ))}
+                  {pts.map(({ k, at }) => {
+                    const name = l.type === 'leg' ? { a: 'Hip', b: l.c ? 'Knee' : 'Ankle', c: 'Ankle' }[k] : { a: 'Shoulder', b: l.c ? 'Elbow' : 'Hand', c: 'Hand' }[k];
+                    const on = isPinned(k);
+                    return (
+                      <g key={k}>
+                        <circle cx={at.x} cy={at.y} r={k === 'a' ? 6 : 7} className={`limb-pt limb-pt-${k}${on ? ' pinned' : ''}`}
+                          pointerEvents="all" onPointerDown={startLimbPoint(k)} onPointerMove={onMove} onPointerUp={onUp}>
+                          <title>{`${name}${on ? ' — pinned in place' : ''}`}</title>
+                        </circle>
+                        {/* the pin: holds this point where it is in the world */}
+                        <g className="limb-pin" data-on={on || undefined} transform={`translate(${at.x + 10} ${at.y - 22})`} pointerEvents="all"
+                          onPointerDown={(e) => { e.stopPropagation(); pinLimbPoint(limbNode.id, k, !on); }}>
+                          <title>{on ? `Unpin the ${name.toLowerCase()} — it follows the body again` : `Pin the ${name.toLowerCase()} where it is — the body moves, it stays`}</title>
+                          <circle r={9} cx={6} cy={6} />
+                          <path d="M6 9.5v3.5 M4.2 1.2h3.6l-.6 3.6 1.8 1.8v1.2H3v-1.2l1.8-1.8-.6-3.6Z" transform="translate(0 0)" />
+                        </g>
+                      </g>
+                    );
+                  })}
                 </>
               );
             })()}
@@ -693,8 +809,7 @@ export function Stage() {
               style={c === 'transparent' ? undefined : { background: c }}
               onClick={() => setBgPersist(c)} />
           ))}
-          <input type="color" aria-label="Custom preview background"
-            value={transparent ? DEFAULT_BG : bg} onChange={(e) => setBgPersist(e.target.value)} />
+          <HexColorPicker label="Custom preview background" value={transparent ? DEFAULT_BG : bg} onChange={setBgPersist} />
         </div>
       </div>
       {tool === 'pen' && (

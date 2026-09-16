@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { useDismiss } from './bits';
 import { useEditor } from '../core/store';
 import { bakeLottie } from '../export/lottie';
 import { buildDotLottie } from '../export/dotlottie';
@@ -25,6 +26,9 @@ export function ExportBar() {
   const playhead = useEditor((s) => s.playhead);
   const [busy, setBusy] = useState<{ what: string; p: number } | null>(null);
   const [scale, setScale] = useState(1);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDetailsElement>(null);
+  useDismiss(exportOpen, () => setExportOpen(false), [exportRef]);
   const [stageBg] = useStageBg();
   const [bg, setBg] = useState(true);
   const [note, setNote] = useState<string | null>(null);
@@ -93,7 +97,7 @@ export function ExportBar() {
 
   return (
     <>
-      <details className="export">
+      <details className="export" ref={exportRef} open={exportOpen} onToggle={(e) => setExportOpen(e.currentTarget.open)}>
         <summary className="btn primary" style={{ listStyle: 'none' }}>Export ▾</summary>
         <div className="export-pop panel">
           <div className="panel-body">

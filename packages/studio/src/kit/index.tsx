@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { GITHUB_URL, GithubMark } from './TourMenu';
 
 /**
  * The shell components shared by the user dashboard and the admin panel.
@@ -63,6 +64,10 @@ export function Shell({ nav, active, onNavigate, footer, brand, children }: {
           </div>
         ))}
 
+        <a className="side-item" href={GITHUB_URL} target="_blank" rel="noopener noreferrer" title="View on GitHub" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <span className="side-glyph" aria-hidden style={{ display: 'grid', placeItems: 'center' }}><GithubMark size={15} /></span>
+          <span className="side-label">View on GitHub</span>
+        </a>
         {footer && <div className="side-foot">{footer}</div>}
       </aside>
 
