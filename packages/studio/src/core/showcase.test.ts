@@ -1,4 +1,6 @@
 import { it } from 'vitest';
+import { appPresets } from './appPresets';
+import { cinematicPresets } from './cinematicPresets';
 import { check } from './testkit';
 import { useEditor } from './store';
 import { builtinPresets, defaultProject, presetPreviewProject } from './defaults';
@@ -12,7 +14,7 @@ import { bakeLottie } from '../export/lottie';
 import { activeTimeline } from './types';
 import type { Preset, Project } from './types';
 
-const SHOWCASE = [...showcasePresets(), ...textPresets()];
+const SHOWCASE = [...showcasePresets(), ...textPresets(), ...appPresets(), ...cinematicPresets()];
 
 // --- the seven are real presets, first in the library ------------------------------------
 {
@@ -204,5 +206,75 @@ for (const preset of SHOWCASE) {
     const kinds = activeTimeline(useEditor.getState().project).tracks.filter((t) => t.nodeId === 'mine' && t.property === 'text.chars.kind');
     it('Pop In on it keys its letter motion', check(kinds.length === 1 && kinds[0].keyframes[0].value === 'pop'));
     useEditor.getState().loadProject(defaultProject());
+  }
+}
+
+// --- the cinematic ten: each is built from the systems it names -------------------------------
+{
+  const cine = cinematicPresets();
+  const byId = (id: string) => cine.find((p) => p.id === id)!;
+  const layer = (p: Preset, id: string) => p.layers!.find((l) => l.id === id)!;
+  const has = (p: Preset, prop: string) => p.tracks.some((t) => t.property.startsWith(prop));
+  it('there are ten', check(cine.length === 10 && new Set(cine.map((p) => p.id)).size === 10));
+  it('no two presets bring a different layer under the same id', check((() => {
+    const seen = new Map<string, string>();
+    for (const p of cine.slice(0, 9)) for (const l of p.layers ?? []) {
+      if (/^(arm|leg)[LR]$/.test(l.id)) continue;
+      if (seen.has(l.id)) return false;
+      seen.set(l.id, p.id);
+    }
+    return true;
+  })()));
+
+  const portal = byId('p_cine_portal');
+  it('Portal: glow + gradient ring, sparks, camera shake and zoom', check(!!layer(portal, 'portalRing').gradient && layer(portal, 'portalGlow').blend === 'screen'
+    && portal.emitters![0].path === 'burst' && portal.modifiers!.some((m) => m.kind === 'shake' && m.nodeId === '__camera') && has(portal, 'camera.zoom')));
+  const morph = byId('p_cine_morph');
+  it('Morph: shape keys, jelly and follow-through', check(has(morph, 'shape.path') && ['jelly', 'follow'].every((k) => morph.modifiers!.some((m) => m.kind === k))));
+  const walk = byId('p_cine_walk');
+  it('Walk: a walk modifier, and scenery at several depths', check(walk.modifiers!.some((m) => m.kind === 'walk') && new Set(walk.layers!.map((l) => l.depth?.z ?? 0)).size >= 3));
+  const glitch = byId('p_cine_glitch');
+  it('Glitch: a masked screen with scanlines, tearing keyed down', check(layer(glitch, 'glitchScreen').mask?.nodeId === 'glitchWipe' && has(glitch, 'effect.slices.amount')
+    && layer(glitch, 'glitchScreen').effects!.some((e) => e.kind === 'scanlines')));
+  const doodle = byId('p_cine_doodle');
+  it('Doodle: tapered, boiling strokes drawn on with trim', check(doodle.layers!.filter((l) => l.curve).every((l) => (l.stroke?.taper ?? 0) > 0 && l.effects?.some((e) => e.kind === 'jitter')) && has(doodle, 'trim.end')));
+  const title = byId('p_cine_title');
+  it('Title: every letter of BLOOBY keyed on its own', check([0, 1, 2, 3, 4, 5].every((i) => has(title, `text.char.${i}.y`))));
+  it('and no letter track has two keys at one time', check(title.tracks.every((t) => new Set(t.keyframes.map((x) => x.time)).size === t.keyframes.length)));
+  const flip = byId('p_cine_flip');
+  it('Flip: cards turn on rotateY in depth, the mascot spins its sphere', check(has(flip, 'depth.rotateY') && has(flip, 'depth.z') && flip.tracks.some((t) => t.nodeId === 'body' && t.property === 'depth.rotateY')));
+  const reel = byId('p_cine_showreel');
+  it('Showreel: about twenty seconds, joined from the others', check(reel.durationMs >= 20000 && reel.durationMs <= 22000 && ['portalRing', 'walkGround', 'glitchScreen', 'morphAura', 'assembleWord'].every((id) => reel.layers!.some((l) => l.id === id))));
+  it('Showreel: its keys stay in order across the joins', check(reel.tracks.every((t) => t.keyframes.every((x, i) => i === 0 || x.time >= t.keyframes[i - 1].time))));
+
+  // behaviour, on a placed clip
+  {
+    const { project, start } = placed(walk);
+    const bodyX = (t: number) => sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'body')!.cx;
+    const treeX = (t: number) => sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'walkTree1')?.cx ?? NaN;
+    it('Walk: the camera keeps the walking mascot framed', check(Math.abs(bodyX(3500) - 360) < 60, String(bodyX(3500))));
+    it('while the scenery slides past', check(treeX(3500) < treeX(800) - 100, `${treeX(800)} → ${treeX(3500)}`));
+  }
+  {
+    const { project, start } = placed(byId('p_cine_particles'));
+    const scene = sceneAt(project, start + 3300, compOf(project));
+    const word = scene.find((s) => s.id === 'assembleWord');
+    const bits = scene.filter((s) => /#/.test(s.id));
+    it('Particles: at 3.3s the particles sit on the word', check(!!word && bits.length > 100 && bits.filter((b) => Math.abs(b.cx - word.cx) < 260 && Math.abs(b.cy - word.cy) < 90).length > bits.length * 0.8));
+  }
+  {
+    const { project, start } = placed(reel);
+    const body = (t: number) => sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'body');
+    // the portal opens with no mascot; the walk after it must not inherit that
+    it('Showreel: the mascot is there when the walk begins', check(!!body(4300) && body(4300)!.w > 200, String(body(4300)?.w)));
+    // the walk's travel ends with its part: back at the centre for the glitch
+    it('Showreel: the walk does not carry the mascot off into the next part', check(Math.abs(body(9000 + 1200)!.cx - 360) < 40, String(body(10200)?.cx)));
+    const order = sceneAt(project, start + 1000, compOf(project)).map((s) => s.id);
+    it('a preset layer with a negative zIndex sits behind the mascot', check(order.indexOf('portalRing') < order.indexOf('body') && order.indexOf('portalRing') >= 0, order.join()));
+  }
+  {
+    const { project, start } = placed(glitch);
+    const at = (t: number) => sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'glitchScreen');
+    it('Glitch: the screen is clipped by the wipe', check(!!at(1500)?.clip?.d));
   }
 }

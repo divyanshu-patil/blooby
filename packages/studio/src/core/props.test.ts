@@ -6,6 +6,7 @@ import { MODIFIER_KINDS, MODIFIERS } from './types';
 import { validate } from '../copilot/tools';
 import { activeTimeline } from './types';
 import { makeLimb, makeTextLayer } from './layers';
+import { EFFECT_KINDS, makeEffect } from './effects';
 
 // --- the registries: one table, and everything downstream derives from it -------
 {
@@ -17,6 +18,9 @@ import { makeLimb, makeTextLayer } from './layers';
   rig.nodes.legProbe = makeLimb('leg', 1, rig.rootId, { id: 'legProbe' });
   // and a text layer has every typography property
   rig.nodes.textProbe = makeTextLayer('probe', { id: 'textProbe' });
+  // and the body wears every effect and a gradient, so their params have somewhere to live
+  rig.nodes[rig.rootId].effects = EFFECT_KINDS.map(makeEffect);
+  rig.nodes[rig.rootId].gradient = { type: 'linear', angle: 0, stops: [] };
   // the same guarantee for an effect's own properties, which live on the timeline rather
   // than in the rig and so have their own read/write pair
   const fxProject = defaultProject();

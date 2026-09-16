@@ -234,8 +234,11 @@ export function placeGlyphs(style: TextStyle, m: TextMetrics, along?: PathSample
         x += motion.dx * Math.cos(r) - motion.dy * Math.sin(r);
         y += motion.dx * Math.sin(r) + motion.dy * Math.cos(r);
       }
-      if (motion.alpha <= 0.002 || motion.scale <= 0.002) continue;
-      glyphs.push({ ch: c.ch, index: c.index, x, y, rot: rot + motion.rot, scale: motion.scale, alpha: motion.alpha });
+      // a letter's own animated offset, on top of the layout and the letter motion
+      const own = style.charOffsets?.[c.index];
+      const scale = motion.scale * (own?.scale ?? 1), alpha = motion.alpha * Math.min(1, Math.max(0, own?.opacity ?? 1));
+      if (alpha <= 0.002 || scale <= 0.002) continue;
+      glyphs.push({ ch: c.ch, index: c.index, x: x + (own?.x ?? 0), y: y + (own?.y ?? 0), rot: rot + motion.rot + (own?.rotation ?? 0), scale, alpha });
     }
   });
   return { glyphs, lines };

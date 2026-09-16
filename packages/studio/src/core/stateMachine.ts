@@ -1,4 +1,5 @@
 import { curveHandles, namedEasing } from './easing';
+import { ANY_STATE } from './types';
 import type {
   ConditionOp, EasingCurve, InputType, InputValue, Project, SmCondition, SmInput,
   SmTransition, StateMachineDef, Timeline,
@@ -153,7 +154,28 @@ export function transitionHolds(t: SmTransition, values: Record<string, InputVal
  * two satisfiable edges is taken.
  */
 export function nextTransition(p: Project, fromId: string, values: Record<string, InputValue>): SmTransition | undefined {
-  return machineOf(p).transitions.find((t) => t.from === fromId && transitionHolds(t, values));
+  return concreteTransitions(p).find((t) => t.from === fromId && transitionHolds(t, values));
+}
+
+/**
+ * Every rule as the engine sees it: a state-to-state edge as it is, and a rule "from any
+ * state" fanned out into one edge per OTHER state — the same way OR fans out, because a
+ * guard list has no "any". In each state its own edges come first, then the any-state
+ * rules, so a specific edge still wins where both hold. Never an edge into the state you
+ * are already in: `mood == 2 → Dance` must not restart Dance on every write while mood is 2.
+ */
+export function concreteTransitions(p: Project): SmTransition[] {
+  const m = machineOf(p);
+  const any = m.transitions.filter((t) => t.from === ANY_STATE);
+  const own = m.transitions.filter((t) => t.from !== ANY_STATE);
+  const out: SmTransition[] = [];
+  for (const tl of p.timelines) {
+    out.push(...own.filter((t) => t.from === tl.id));
+    for (const t of any) if (t.to !== tl.id) out.push({ ...t, id: `${t.id}@${tl.id}`, from: tl.id });
+  }
+  // an edge from a state that is gone stays visible to validation rather than vanishing
+  out.push(...own.filter((t) => !p.timelines.some((tl) => tl.id === t.from)));
+  return out;
 }
 
 /** The declared defaults, as a live value bag to start a session from. */
@@ -222,7 +244,7 @@ export function toDotLottie(p: Project, layout?: DotLottieLayout) {
 
   const states = p.timelines.map((tl) => {
     const outgoing: ReturnType<typeof transitionJson>[] = [];
-    for (const t of m.transitions) {
+    for (const t of concreteTransitions(p)) {
       if (t.from !== tl.id || !byId.has(t.to)) continue;
       const to = nameOf(t.to);
       const guards = t.conditions.map((c) => guardFor(c, m.inputs)).filter((g): g is Guard => !!g);
@@ -389,9 +411,10 @@ export function directTransition(p: Project, fromId: string, toId: string, opts:
     ? (typeof opts.value === 'number' ? opts.value : p.timelines.indexOf(target))
     : (typeof opts.value === 'string' && opts.value ? opts.value : target.name);
   const condition: SmCondition = { input: input.name, operator: 'Equal', value };
-  const sources = opts.fromAny ? p.timelines.filter((t) => t.id !== toId).map((t) => t.id) : [fromId];
+  // from any state is ONE rule, not an edge per state: a state added later is covered too
+  const sources = opts.fromAny ? [ANY_STATE] : [fromId];
   for (const from of sources) {
-    if (from === toId || !p.timelines.some((t) => t.id === from)) continue;
+    if (from === toId || (from !== ANY_STATE && !p.timelines.some((t) => t.id === from))) continue;
     const same = m.transitions.find((t) => t.from === from && t.to === toId
       && t.conditions.length === 1 && t.conditions[0].input === input!.name && t.conditions[0].value === value);
     if (same) { same.durationMs = Math.max(0, opts.durationMs); if (opts.easing) same.easing = opts.easing; continue; }
@@ -446,8 +469,8 @@ export function validateMachine(p: Project): Issue[] {
   }
 
   for (const t of m.transitions) {
-    const label = `${byId.get(t.from)?.name ?? '?'} → ${byId.get(t.to)?.name ?? '?'}`;
-    if (!byId.has(t.from) || !byId.has(t.to)) {
+    const label = `${t.from === ANY_STATE ? 'Any state' : byId.get(t.from)?.name ?? '?'} → ${byId.get(t.to)?.name ?? '?'}`;
+    if ((t.from !== ANY_STATE && !byId.has(t.from)) || !byId.has(t.to)) {
       out.push({ level: 'error', message: `Transition ${label} points at a state that no longer exists.`, transitionId: t.id });
       continue;
     }

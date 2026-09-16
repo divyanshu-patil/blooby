@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { naturalShape, primitivePath, SHAPE_DIALS, type ShapeParams } from '../core/path';
 import { libraryOutline, shapeById, shapeIdOf, SHAPE_LIBRARY } from '../core/emitters';
@@ -6,7 +6,7 @@ import { looksLikeSvg, svgOutline } from '../core/svg';
 import { MORPH_MODE_NAMES, MORPH_MODES, morphModeOf, type MorphMode } from '../core/easing';
 import { activeTrackFor, valueAt } from '../core/scene';
 import { activeTimeline } from '../core/types';
-import { KeyNav, NumberField } from './bits';
+import { KeyNav, NumberField, useDismiss } from './bits';
 import type { RigNode, ShapeKind } from '../core/types';
 
 /**
@@ -44,6 +44,8 @@ export function ShapeEditor({ node }: { node: RigNode }) {
   const setEditPoints = useEditor((s) => s.setEditPoints);
   const commit = useEditor((s) => s.commit);
   const [picking, setPicking] = useState(false);
+  const pickRef = useRef<HTMLDivElement>(null), trayRef = useRef<HTMLDivElement>(null);
+  useDismiss(picking, () => setPicking(false), [pickRef, trayRef]);
   const [showPath, setShowPath] = useState(false);
 
   // what is on screen right now, which is the animated value rather than the stored one
@@ -117,7 +119,7 @@ export function ShapeEditor({ node }: { node: RigNode }) {
     <>
       <div className="row">
         <KeyNav nodeId={node.id} property="shape.path" onToggle={() => toggleKeyframe(node.id, 'shape.path')} />
-        <div className="shape-pick">
+        <div className="shape-pick" ref={pickRef}>
           <button className="btn sm shape-current" aria-expanded={picking} onClick={() => setPicking((v) => !v)}
             title="Pick a shape. With the shape keyframed, picking changes the keyframe under the playhead.">
             {current
@@ -133,7 +135,7 @@ export function ShapeEditor({ node }: { node: RigNode }) {
       </div>
       {/* in the flow, below the row: the rail clips a popover that does not fit */}
       {picking && (
-        <div className="shape-grid tray" role="listbox" aria-label="Shapes">
+        <div className="shape-grid tray" role="listbox" aria-label="Shapes" ref={trayRef}>
           {SHAPE_LIBRARY.map((s) => (
             <button key={s.id} role="option" aria-selected={s.id === currentId} className="shapepick-cell" title={s.name}
               onClick={() => pick(s.id)}>

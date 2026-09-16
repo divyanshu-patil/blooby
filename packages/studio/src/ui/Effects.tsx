@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { HexColorPicker } from './ColorPicker';
 import { useEditor } from '../core/store';
 import { SvgLibrary } from './SvgLibrary';
 import { activeTimeline, MODIFIER_AXES } from '../core/types';
@@ -255,10 +256,9 @@ export function Effects() {
               onClick={() => selectEmitter(selectedEmitterId === em.id ? null : em.id)}>◎</button>
             <input className="txt" style={{ flex: 1 }} value={em.name} aria-label="Emitter name"
               onChange={(e) => updateEmitter(em.id, (x) => { x.name = e.target.value; })} />
-            <input type="color" className="swatch" title="Colour of everything this throws"
-              value={hexColor(em.color)}
-              onChange={(e) => updateEmitter(em.id, (x) => {
-                const c = { ...parseHex(e.target.value), a: x.color.a };
+            <HexColorPicker label="Emitter" value={hexColor(em.color)}
+              onChange={(hex) => updateEmitter(em.id, (x) => {
+                const c = { ...parseHex(hex), a: x.color.a };
                 x.color = c;
                 // A part with its own colour ignores the emitter's, which made this swatch
                 // look broken on anything placed from a preset — Sleepy's zzz and Crying's
@@ -309,6 +309,7 @@ export function Effects() {
               <option value="arc">arc — drifts</option>
               <option value="fall">fall — drops</option>
               <option value="orbit">orbit — circles</option>
+              <option value="burst">burst — explodes, can gather</option>
             </select>
           </div>
 
@@ -341,7 +342,8 @@ export function Effects() {
               <PropRow nodeId={em.id} property="fx.orbitTilt" />
             </>
           ) : <PropRow nodeId={em.id} property="fx.bow" />}
-          <PropRow nodeId={em.id} property="fx.rateMs" />
+          {em.path === 'burst' && <BurstRows em={em} />}
+          {em.path !== 'burst' && <PropRow nodeId={em.id} property="fx.rateMs" />}
           <PropRow nodeId={em.id} property="fx.lifeMs" />
           <PropRow nodeId={em.id} property="fx.count" />
           <PropRow nodeId={em.id} property="fx.fadeStart" />
@@ -394,3 +396,33 @@ export function Effects() {
 const easingName = (e?: { type: string; name?: string }) => (e?.type === 'preset' ? e.name! : 'linear');
 
 /** One labelled slider + number, which is most of this panel. */
+
+/** A burst's physics, and what it gathers onto. */
+function BurstRows({ em }: { em: import('../core/types').Emitter }) {
+  const project = useEditor((s) => s.project);
+  const updateEmitter = useEditor((s) => s.updateEmitter);
+  const targets = Object.values(project.rig.nodes).filter((n) => n.kind === 'body' || n.kind === 'primitive' || n.kind === 'svgLayer');
+  return (
+    <>
+      {(['fx.velocity', 'fx.velocityJitter', 'fx.angle', 'fx.spread', 'fx.drag', 'fx.gravity', 'fx.turbulence'] as const).map((p) => <PropRow key={p} nodeId={em.id} property={p} />)}
+      <div className="row">
+        <span className="prop-label" style={{ flex: 1 }} title="From a time, every particle flies to its own point on this layer — an assembly">Gather onto</span>
+        <select className="sel" style={{ maxWidth: 130 }} aria-label="Gather onto" value={em.attract?.nodeId ?? ''}
+          onChange={(e) => updateEmitter(em.id, (x) => { if (!e.target.value) delete x.attract; else x.attract = { startMs: 1500, durationMs: 1200, fill: true, ...x.attract, nodeId: e.target.value }; })}>
+          <option value="">nothing</option>
+          {targets.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+        </select>
+      </div>
+      {em.attract && (
+        <div className="row" style={{ gap: 4 }}>
+          <span className="hint">from</span>
+          <NumberField value={em.attract.startMs} step={50} onChange={(v) => updateEmitter(em.id, (x) => { if (x.attract) x.attract.startMs = Math.max(0, v); })} />
+          <span className="hint">ms, over</span>
+          <NumberField value={em.attract.durationMs} step={50} onChange={(v) => updateEmitter(em.id, (x) => { if (x.attract) x.attract.durationMs = Math.max(50, v); })} />
+          <label className="hint" style={{ display: 'flex', gap: 3 }}><input type="checkbox" checked={!!em.attract.fill}
+            onChange={(e) => updateEmitter(em.id, (x) => { if (x.attract) x.attract.fill = e.target.checked; })} /> fill</label>
+        </div>
+      )}
+    </>
+  );
+}

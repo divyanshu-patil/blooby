@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useEditor } from '../core/store';
+import { useEditor, type RailTab } from '../core/store';
 import { Stage } from './Stage';
 import { Layers } from './Layers';
 import { Presets, Expressions, OtherTimelines } from './Presets';
@@ -22,12 +22,11 @@ import { looksLikeSvg } from '../core/svg';
 import { makeSvgLayer } from '../core/layers';
 import { activeTimeline } from '../core/types';
 import { startTourWhenReady } from '../kit/tour';
-import { TourMenu } from '../kit/TourMenu';
+import { GithubLink, TourMenu } from '../kit/TourMenu';
 import { EDITOR_TOURS, INTRO_TOUR } from './tours';
 import type { ReactNode } from 'react';
 import type { Project } from '../core/types';
 
-type Tab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
 
 
 /** The whole editor UI — apps/web renders it with no onSave (local-file Save/Open only),
@@ -54,7 +53,8 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
   const commit = useEditor((s) => s.commit);
   const loadProject = useEditor((s) => s.loadProject);
   const resetProject = useEditor((s) => s.resetProject);
-  const [tab, setTab] = useState<Tab>('node');
+  const tab = useEditor((s) => s.railTab);
+  const setTab = useEditor((s) => s.setRailTab);
   const file = useRef<HTMLInputElement>(null);
   // the faces this project's text uses, fetched as it needs them — never all of Google Fonts
   useEffect(() => { void ensureFonts(project); }, [project]);
@@ -186,6 +186,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
         <button className="btn sm" onClick={openGallery}>Gallery</button>
         <button className="btn sm" title="Reset everything back to the default mascot — the rig, every timeline and the state machine"
           onClick={() => confirm(`Reset "${project.name}"?\n\nThe rig, every timeline, the state machine and all keyframes go back to the default mascot. This cannot be undone — save or export first if you want to keep it.`) && resetProject()}>New</button>
+        <GithubLink />
         <span data-tour="export"><ExportBar /></span>
         <TourMenu tours={EDITOR_TOURS} label="Show me around" />
       </header>
@@ -206,7 +207,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
               { min: 240, max: 560, content: (
                 <div className="rail rail-right" data-tour="rail-right">
                   <div className="tabs">
-                    {(['node', 'eyes', 'fx', 'states', 'ai'] as Tab[]).map((t) => (
+                    {(['node', 'eyes', 'fx', 'states', 'ai'] as RailTab[]).map((t) => (
                       <button key={t} data-tour={`tab-${t}`} aria-pressed={tab === t} onClick={() => setTab(t)}>
                         {t === 'node' ? (selectedBlockId ? 'Clip' : 'Node') : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : t === 'states' ? 'States' : 'Copilot'}
                       </button>

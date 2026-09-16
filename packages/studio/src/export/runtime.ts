@@ -1,7 +1,7 @@
 import { buildDotLottie } from './dotlottie';
 import { dotLottieLayout } from './strip';
 import { zipStore } from './zip';
-import { easingToBezier, initialState, machineOf, RUNTIME_SETTER } from '../core/stateMachine';
+import { concreteTransitions, easingToBezier, initialState, machineOf, RUNTIME_SETTER } from '../core/stateMachine';
 import { easingLabel } from '../core/easing';
 import type { LottieOptions } from './lottie';
 import type { InputType, Project, SmInput } from '../core/types';
@@ -69,7 +69,7 @@ export function machineConfig(project: Project) {
         /** the blend used when this state is entered any way other than a transition */
         enterMs: tl.transitionMs ?? 300,
       })),
-      transitions: m.transitions
+      transitions: concreteTransitions(project)
         .filter((t) => nameOf(t.from) && nameOf(t.to))
         .map((t) => ({
           from: nameOf(t.from),

@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import GIF from 'gif.js.optimized';
 import workerUrl from 'gif.js.optimized/dist/gif.worker.js?url';
@@ -18,7 +19,7 @@ export interface RasterOptions {
 
 /** Same <Shapes> the stage draws — one renderer, so an export can't drift from preview. */
 export function sceneToSvg(scene: SceneItem[], background: string | null, view: Viewport): string {
-  const body = renderToStaticMarkup(Shapes({ scene }));
+  const body = renderToStaticMarkup(createElement(Shapes, { scene }));
   const bg = background ? `<rect width="${view.width}" height="${view.height}" fill="${background}"/>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${view.width}" height="${view.height}" viewBox="0 0 ${view.width} ${view.height}">${bg}${body}</svg>`;
 }

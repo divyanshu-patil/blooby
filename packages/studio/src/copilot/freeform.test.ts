@@ -154,7 +154,7 @@ const run = (calls: ToolCall[]) => {
     && m.transitions[0].from === id('Excited') && m.transitions[0].to === id('Angry')));
   it('on the state input', check(m.transitions[0].conditions[0].input === STATE_INPUT && m.transitions[0].conditions[0].value === 'Angry'));
   run([{ name: 'set_transition', args: { to: 'Happy', from: 'any' } }]);
-  it('from "any" is one direct edge from each state, no chains', check(machineOf(P()).transitions.filter((t) => t.to === id('Happy')).length === 3));
+  it('from "any" is one rule from any state, no chains', check(machineOf(P()).transitions.filter((t) => t.to === id('Happy')).length === 1 && machineOf(P()).transitions.some((t) => t.to === id('Happy') && t.from === '*')));
   it('already being there is refused', check(validate(P(), { name: 'set_transition', args: { to: 'Excited' } }) !== null));
 }
 
@@ -179,4 +179,14 @@ const run = (calls: ToolCall[]) => {
   it('and every new property is in the reference, with its help', check(['opacity', 'stroke.width', 'limb.bend', 'limb.foot.angle'].every((k) => prompt.includes(`  ${k}`))));
   it('and near an exact pixel for the attached sticker', check(near(1, 1)));
   ed().loadProject(defaultProject());
+}
+
+// --- a layer and a property written as one path ----------------------------------------
+{
+  ed().loadProject(defaultProject());
+  const c = normaliseCall(P(), { name: 'add_keyframe', args: { nodeId: 'body.transform.scale.x', atMs: 300, value: 1.2 } });
+  it('"body.transform.scale.x" is split into the layer and the property', check(c.args.nodeId === 'body' && c.args.property === 'transform.scale.x', JSON.stringify(c.args)));
+  const m = normaliseCall(P(), { name: 'move_keyframe', args: { nodeId: 'body.flatOffset.y', fromMs: 123, toMs: 200 } });
+  const err = validate(P(), m) ?? '';
+  it('a missing keyframe says where the keys actually are', check(/its keys are at|has no keys/.test(err), err));
 }

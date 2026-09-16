@@ -1,7 +1,10 @@
 import { makeTimeline } from './defaults';
 import { showcasePresets } from './showcase';
 import { textPresets } from './textPresets';
+import { appPresets } from './appPresets';
+import { cinematicPresets } from './cinematicPresets';
 import { slug } from './stateMachine';
+import { ensureFaces } from './mascot';
 import type { Block, Modifier, Project, Track } from './types';
 
 /**
@@ -25,7 +28,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 9;
 
 interface Migration {
   /** the version this step produces */
@@ -192,6 +195,53 @@ const MIGRATIONS: Migration[] = [
       const showcase = new Set(showcasePresets().map((x) => x.id));
       const lead = p.presets.findIndex((x) => !showcase.has(x?.id));
       p.presets.splice(lead < 0 ? p.presets.length : lead, 0, ...[...showcasePresets(), ...textPresets()].filter((x) => !have.has(x.id)));
+    },
+  },
+  {
+    to: 7,
+    label: 'faces',
+    /**
+     * The face became a layer of its own: a group on each body that the eyes live in, so
+     * it can move, turn and be deleted apart from the body. Every mascot with eyes sitting
+     * straight on it gets one at rest (no offset, no roll, scale 1) — the picture does not
+     * change by a pixel. Saved mascots too, so an instance of one has a face.
+     *
+     * Anchor, squish, curve offsets, pinned feet and "from any state" rules need nothing:
+     * each is optional and absent reads as what a file already meant.
+     */
+    run(p) {
+      if (p.rig?.nodes) ensureFaces(p.rig.nodes, p.rig.rootId);
+      for (const t of p.mascotTemplates ?? []) {
+        if (!Array.isArray(t?.nodes)) continue;
+        const byId = Object.fromEntries(t.nodes.filter(Boolean).map((n) => [n.id, n]));
+        ensureFaces(byId);
+        t.nodes = Object.values(byId);
+      }
+    },
+  },
+  {
+    to: 8,
+    label: 'app screen presets',
+    /**
+     * Ten presets for app screens (core/appPresets.ts), added once the way steps 4 and 6
+     * added theirs: after the text presets, skipping any the file already has.
+     */
+    run(p) {
+      if (!Array.isArray(p.presets)) return;
+      const have = new Set(p.presets.map((x) => x?.id));
+      const lastText = Math.max(-1, ...textPresets().map((t) => p.presets.findIndex((x) => x?.id === t.id)));
+      p.presets.splice(lastText + 1 || p.presets.length, 0, ...appPresets().filter((x) => !have.has(x.id)));
+    },
+  },
+  {
+    to: 9,
+    label: 'cinematic presets',
+    /** The ten cinematic presets (core/cinematicPresets.ts), after the app screen presets. */
+    run(p) {
+      if (!Array.isArray(p.presets)) return;
+      const have = new Set(p.presets.map((x) => x?.id));
+      const lastApp = Math.max(-1, ...appPresets().map((t) => p.presets.findIndex((x) => x?.id === t.id)));
+      p.presets.splice(lastApp + 1 || p.presets.length, 0, ...cinematicPresets().filter((x) => !have.has(x.id)));
     },
   },
 ];

@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
+import { activeTimeline } from '../core/types';
 import { useEditor } from '../core/store';
 import { cssColor } from '../core/color';
 import { shapeById, SHAPE_LIBRARY, libraryOutline } from '../core/emitters';
-import { attachmentOf, layerOrder, makeLimbPair, makeShapeLayer, makeSvgLayer } from '../core/layers';
+import { attachmentOf, layerOrder, makeLimbPair, makeShapeLayer, makeSvgLayer, ROLE_LABEL, rolesFor, absentHere } from '../core/layers';
 import { naturalOutline, PRIMITIVE_SHAPES, primitivePath } from '../core/path';
 import { looksLikeSvg } from '../core/svg';
 import { MASCOT_KINDS, mascotLabel, mascotOf, mascotsOf, type MascotKind } from '../core/mascot';
-import { Icon, Panel } from './bits';
+import { Icon, Panel, useDismiss } from './bits';
 import type { RigNode, ShapeKind } from '../core/types';
 
 type Tray = null | 'add' | 'shape' | 'svg';
@@ -38,7 +39,12 @@ export function Layers() {
   const file = useRef<HTMLInputElement>(null);
   const [tray, setTray] = useState<Tray>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [drop, setDrop] = useState<{ id: string; front: boolean } | null>(null);
+  const [roleFor, setRoleFor] = useState<string | null>(null);
+  const setRole = useEditor((s) => s.setRole);
+  const showLayersIn = useEditor((s) => s.showLayersIn);
+  /** where a dragged layer would land: in front of, behind, or INTO the row under the pointer */
+  const [drop, setDrop] = useState<{ id: string; front: boolean; into?: boolean } | null>(null);
+  const moveInto = useEditor((s) => s.moveInto);
   const [note, setNote] = useState<string | null>(null);
   const [svgText, setSvgText] = useState('');
 
@@ -50,9 +56,15 @@ export function Layers() {
     .filter((n) => n.parentId === parentId && n.id !== rig.rootId)
     .sort((a, b) => (rank.get(b.id) ?? 0) - (rank.get(a.id) ?? 0));
 
-  const rows: { node: RigNode; depth: number }[] = [];
+  // layers owned by another state: listed (dimmed) so they can be brought back
+  const absent = Object.keys(rig.nodes).filter((id) => absentHere(project, id));
+  const rows: { node: RigNode; depth: number; head?: boolean }[] = [];
   const walk = (n: RigNode, depth: number) => {
     rows.push({ node: n, depth });
+    // the head is drawn by the face: show it there, as the part of the face it is
+    if (n.kind === 'group' && n.role === 'face' && n.parentId && rig.nodes[n.parentId]?.kind === 'body') {
+      rows.push({ node: rig.nodes[n.parentId], depth: depth + 1, head: true });
+    }
     for (const c of kids(n.id)) walk(c, depth + 1);
   };
   // the mascots and the world layers interleave by their own draw order at the top level
@@ -86,6 +98,9 @@ export function Layers() {
   };
   const importFile = async (f: File) => { importText(await f.text(), f.name.replace(/\.svg$/i, ''), f.name); };
   const closeTray = () => { setTray(null); setSvgText(''); };
+  const addBtn = useRef<HTMLButtonElement>(null), trayRef = useRef<HTMLDivElement>(null);
+  // a pasted-but-not-imported SVG is a draft worth keeping: only the add and shape trays close by themselves
+  useDismiss(tray === 'add' || tray === 'shape', closeTray, [addBtn, trayRef]);
   const pasteClipboard = async () => {
     try {
       if (importText(await navigator.clipboard.readText(), undefined, 'The clipboard')) closeTray();
@@ -95,9 +110,13 @@ export function Layers() {
   };
 
   /** Top half of a row means "in front of it". */
-  const onDrop = (target: RigNode, front: boolean, dragged: string) => {
+  /** a layer another can be moved into: groups, the face, shapes, SVG, mascots — not eyes, limbs or text */
+  const canHold = (n: RigNode) => n.kind === 'group' || n.kind === 'body' || n.kind === 'primitive' || n.kind === 'svgLayer';
+
+  const onDrop = (target: RigNode, front: boolean, dragged: string, into?: boolean) => {
     setDrop(null);
     if (dragged === target.id) return;
+    if (into) { moveInto(dragged, target.id); return; }
     const ids = order.map((n) => n.id).filter((id) => id !== dragged);
     const t = ids.indexOf(target.id);
     reorderLayer(dragged, front ? t + 1 : t);
@@ -105,14 +124,14 @@ export function Layers() {
 
   return (
     <Panel title="Layers" actions={
-      <button className="btn sm add-btn" aria-expanded={tray !== null} title="Add a mascot, text, a curve, a shape or an SVG"
+      <button ref={addBtn} className="btn sm add-btn" aria-expanded={tray !== null} title="Add a mascot, text, a curve, a shape or an SVG"
         onClick={() => (tray ? closeTray() : setTray('add'))}><Icon name="plus" size={12} />Add</button>
     }>
       <input ref={file} type="file" accept=".svg,image/svg+xml" multiple hidden
         onChange={(e) => { for (const f of [...(e.target.files ?? [])]) void importFile(f); e.target.value = ''; closeTray(); }} />
       {/* trays in the panel's own flow: a popover here is clipped by .panel's overflow */}
       {tray === 'add' && (
-        <div className="add-tray" role="menu" aria-label="Add" onKeyDown={(e) => { if (e.key === 'Escape') closeTray(); }}>
+        <div ref={trayRef} className="add-tray" role="menu" aria-label="Add" onKeyDown={(e) => { if (e.key === 'Escape') closeTray(); }}>
           <span className="add-tray-label">Mascot</span>
           <div className="add-mascots">
             {(Object.keys(MASCOT_KINDS) as MascotKind[]).map((k) => (
@@ -149,7 +168,7 @@ export function Layers() {
         </div>
       )}
       {tray === 'shape' && (
-        <div className="shape-grid tray" role="listbox" aria-label="Add a shape">
+        <div ref={trayRef} className="shape-grid tray" role="listbox" aria-label="Add a shape">
           {SHAPE_LIBRARY.map((s) => (
             <button key={s.id} className="shapepick-cell" title={s.name} onClick={() => addShape(s.id)}>
               <svg viewBox={s.viewBox} aria-hidden dangerouslySetInnerHTML={{ __html: s.markup }} />
@@ -158,7 +177,7 @@ export function Layers() {
         </div>
       )}
       {tray === 'svg' && (
-        <div className="svg-import" role="group" aria-label="Import an SVG" onKeyDown={(e) => { if (e.key === 'Escape') closeTray(); }}>
+        <div ref={trayRef} className="svg-import" role="group" aria-label="Import an SVG" onKeyDown={(e) => { if (e.key === 'Escape') closeTray(); }}>
           <textarea className="ask svg-paste" autoFocus spellCheck={false} aria-label="SVG markup"
             placeholder="Paste SVG markup here (⌘V)" value={svgText} onChange={(e) => setSvgText(e.target.value)}
             onPaste={(e) => {
@@ -174,25 +193,47 @@ export function Layers() {
       )}
       {note && <p className="hint" role="status">{note}</p>}
 
+      {absent.length > 0 && (
+        <div className="row absent-note" role="status">
+          <span className="hint" style={{ flex: 1 }}>{absent.length} layer{absent.length === 1 ? '' : 's'} from other states {absent.length === 1 ? 'is' : 'are'} not in “{activeTimeline(project).name}”.</span>
+          <button className="btn sm" title="Show them in this state too" onClick={() => showLayersIn(absent, 'here')}>Show here</button>
+        </div>
+      )}
       <div className="layer-list" role="tree" aria-label="Layers" aria-multiselectable>
-        {rows.map(({ node, depth }) => {
+        {rows.map(({ node, depth, head }) => {
           const locked = !!node.locked;
           const mascot = node.kind === 'body';
           const attached = !mascot && attachmentOf(node) === 'mascot';
+          if (head) {
+            return (
+              <div key={`${node.id}.head`} role="treeitem" aria-selected={selection.includes(node.id)} className="layer"
+                data-depth={Math.min(depth, 4)} title="The head shape — it moves, turns and scales with the face. Selecting it selects the mascot."
+                onPointerDown={() => select([node.id])}>
+                <span className="layer-btn" aria-hidden />
+                <LayerThumb node={node} />
+                <span className="layer-name">Head shape</span>
+                <span className="kind">{node.shape?.kind ?? 'circle'}</span>
+                <span className="layer-btn" aria-hidden />
+              </div>
+            );
+          }
           return (
             <div key={node.id} role="treeitem" aria-selected={selection.includes(node.id)} className="layer"
-              data-depth={Math.min(depth, 4)} data-drop={drop?.id === node.id ? (drop.front ? 'front' : 'back') : undefined}
-              data-hidden={!node.visible || undefined} data-mascot={mascot || undefined}
+              data-depth={Math.min(depth, 4)} data-drop={drop?.id === node.id ? (drop.into ? 'into' : drop.front ? 'front' : 'back') : undefined}
+              data-hidden={!node.visible || absent.includes(node.id) || undefined} data-mascot={mascot || undefined}
               draggable={renaming !== node.id}
               onDragStart={(e) => { e.dataTransfer.setData('text/blooby-layer', node.id); e.dataTransfer.effectAllowed = 'move'; }}
               onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes('text/blooby-layer')) return;
                 e.preventDefault();
                 const r = e.currentTarget.getBoundingClientRect();
-                setDrop({ id: node.id, front: e.clientY < r.top + r.height / 2 });
+                const f = (e.clientY - r.top) / r.height;
+                // the middle of a row that can hold layers means "put it inside"; its edges, "beside"
+                const into = f > 0.28 && f < 0.72 && canHold(node);
+                setDrop({ id: node.id, front: f < 0.5, into });
               }}
               onDragLeave={() => setDrop((d) => (d?.id === node.id ? null : d))}
-              onDrop={(e) => { const id = e.dataTransfer.getData('text/blooby-layer'); if (id) onDrop(node, !!drop?.front, id); }}
+              onDrop={(e) => { const id = e.dataTransfer.getData('text/blooby-layer'); if (id) onDrop(node, !!drop?.front, id, drop?.into); }}
               onPointerDown={(e) => {
                 if (renaming === node.id) return;
                 if (e.shiftKey || e.metaKey || e.ctrlKey) {
@@ -212,6 +253,11 @@ export function Layers() {
                   onBlur={(e) => { const v = e.target.value.trim(); if (v) updateNode(node.id, (n) => { n.name = v; }); setRenaming(null); }}
                   onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setRenaming(null); }} />
               ) : <span className="layer-name">{mascot ? mascotLabel(rig, node) : node.name}</span>}
+              {absent.includes(node.id) && (
+                <button className="btn ghost sm layer-here" title={`Not in “${activeTimeline(project).name}” — made in another state. Click to show it here; ⇧-click to share it with every state.`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => showLayersIn([node.id], e.shiftKey ? 'everywhere' : 'here')}>+ here</button>
+              )}
               {attached && node.kind !== 'eye' && node.kind !== 'limb' && (
                 <span className="layer-badge" title={node.surface.mapped ? 'Attached to its mascot, on the surface' : `Attached to ${rig.nodes[node.parentId!]?.name ?? 'its parent'}`}><Icon name="anchor" size={11} /></span>
               )}
@@ -221,7 +267,19 @@ export function Layers() {
               {!mascot && attachmentOf(node) === 'world' && (
                 <span className="layer-badge" title="A world layer — stays put when the mascots move"><Icon name="world" size={11} /></span>
               )}
-              <span className="kind">{node.guide ? 'guide' : node.curve ? 'curve' : KIND_LABEL[node.kind]}</span>
+              {roleFor === node.id ? (
+                <select className="sel layer-role" autoFocus aria-label={`Role of ${node.name}`} value={node.role ?? ''}
+                  onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
+                  onChange={(e) => { setRole(node.id, e.target.value); setRoleFor(null); }}
+                  onBlur={() => setRoleFor(null)} onKeyDown={(e) => { if (e.key === 'Escape') setRoleFor(null); }}>
+                  {rolesFor(node).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                </select>
+              ) : (
+                <span className="kind" title={`${node.role ? ROLE_LABEL[node.role] ?? node.role : 'No role'} — double-click to change its role`}
+                  onDoubleClick={(e) => { e.stopPropagation(); setRoleFor(node.id); }}>
+                  {node.guide ? 'guide' : node.curve ? 'curve' : node.role && node.kind !== 'body' ? ROLE_LABEL[node.role]?.replace(/^(Left|Right) /, '') ?? node.role : KIND_LABEL[node.kind]}
+                </span>
+              )}
               <button className="layer-btn lock" data-on={locked} title={locked ? 'Unlock' : 'Lock — cannot be selected or moved on the stage'}
                 aria-label={locked ? `Unlock ${node.name}` : `Lock ${node.name}`}
                 onPointerDown={(e) => e.stopPropagation()}
@@ -243,6 +301,10 @@ export function Layers() {
           {one?.kind === 'group'
             ? <button className="btn ghost sm" title="Ungroup — the children stay where they are" onClick={() => ungroupLayer(one.id)}>Ungroup</button>
             : <button className="btn ghost sm icon" title="Group selection" disabled={!sel.length || sel.some((n) => n.kind === 'body')} onClick={() => groupLayers(sel.map((n) => n.id))}><Icon name="group" /></button>}
+          {one && one.parentId !== null && one.kind !== 'eye' && (
+            <button className="btn ghost sm" title={`Move out of ${rig.nodes[one.parentId]?.name ?? 'its parent'} — it stays where it is on screen`}
+              onClick={() => { const up = rig.nodes[one.parentId!]; moveInto(one.id, up?.kind === 'body' ? null : up?.parentId ?? null); }}>Move out</button>
+          )}
           <button className="btn ghost sm icon" title="Duplicate (⌘D)" disabled={!one} onClick={() => one && duplicateLayer(one.id)}><Icon name="copy" /></button>
           <button className="btn ghost sm icon danger-icon" title="Delete (⌫)" disabled={sel.every(isRoot)}
             onClick={() => { for (const n of sel) if (!isRoot(n)) deleteNode(n.id); }}><Icon name="trash" /></button>

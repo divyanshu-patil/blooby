@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { HexColorPicker } from './ColorPicker';
 import { createPortal } from 'react-dom';
 import { useEditor, keyframeTimes, writeKeyframe } from '../core/store';
 import { compOf } from '../core/comp';
@@ -13,7 +14,7 @@ import { mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
 import { textName } from '../core/layers';
 import { GraphEditor } from './GraphEditor';
 import { CurveEditor } from './CurveEditor';
-import { NumberField } from './bits';
+import { NumberField, useDismiss } from './bits';
 
 const FPS_OPTIONS = [12, 15, 24, 25, 30, 50, 60];
 
@@ -30,6 +31,9 @@ export function clipColor(project: { presets: { id: string; color?: string }[] }
 
 /** `onOpenEffects` lets the editor switch the right rail to the Effects tab when a span
  *  on the strip is clicked — the timeline has no business knowing about tabs itself. */
+/** Prefix of keyframes on the system clipboard, so a paste can tell them from text or an SVG. */
+const KEYS_MARK = 'blooby-keyframes:';
+
 export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {}) {
   const project = useEditor((s) => s.project);
   const tl = activeTimeline(project);
@@ -73,6 +77,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
 
   const [view, setView] = useState<'tracks' | 'graph'>('tracks');
   const [zoom, setZoom] = useState(1);
+  const laneScroll = useRef(0);
   const [stripZoom, setStripZoom] = useState(1);
   const [isolatedBlockId, setIsolatedBlockId] = useState<string | null>(null);
   // multi-select: every selected keyframe as `${trackId} ${kfId}`, click to replace,
@@ -89,13 +94,16 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const sel = selKeys.size === 1 ? parseKfKey([...selKeys][0]) : null;
   const setSel = (s: { trackId: string; kfId: string } | null) => setSelKeys(s ? new Set([kfKey(s.trackId, s.kfId)]) : new Set());
   const [curveOpen, setCurveOpen] = useState(false);
+  const curveRef = useRef<HTMLDivElement>(null);
+  useDismiss(curveOpen, () => setCurveOpen(false), [curveRef]);
   useEffect(() => { if (!sel) setCurveOpen(false); }, [sel]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(760);
   const [stripWidth, setStripWidth] = useState(600);
-  const kfDrag = useRef<{ keys: { trackId: string; kfId: string; startTime: number }[]; anchorStartTime: number } | null>(null);
+  /** a keyframe drag: where it was grabbed, and whether it has moved past the click threshold */
+  const kfDrag = useRef<{ keys: { trackId: string; kfId: string; startTime: number }[]; anchorStartTime: number; grabX: number; grabMs: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const resize = useRef<{ id: string; startX: number; startMs: number } | null>(null);
   const resizing = useRef(false);
@@ -117,8 +125,14 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
     // the lanes are as wide as the content, so measure the viewport that holds them
     const ro = new ResizeObserver(([e]) => setWidth(Math.max(240, e.contentRect.width - 168)));
     ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    // the Graph view unmounts the lanes: coming back is a NEW element, which has to be
+    // observed again (the old observer watched a detached node, and the lanes kept a stale
+    // width) and put back where it was scrolled to
+    el.scrollLeft = laneScroll.current;
+    const keep = () => { laneScroll.current = el.scrollLeft; };
+    el.addEventListener('scroll', keep);
+    return () => { ro.disconnect(); el.removeEventListener('scroll', keep); };
+  }, [view]);
 
   useEffect(() => {
     const el = stripRef.current;
@@ -304,7 +318,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
         return track && kf ? { track, kf } : null;
       })
       .filter((x): x is { track: Track; kf: Keyframe } => x !== null);
-    if (!picked.length) return;
+    if (!picked.length) return false;
 
     const base = Math.min(...picked.map((p) => p.kf.time));
     clipboard.current = picked.map(({ track, kf }) => ({
@@ -314,46 +328,67 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
       value: kf.value,
       easingOut: kf.easingOut,
     }));
+    return true;
   };
 
   const pasteKeys = () => {
     if (!clipboard.current.length) return;
+    // the playhead NOW, not as of the last render: a paste straight after moving it used the old one
+    const at = useEditor.getState().playhead;
     commit((p) => {
       for (const c of clipboard.current) {
-        writeKeyframe(p, c.nodeId, c.property, playhead + c.offset, c.value, c.easingOut);
+        writeKeyframe(p, c.nodeId, c.property, at + c.offset, c.value, c.easingOut);
       }
     }, 'paste keyframes');
   };
 
   // Timeline-wide shortcuts. Ignored while typing so a name field still receives ⌘C.
+  // Copy and paste are clipboard EVENTS, not ⌘C/⌘V keydowns: cancelling the keydown killed every
+  // paste in the app (an SVG copied from Figma could never arrive), and a keydown check missed
+  // ⌘C with caps lock on. The copy also writes the keys to the system clipboard — otherwise an
+  // SVG copied earlier stayed there, Editor.tsx took the paste as a new layer, and the keys never came.
   useEffect(() => {
+    const typing = (el: HTMLElement | null) => !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (typing(e.target as HTMLElement | null)) return;
       const mod = e.metaKey || e.ctrlKey;
-
-      if (mod && e.key === 'c') { copyKeys(); }
-      else if (mod && e.key === 'a') {
+      if (mod && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         setSelKeys(new Set(tl.tracks.flatMap((t) => t.keyframes.map((k) => kfKey(t.id, k.id)))));
       } else if (e.key === 'Escape') setSelKeys(new Set());
     };
-    // Paste is a paste EVENT, not a ⌘V keydown: cancelling the keydown killed every paste
-    // in the app, which is how an SVG copied from Figma could never reach the editor. An
-    // SVG on the clipboard is taken first (capture, in Editor.tsx); this sees the rest.
+    const onCopy = (e: ClipboardEvent) => {
+      if (typing(e.target as HTMLElement | null)) return;
+      if (!copyKeys()) return;
+      e.clipboardData?.setData('text/plain', KEYS_MARK + JSON.stringify(clipboard.current));
+      e.preventDefault();
+    };
     const onPaste = (e: ClipboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (typing(e.target as HTMLElement | null)) return;
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      if (text.startsWith(KEYS_MARK)) {
+        try { clipboard.current = JSON.parse(text.slice(KEYS_MARK.length)); } catch { /* keep what we had */ }
+      }
       if (!clipboard.current.length) return;
       e.preventDefault();
       pasteKeys();
     };
     window.addEventListener('keydown', onKey);
+    window.addEventListener('copy', onCopy);
     window.addEventListener('paste', onPaste);
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('paste', onPaste); };
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste); };
   });
 
   const selKf = sel && tl.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
+  // A curve belongs to a SEGMENT, stored on the key it leaves. The last key of a track leaves
+  // nothing, so editing "its" curve used to change nothing on screen — there the curve shown
+  // and edited is the one arriving at it, which is the tween the user is looking at.
+  const curveKf = (() => {
+    const track = sel && tl.tracks.find((t) => t.id === sel.trackId);
+    if (!track || !selKf) return null;
+    const i = track.keyframes.indexOf(selKf);
+    return i === track.keyframes.length - 1 && i > 0 ? { kf: track.keyframes[i - 1], into: true } : { kf: selKf, into: false };
+  })();
   const isolatedBlock = isolatedBlockId ? tl.blocks.find((b) => b.id === isolatedBlockId) : null;
   const colorForBlockId = (id: string | undefined) => (id ? clipColor(project, tl.blocks.find((b) => b.id === id)) : undefined);
 
@@ -406,15 +441,15 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
         <span className="spacer" />
         {selKf && (
           <>
-            <span className="hint">easing</span>
-            <div style={{ position: 'relative' }}>
+            <span className="hint">{curveKf?.into ? 'easing in' : 'easing'}</span>
+            <div style={{ position: 'relative' }} ref={curveRef}>
               <button className="btn sm" data-tour="curve" aria-pressed={curveOpen} onClick={() => setCurveOpen((v) => !v)}
                 title="Edit this keyframe's curve">
-                {easingLabel(selKf.easingOut)} ⌃
+                {(curveKf?.kf ?? selKf).bakedAs ?? easingLabel((curveKf?.kf ?? selKf).easingOut)} ⌃
               </button>
               {curveOpen && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 20 }}>
-                  <CurveEditor value={selKf.easingOut} onChange={(c) => setEasing(sel!.trackId, sel!.kfId, c)} />
+                  <CurveEditor value={(curveKf?.kf ?? selKf).bakedAs ? { type: 'preset', name: (curveKf?.kf ?? selKf).bakedAs! } : (curveKf?.kf ?? selKf).easingOut} onChange={(c) => setEasing(sel!.trackId, (curveKf?.kf ?? selKf).id, c)} />
                 </div>
               )}
             </div>
@@ -534,9 +569,10 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                 onDoubleClick={() => { setPlayhead(start); selectBlock(b.id); setIsolatedBlockId(b.id); }}>
                 {within && <span className="tick" style={{ left: `${((playhead - start) / b.durationMs) * 100}%` }} />}
                 <button className="x" title="Remove block" onClick={(e) => { e.stopPropagation(); removeBlock(b.id); }}>✕</button>
-                <input type="color" className="block-color" title="Clip accent color — shows in the strip, track lanes and graph"
-                  value={color ?? '#8c8577'} onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => { e.stopPropagation(); setBlockColor(b.id, e.target.value); }} />
+                <span className="block-color-wrap" title="Clip accent color — shows in the strip, track lanes and graph"
+                  onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                  <HexColorPicker label="Clip accent" value={color ?? '#8c8577'} onChange={(hex) => setBlockColor(b.id, hex)} />
+                </span>
                 <MascotThumb className="thumb" scene={thumbs[i]} view={compOf(project)} />
                 <span style={{ font: '600 10.5px var(--ui)', width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                 <DurInput ms={b.durationMs} label={`${b.name} duration`} locked={tl.durationMode === 'even'}
@@ -728,19 +764,24 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
                                 const kf = tl.tracks.find((x) => x.id === trackId)?.keyframes.find((x) => x.id === kfId);
                                 return { trackId, kfId, startTime: kf?.time ?? 0 };
                               });
-                              kfDrag.current = { keys: group, anchorStartTime: k.time };
+                              const r0 = lanesRef.current!.getBoundingClientRect();
+                              kfDrag.current = { keys: group, anchorStartTime: k.time, grabX: e.clientX, grabMs: (e.clientX - r0.left) / pxPerMs, moved: false };
                             }}
                             onPointerMove={(e) => {
                               const d = kfDrag.current;
                               if (!d) return;
                               e.stopPropagation();
+                              // a click is not a drag: nothing moves until the pointer has travelled 3px
+                              if (!d.moved && Math.abs(e.clientX - d.grabX) < 3) return;
+                              d.moved = true;
                               const r = lanesRef.current!.getBoundingClientRect();
-                              const raw = (e.clientX - r.left) / pxPerMs;
-                              const snap = [...jumps, playhead].find((j) => Math.abs(j - raw) < 6 / pxPerMs && Math.abs(j - d.anchorStartTime) > 0.5);
-                              const target = snap ?? raw;
-                              const delta = target - d.anchorStartTime;
+                              // RELATIVE to where it was grabbed — a key grabbed by its edge must not
+                              // jump so its centre sits under the pointer
+                              const wanted = d.anchorStartTime + (e.clientX - r.left) / pxPerMs - d.grabMs;
+                              const snap = [...jumps, playhead].find((j) => Math.abs(j - wanted) < 6 / pxPerMs && Math.abs(j - d.anchorStartTime) > 0.5);
+                              const delta = (snap ?? wanted) - d.anchorStartTime;
                               if (d.keys.length > 1) moveKeyframes(d.keys.map((x) => ({ trackId: x.trackId, kfId: x.kfId, time: x.startTime + delta })));
-                              else moveKeyframe(d.keys[0].trackId, d.keys[0].kfId, target);
+                              else moveKeyframe(d.keys[0].trackId, d.keys[0].kfId, d.keys[0].startTime + delta);
                             }}
                             onPointerUp={() => { kfDrag.current = null; }}
                             onDoubleClick={() => {

@@ -1,5 +1,26 @@
 import { create } from 'zustand';
 import type { ToolCall } from './tools';
+import type { Project } from '../core/types';
+import type { AgentEvent } from './agent';
+
+/**
+ * One agent run as a checkpoint: the document before it, every action it took, and the
+ * document it left. Reverting restores `before` and reapplying restores `after` — the
+ * recorded result, never a regeneration. Both are whole-document snapshots, which the store
+ * makes anyway on every commit (a project object is never mutated after it is committed).
+ */
+export interface AgentRun {
+  status: 'running' | 'done' | 'stopped' | 'failed' | 'steps';
+  actions: AgentEvent[];
+  usage: { input: number; output: number };
+  steps: number;
+  startedAt: number;
+  endedAt?: number;
+  before: Project;
+  after?: Project;
+  /** false after Revert, true again after Reapply */
+  applied: boolean;
+}
 
 export interface Turn {
   /** `note` is the copilot reporting on itself (stopped, skipped) — not a failure, and
@@ -12,6 +33,8 @@ export interface Turn {
   rejected?: boolean;
   /** what the model was reasoning about, when it says so — shown collapsed */
   thinking?: string;
+  /** an agent run, with its checkpoint */
+  run?: AgentRun;
 }
 
 /** What the copilot is doing right now, so the UI can say so rather than just spin. */
@@ -27,6 +50,8 @@ interface CopilotSession {
 
   push: (t: Turn) => void;
   patchTurn: (i: number, patch: Partial<Turn>) => void;
+  patchRun: (i: number, patch: Partial<AgentRun>) => void;
+  logAction: (i: number, e: AgentEvent) => void;
   setInput: (v: string) => void;
   setPhase: (p: Phase) => void;
   setStatus: (s: string) => void;
@@ -52,6 +77,8 @@ export const useCopilotSession = create<CopilotSession>((set) => ({
 
   push: (t) => set((s) => ({ turns: [...s.turns, t] })),
   patchTurn: (i, patch) => set((s) => ({ turns: s.turns.map((x, n) => (n === i ? { ...x, ...patch } : x)) })),
+  patchRun: (i, patch) => set((s) => ({ turns: s.turns.map((x, n) => (n === i && x.run ? { ...x, run: { ...x.run, ...patch } } : x)) })),
+  logAction: (i, e) => set((s) => ({ turns: s.turns.map((x, n) => (n === i && x.run ? { ...x, run: { ...x.run, actions: [...x.run.actions, e] } } : x)) })),
   setInput: (input) => set({ input }),
   setPhase: (phase) => set({ phase }),
   setStatus: (status) => set({ status }),

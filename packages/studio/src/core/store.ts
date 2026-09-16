@@ -7,11 +7,13 @@ import { bakeHandles, curveFromPath, curveToPath, type Curve, type CurvePoint } 
 import { onFonts } from './fonts';
 import {
   addMascot as addMascotIn, duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
-  saveMascotTemplate as saveMascotTemplateIn,
+  saveMascotTemplate as saveMascotTemplateIn, applyScaleAsBase as applyScaleAsBaseIn, setRole as setRoleIn, moveInto as moveIntoIn, showLayerIn as showLayerInIn, ownLayer, pinLimb as pinLimbIn, pinLimbPoint as pinLimbPointIn, setFaceRole as setFaceRoleIn,
   setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
   type AppearanceRange, type AttachMode, type ReorderTo,
 } from './layers';
-import { laneOf, laneOfMascot, mascotOf, type MascotKind } from './mascot';
+import { faceOf, laneOf, laneOfMascot, makeFace, mascotOf, type MascotKind } from './mascot';
+import { applySquish as applySquishIn } from './squish';
+import { applyPose as applyPoseIn } from './poses';
 import { presetTargets } from './defaults';
 import { textPresetOnto } from './textPresets';
 import { compOf } from './comp';
@@ -35,6 +37,8 @@ const DEFAULT_STATE_EASING: EasingCurve = { type: 'preset', name: 'easeInOut' };
 /** What a click on the stage does: select and move, pan the view, place a shape, draw a
  *  curve point by point, place text, or turn a mascot's head. */
 export type Tool = 'select' | 'hand' | 'shape' | 'pen' | 'text' | 'turn';
+/** The right rail's tabs: node (or clip) inspector, eyes, effects, states, copilot. */
+export type RailTab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
 
 /** The active timeline — every editor action reads/writes through this, never `p.timelines[i]` directly. */
 const at = (p: Project): Timeline => activeTimeline(p);
@@ -79,6 +83,10 @@ export interface Editor {
   stateTransition: { fromRig: Rig; durationMs: number; easing: EasingCurve; startedAtMs: number } | null;
 
   commit: (fn: (p: Project) => void, label?: string) => void;
+  /** replace the whole document as ONE undoable step — how a copilot run is reverted or reapplied */
+  restoreProject: (p: Project, label?: string) => void;
+  railTab: RailTab;
+  setRailTab: (t: RailTab) => void;
   undo: () => void;
   redo: () => void;
   select: (ids: string[]) => void;
@@ -133,6 +141,28 @@ export interface Editor {
 
   /** A new mascot — a look, or a saved one by template id — selected. Returns its body id. */
   addMascot: (kind: MascotKind | { templateId: string }, opts?: { name?: string; x?: number; y?: number }) => string;
+  /** make a layer its mascot's face (any shape or group), or an ordinary layer again */
+  setFaceRole: (nodeId: string, on: boolean) => void;
+  /** where a node sits in the state editor's graph (a state id, or ANY_STATE) */
+  setStateNodePosition: (id: string, at: Vec2) => void;
+  /** put every hand and foot of a mascot into a named pose, as keyframes at the playhead when `keyed` */
+  applyPose: (mascotId: string, pose: string, keyed: boolean) => void;
+  /** bring layers owned by another state into this one, or into every state */
+  showLayersIn: (nodeIds: string[], where: 'here' | 'everywhere') => void;
+  /** move a layer into another layer (null: the world), keeping it where it is on screen */
+  moveInto: (nodeId: string, parentId: string | null) => void;
+  /** give a layer a part to play ('' for none) — see core/layers.ts setRole */
+  setRole: (nodeId: string, role: string) => void;
+  /** bake a mascot's current scale into its size, so scale is 1 again and nothing moves */
+  applyScaleAsBase: (mascotId: string) => void;
+  /** a face group for a mascot that has none (after its face was deleted), with its eyes and hands */
+  addFace: (mascotId: string) => void;
+  /** plant a limb's end on the ground where it is now, or lift it without a jump */
+  pinLimb: (nodeId: string, on: boolean) => void;
+  /** pin (or lift) ONE point of a limb — 'a' hip/shoulder, 'b' knee/elbow (or the end of a two-point limb), 'c' ankle/hand — in the world */
+  pinLimbPoint: (nodeId: string, key: 'a' | 'b' | 'c', on: boolean) => void;
+  /** drop a squish preset onto a layer, starting at the playhead — see core/squish.ts */
+  applySquishPreset: (nodeId: string, presetId: string) => void;
   saveMascotTemplate: (bodyId: string, name?: string) => void;
 
   /** A text layer, selected. `at` is a composition point (where the Text tool was clicked). */
@@ -424,6 +454,15 @@ export const useEditor = create<Editor>((set, get) => ({
     });
   },
 
+  restoreProject(p, label = 'restore') {
+    const { project, past } = get();
+    autosave(p);
+    set({ project: p, past: [...past, project].slice(-HISTORY_LIMIT), future: [], lastLabel: label, lastAt: Date.now(),
+      selection: get().selection.filter((id) => p.rig.nodes[id]) });
+  },
+  railTab: 'node',
+  setRailTab: (railTab) => set({ railTab }),
+
   undo() {
     const { past, future, project } = get();
     if (!past.length) return;
@@ -570,7 +609,8 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => {
       const t = at(p).tracks.find((x) => x.id === trackId);
       if (!t) return;
-      t.keyframes = t.keyframes.filter((k) => k.id !== kfId);
+      // a bounce's generated points go with the key they belong to
+      t.keyframes = t.keyframes.filter((k) => k.id !== kfId && k.bakedFrom !== kfId);
       if (!t.keyframes.length) at(p).tracks = at(p).tracks.filter((x) => x.id !== trackId);
     });
   },
@@ -587,7 +627,7 @@ export const useEditor = create<Editor>((set, get) => ({
       for (const [trackId, kfIds] of byTrack) {
         const t = tl.tracks.find((x) => x.id === trackId);
         if (!t) continue;
-        t.keyframes = t.keyframes.filter((k) => !kfIds.has(k.id));
+        t.keyframes = t.keyframes.filter((k) => !kfIds.has(k.id) && !(k.bakedFrom && kfIds.has(k.bakedFrom)));
       }
       tl.tracks = tl.tracks.filter((t) => t.keyframes.length);
     });
@@ -595,8 +635,8 @@ export const useEditor = create<Editor>((set, get) => ({
 
   setEasing(trackId, kfId, easing) {
     get().commit((p) => {
-      const k = at(p).tracks.find((x) => x.id === trackId)?.keyframes.find((x) => x.id === kfId);
-      if (k) k.easingOut = easing;
+      const t = at(p).tracks.find((x) => x.id === trackId);
+      if (t) setEasingIn(t, kfId, easing);
     }, `ease.${kfId}`);
   },
 
@@ -629,6 +669,7 @@ export const useEditor = create<Editor>((set, get) => ({
         else if (owner && owner.id !== p.rig.rootId) n.zIndex = owner.zIndex - 0.5 + n.zIndex * 0.01;
         p.rig.nodes[n.id] = n;
         if (opts?.appearAt && opts.appearAt > 0) setAppearanceIn(p, n.id, { startMs: opts.appearAt }, opts.appearAt);
+        ownLayer(p, n.id);
       }
     });
     set({ selection: nodes.map((n) => n.id), selectedBlockId: null });
@@ -704,6 +745,70 @@ export const useEditor = create<Editor>((set, get) => ({
     });
     if (id) set({ selection: [id], selectedBlockId: null });
     return id;
+  },
+
+  setFaceRole(nodeId, on) {
+    const { playhead } = get();
+    get().commit((p) => { setFaceRoleIn(p, nodeId, on, playhead); });
+  },
+
+  setStateNodePosition(id, at) {
+    get().commit((p) => {
+      const m = (p.stateMachine ??= machineOf(p));
+      m.layout = { ...m.layout, [id]: { x: Math.round(at.x), y: Math.round(at.y) } };
+    }, `smlayout.${id}`);
+  },
+
+  applyPose(mascotId, pose, keyed) {
+    const { playhead } = get();
+    get().commit((p) => { applyPoseIn(p, mascotId, pose, playhead, keyed); }, `pose.${mascotId}.${pose}`);
+  },
+
+  showLayersIn(nodeIds, where) {
+    get().commit((p) => { for (const id of nodeIds) showLayerInIn(p, id, where); }, `show.${where}`);
+  },
+
+  moveInto(nodeId, parentId) {
+    const { playhead } = get();
+    get().commit((p) => { moveIntoIn(p, nodeId, parentId, playhead); }, `parent.${nodeId}`);
+  },
+
+  setRole(nodeId, role) {
+    const { playhead } = get();
+    get().commit((p) => { setRoleIn(p, nodeId, role, playhead); }, `role.${nodeId}`);
+  },
+
+  applyScaleAsBase(mascotId) {
+    const { playhead } = get();
+    get().commit((p) => { applyScaleAsBaseIn(p, mascotId, playhead); }, `bake.${mascotId}`);
+  },
+
+  addFace(mascotId) {
+    const { project, playhead } = get();
+    if (project.rig.nodes[mascotId]?.kind !== 'body' || faceOf(project.rig, mascotId)) return;
+    const id = project.rig.nodes[`${mascotId}.face`] ? uid('face') : `${mascotId}.face`;
+    get().commit((p) => {
+      const face = { ...makeFace(id, mascotId), zIndex: p.rig.nodes[mascotId].zIndex + 0.5 };
+      delete face.role;   // setFaceRole gives it the role, and the eyes with it
+      p.rig.nodes[id] = face;
+      setFaceRoleIn(p, id, true, playhead);
+    });
+    set({ selection: [id] });
+  },
+
+  pinLimbPoint(nodeId, key, on) {
+    const { playhead } = get();
+    get().commit((p) => { pinLimbPointIn(p, nodeId, key, on, playhead); }, `pinpt.${nodeId}.${key}`);
+  },
+
+  pinLimb(nodeId, on) {
+    const { playhead } = get();
+    get().commit((p) => { pinLimbIn(p, nodeId, on, playhead); });
+  },
+
+  applySquishPreset(nodeId, presetId) {
+    const { playhead } = get();
+    get().commit((p) => { applySquishIn(p, nodeId, presetId, playhead); });
   },
 
   saveMascotTemplate(bodyId, name) {
@@ -1469,3 +1574,46 @@ export function keyframeTimes(tracks: Track[]): number[] {
 
 export { activeTimeline };
 export type { Expression, Modifier, Preset, Project, Timeline, Track };
+
+/**
+ * Bounce and Elastic as KEYFRAMES, not as a formula hidden in one segment.
+ *
+ * Their motion goes past the next key and back several times; drawn as one curve with two
+ * bezier handles it could not be shaped, and the handles lied about it. So picking one puts
+ * a key at every contact and every peak — each an ordinary key with easeIn into a contact
+ * and easeOut out of it (a bounce is parabolas), or easeInOut between an elastic's swings —
+ * which the graph shows and anyone can drag. Picking any other easing on that key takes the
+ * generated keys away again. Peaks within 2% of the target are left out.
+ */
+const BAKED: Record<'bounce' | 'elastic', { u: number; e: number; ease: 'easeIn' | 'easeOut' | 'easeInOut' }[]> = {
+  // [where along the segment, how far to the target, easing leaving that point]
+  bounce: [
+    { u: 1 / 2.75, e: 1, ease: 'easeOut' }, { u: 1.5 / 2.75, e: 0.75, ease: 'easeIn' },
+    { u: 2 / 2.75, e: 1, ease: 'easeOut' }, { u: 2.25 / 2.75, e: 0.9375, ease: 'easeIn' },
+    { u: 2.5 / 2.75, e: 1, ease: 'easeOut' },
+  ],
+  elastic: [
+    { u: 0.15, e: 1.354, ease: 'easeInOut' }, { u: 0.3, e: 0.875, ease: 'easeInOut' }, { u: 0.45, e: 1.044, ease: 'easeInOut' },
+  ],
+};
+
+export function setEasingIn(track: Track, kfId: string, easing: EasingCurve): void {
+  track.keyframes = track.keyframes.filter((k) => k.bakedFrom !== kfId);
+  const i = track.keyframes.findIndex((k) => k.id === kfId);
+  const a = track.keyframes[i], b = track.keyframes[i + 1];
+  if (!a) return;
+  delete a.bakedAs;
+  const name = easing.type === 'preset' && (easing.name === 'bounce' || easing.name === 'elastic') ? easing.name : null;
+  const bakeable = name && b && typeof a.value !== 'string' && typeof b.value !== 'string' && b.time - a.time > 60;
+  if (!bakeable) { a.easingOut = easing; return; }
+  const points = BAKED[name];
+  a.easingOut = { type: 'preset', name: name === 'bounce' ? 'easeIn' : 'easeOut' };
+  a.bakedAs = name;
+  for (const pt of points) {
+    track.keyframes.push({
+      id: uid('k'), time: Math.round(a.time + (b.time - a.time) * pt.u), value: lerpValue(a.value, b.value, pt.e),
+      easingOut: { type: 'preset', name: pt.ease }, bakedFrom: a.id,
+    });
+  }
+  track.keyframes.sort((x, y) => x.time - y.time);
+}

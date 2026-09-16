@@ -1,4 +1,5 @@
 import type { Anchor, EasingCurve, Emitter, EmitterPart, Expression, Keyframe, Modifier, KeyValue, Preset, Project, Rig, RigNode, Timeline, Track } from './types';
+import { activeTimeline } from './types';
 import { derivedDuration } from './timeline';
 import { primitivePath } from './path';
 import { CONFETTI_COLORS } from './emitters';
@@ -7,7 +8,9 @@ import { uid } from './id';
 import { COMP } from './comp';
 import { showcasePresets } from './showcase';
 import { textPresets } from './textPresets';
-import { BONE, INK, makeBody, makeEye, retargetId, roleOf } from './mascot';
+import { appPresets } from './appPresets';
+import { cinematicPresets } from './cinematicPresets';
+import { BONE, faceOf, INK, makeBody, makeEye, makeFace, retargetId, roleOf } from './mascot';
 
 export { uid } from './id';
 export { COMP, compOf } from './comp';
@@ -32,7 +35,7 @@ const track = (nodeId: string, property: string, keyframes: Keyframe[]): Track =
 
 export function defaultRig(): Rig {
   const nodes: Record<string, RigNode> = {};
-  for (const n of [makeBody(), makeEye('eyeL', -21), makeEye('eyeR', 21)]) nodes[n.id] = n;
+  for (const n of [makeBody(), makeFace('face', 'body'), makeEye('eyeL', -21), makeEye('eyeR', 21)]) nodes[n.id] = n;
   return { id: uid('rig'), nodes, rootId: 'body', camera: { fov: 28, distance: 6, offset: { x: 0, y: 0 } } };
 }
 
@@ -97,6 +100,10 @@ export function builtinPresets(): Preset[] {
     ...showcasePresets(),
     // then words: curved text, and letters arriving — see core/textPresets.ts
     ...textPresets(),
+    // then the app screens: refresh, profile, search, empty states — see core/appPresets.ts
+    ...appPresets(),
+    // then the cinematic ones: portal, morph, walk + parallax … the 20s showreel — core/cinematicPresets.ts
+    ...cinematicPresets(),
     {
       // no tracks at all — dropped into a sequence it just holds whatever pose already
       // precedes it (the rig's own rest pose if it's first). The "base state" clip §8
@@ -493,7 +500,7 @@ export function attachPresetEffects(timeline: Timeline, preset: Preset, blockId:
   for (const e of preset.emitters ?? []) {
     // a free anchor is measured from the body — which body is the mascot it was placed on
     const anchor = (a: Anchor): Anchor => (a.nodeId ? { ...a, nodeId: to(a.nodeId) } : onOther ? { ...a, nodeId: mascotId } : a);
-    (timeline.emitters ??= []).push({ ...e, from: anchor(e.from), to: anchor(e.to), id: uid('e'), blockId });
+    (timeline.emitters ??= []).push({ ...e, from: anchor(e.from), to: anchor(e.to), ...(e.attract ? { attract: { ...e.attract, nodeId: to(e.attract.nodeId) } } : {}), id: uid('e'), blockId });
   }
   if (rig) addPresetLayers(rig, preset, mascotId);
   for (const a of preset.appearances ?? []) {
@@ -519,6 +526,7 @@ export function addPresetLayers(rig: Rig, preset: Preset, mascotId?: string): vo
   const own = new Set((preset.layers ?? []).map((l) => l.id));
   const body = mascotId && rig.nodes[mascotId] ? mascotId : rig.rootId;
   const top = Math.max(0, ...Object.values(rig.nodes).map((n) => n.zIndex));
+  const bottom = Math.min(0, ...Object.values(rig.nodes).map((n) => n.zIndex));
   for (const layer of preset.layers ?? []) {
     const id = to(layer.id);
     if (rig.nodes[id]) continue;
@@ -530,11 +538,14 @@ export function addPresetLayers(rig: Rig, preset: Preset, mascotId?: string): vo
     if (copy.parentId !== null) {
       const parent = to(copy.parentId);
       copy.parentId = rig.nodes[parent] || own.has(copy.parentId) ? parent : body;
+      // a hand goes on the face, as one added by hand does
+      if (copy.limb?.type === 'arm' && rig.nodes[copy.parentId]?.kind === 'body') copy.parentId = faceOf(rig, copy.parentId) ?? copy.parentId;
     }
     // words round "the body" go round the body of the mascot it was placed on
     if (copy.text?.path?.nodeId) copy.text.path = { ...copy.text.path, nodeId: to(copy.text.path.nodeId) };
-    // limbs tuck behind the body; everything else a preset adds sits on top of the rig
-    if (copy.kind !== 'limb') copy.zIndex = top + 1 + copy.zIndex;
+    // limbs tuck behind the body; everything else a preset adds sits on top of the rig —
+    // or, given a NEGATIVE zIndex (a backdrop, a portal, scenery), under all of it
+    if (copy.kind !== 'limb') copy.zIndex = copy.zIndex < 0 ? bottom + copy.zIndex : top + 1 + copy.zIndex;
     rig.nodes[copy.id] = copy;
   }
 }
@@ -564,7 +575,12 @@ export function presetPreviewProject(project: Project, preset: Preset): Project 
       // the preview IS the clip
       modifiers: (preset.modifiers ?? []).map((m, i) => ({ ...m, id: `pm${i}`, blockId: undefined })),
       emitters: (preset.emitters ?? []).map((e, i) => ({ ...e, id: `pe${i}`, blockId: undefined })),
-      appearances: (preset.appearances ?? []).map((a, i) => ({ ...a, id: `pa${i}`, blockId: undefined })),
+      // the preset's ranges, and the state's own timeline-wide ones: a hand or a leg made in
+      // this state is `ranged`, and without its range it would vanish from every preview
+      appearances: [
+        ...(tl.appearances ?? []).filter((a) => !a.blockId && !(preset.appearances ?? []).some((x) => x.nodeId === a.nodeId)),
+        ...(preset.appearances ?? []).map((a, i) => ({ ...a, id: `pa${i}`, blockId: undefined })),
+      ],
       timelineDurationMs: Math.max(200, preset.durationMs),
       durationOverrideMs: Math.max(200, preset.durationMs),
     }],
@@ -584,6 +600,8 @@ export function effectPreviewProject(
   effect: { modifier?: Omit<Modifier, 'id'>; emitter?: Omit<Emitter, 'id'> },
 ): Project {
   const tl = makeTimeline('preview');
+  // the layers this state owns stay on screen under the effect
+  tl.appearances = (activeTimeline(project).appearances ?? []).filter((a) => !a.blockId);
   tl.timelineDurationMs = 2000;
   tl.durationOverrideMs = 2000;
   if (effect.modifier) tl.modifiers = [{ ...effect.modifier, id: 'pm', blockId: undefined }];

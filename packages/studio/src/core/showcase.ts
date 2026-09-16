@@ -42,7 +42,7 @@ export const both = (property: string, keys: Keyframe[]): Track[] => [
   tr('eyeR', property, keys.map((x) => ({ ...x, id: uid('k') }))),
 ];
 /** a point track pair — x and y of one limb point, keyed at the same times */
-const point = (nodeId: string, key: 'a' | 'b' | 'c', keys: [number, number, number, E?][]): Track[] => [
+export const point = (nodeId: string, key: 'a' | 'b' | 'c', keys: [number, number, number, E?][]): Track[] => [
   tr(nodeId, `limb.${key}.x`, keys.map(([t, x, , e]) => k(t, x, e))),
   tr(nodeId, `limb.${key}.y`, keys.map(([t, , y, e]) => k(t, y, e))),
 ];
@@ -99,7 +99,7 @@ function friend(id: string, name: string, kind: MascotKind, x: number, y: number
     ...(n.kind === 'body' ? { parentId, size: { x: width, y: Math.round((width * n.size.y) / n.size.x) } } : {}),
   }));
 }
-const partsOf = (id: string) => [id, `${id}.eyeL`, `${id}.eyeR`];
+const partsOf = (id: string) => [id, `${id}.face`, `${id}.eyeL`, `${id}.eyeR`];
 const onFor = (id: string, startMs: number, endMs: number, fadeInMs = 180, fadeOutMs = 220): Omit<Appearance, 'id' | 'blockId'>[] =>
   partsOf(id).map((nodeId) => ({ nodeId, startMs, endMs, fadeInMs, fadeOutMs }));
 /** a friend's two eyes, keyed together */
@@ -127,17 +127,17 @@ const YELLOW: ColorStop = { r: 247, g: 201, b: 72, a: 1 };
 const PINK: ColorStop = { r: 242, g: 155, b: 184, a: 1 };
 
 /** an SVG as a preset's own layer: fixed id, only on screen where the preset says */
-function art(id: string, name: string, markup: string, over: Partial<RigNode>): RigNode {
+export function art(id: string, name: string, markup: string, over: Partial<RigNode>): RigNode {
   const made = makeSvgLayer(markup, name);
   if (!made) throw new Error(`showcase art "${id}" is not readable SVG`);
   return { ...made.node, id, name, ranged: true, ...over };
 }
-function limb(type: 'arm' | 'leg', side: -1 | 1, over: Partial<LimbRig> = {}): RigNode {
+export function limb(type: 'arm' | 'leg', side: -1 | 1, over: Partial<LimbRig> = {}): RigNode {
   const n = makeLimb(type, side, 'body', { id: `${type}${side < 0 ? 'L' : 'R'}`, ranged: true });
   n.limb = { ...n.limb!, ...over };
   return n;
 }
-const onMascot = (x: number, y: number): Partial<RigNode> => ({ parentId: 'body', surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x, y } } });
+export const onMascot = (x: number, y: number): Partial<RigNode> => ({ parentId: 'body', surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x, y } } });
 const onSurface = (yaw: number, pitch: number): Partial<RigNode> => ({ parentId: 'body', surface: { yaw, pitch, mapped: true } });
 
 const HI_BUBBLE = `<svg viewBox="0 0 132 92">

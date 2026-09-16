@@ -4,12 +4,13 @@ import { primitivePath, SHAPE_LABEL } from './path';
 import { importSvg, parseSvg } from './svg';
 import { restLength } from './limb';
 import { screenToSurface } from './curvature';
-import { setProp } from './props';
-import { activeTrackFor, appearanceSpans, buildScene, evaluateRig, fromFrame, toFrame, WORLD, type LayerFrame } from './scene';
+import { getProp, setProp } from './props';
+import { activeTrackFor, appearanceSpans, buildScene, evaluateRig, fromFrame, pinned, toFrame, WORLD, type LayerFrame } from './scene';
+import { hoseInputOf } from './limb';
 import { activeTimeline } from './types';
 import { MORPH_MODES, type MorphMode } from './easing';
 import { relayoutBlocks } from './timeline';
-import { instantiateTemplate, laneOfMascot, makeMascot, mascotsOf, nextMascotName, partOf, roleOf, type MascotKind } from './mascot';
+import { faceOf, instantiateTemplate, laneOfMascot, makeMascot, mascotOf, mascotsOf, nextMascotName, partOf, roleOf, type MascotKind } from './mascot';
 import { curveToPath, type CurvePoint } from './curve';
 import { TEXT_DEFAULTS } from './text';
 import type { ColorStop, CurveType, EasingCurve, KeyValue, MascotTemplate, Project, Rig, RigNode, ShapeKind, TextStyle, Vec2 } from './types';
@@ -86,7 +87,7 @@ export function makeLimbPair(rig: Rig, mascotId: string, type: 'arm' | 'leg'): R
     || Object.values(rig.nodes).some((n) => n.limb?.type === type && Math.sign(n.limb.a.x) === s && isInside(rig, n.id, mascotId));
   const sides = ([-1, 1] as const).filter((s) => !has(s));
   return (sides.length ? sides : [1 as const]).map((s) => {
-    const l = makeLimb(type, s, mascotId);
+    const l = makeLimb(type, s, limbParent(rig, mascotId, type));
     if (l.limb && k !== 1) {
       for (const pt of [l.limb.a, l.limb.b, l.limb.c]) if (pt) { pt.x *= k; pt.y *= k; }
       l.limb.length *= k;
@@ -95,6 +96,10 @@ export function makeLimbPair(rig: Rig, mascotId: string, type: 'arm' | 'leg'): R
     return l;
   });
 }
+
+/** Hands ride the face when the mascot has one (they gesture with it); legs stay on the body. */
+export const limbParent = (rig: Rig, mascotId: string, type: 'arm' | 'leg'): string =>
+  (type === 'arm' && faceOf(rig, mascotId)) || mascotId;
 
 /** SVG's own default paint — what an icon that says nothing about colour is drawn in. */
 const SVG_BLACK: ColorStop = { r: 20, g: 19, b: 24, a: 1 };
@@ -635,4 +640,346 @@ export function setAppearance(p: Project, nodeId: string, range: AppearanceRange
   if (entry.startMs !== undefined && entry.endMs !== undefined && entry.endMs < entry.startMs + 20) entry.endMs = entry.startMs + 20;
   if ('fadeInMs' in range) entry.fadeInMs = range.fadeInMs === undefined ? undefined : Math.max(0, Math.round(range.fadeInMs));
   if ('fadeOutMs' in range) entry.fadeOutMs = range.fadeOutMs === undefined ? undefined : Math.max(0, Math.round(range.fadeOutMs));
+}
+
+// ---------------------------------------------------------------------------
+// ownership: which state a new layer belongs to
+
+/**
+ * A layer made while a state is open belongs to that state.
+ *
+ * Nodes live on the rig, which every timeline shares — so a hand drawn in "Happy" used to
+ * be on screen in "Idle" too: nothing said it was Happy's. Now it is `ranged` (absent from
+ * any timeline with no range for it) with one whole-timeline range on the active one. It is
+ * still one node, so a state transition can blend through it, just never visibly in a state
+ * that does not own it. Unticking "only in its ranges" shares it with every state again.
+ */
+export function ownLayer(p: Project, id: string): void {
+  const n = p.rig.nodes[id];
+  if (!n) return;
+  n.ranged = true;
+  const tl = activeTimeline(p);
+  if (!(tl.appearances ?? []).some((a) => a.nodeId === id)) (tl.appearances ??= []).push({ id: uid('ap'), nodeId: id });
+}
+
+// ---------------------------------------------------------------------------
+// faces
+
+/**
+ * Move layers under a new parent without anything moving on screen — mapped ones (the eyes)
+ * included, which stay on the sphere: the face hands down the head's radius, so only the
+ * difference in origin is left to take up, as a flat nudge in the new frame.
+ */
+function adopt(p: Project, ids: string[], parentId: string, atMs: number): void {
+  const frames = () => { const f = new Map<string, LayerFrame>(); buildScene(evaluateRig(p, atMs), compOf(p), f); return f; };
+  const before = frames();
+  const mapped = ids.filter((id) => p.rig.nodes[id]?.surface.mapped);
+  for (const id of ids) if (!mapped.includes(id)) placeUnder(p, id, parentId, atMs, false);
+  for (const id of mapped) p.rig.nodes[id].parentId = parentId;
+  if (!mapped.length) return;
+  const after = frames();
+  const f = after.get(parentId);
+  for (const id of mapped) {
+    const a = before.get(id), b = after.get(id), node = p.rig.nodes[id];
+    if (!a || !b || !f) continue;
+    const r = (-f.rot * Math.PI) / 180, dx = a.x - b.x, dy = a.y - b.y;
+    const fo = node.surface.flatOffset ?? { x: 0, y: 0 };
+    writeValue(p, id, 'flatOffset.x', r2(fo.x + (dx * Math.cos(r) - dy * Math.sin(r)) / (f.kx || 1)), atMs);
+    writeValue(p, id, 'flatOffset.y', r2(fo.y + (dx * Math.sin(r) + dy * Math.cos(r)) / (f.ky || 1)), atMs);
+  }
+}
+
+/**
+ * Make a layer its mascot's face, or (`on` false) an ordinary layer again.
+ *
+ * Any shape or group can be the face. It goes onto the mascot if it is not on one already
+ * (the first, when it is in the world), takes over the eyes and hands from the old face —
+ * whose group is dropped when that leaves it empty — and nothing moves on screen. Taking the
+ * role away gives the eyes and hands back to the body.
+ */
+export function setFaceRole(p: Project, id: string, on: boolean, atMs: number): boolean {
+  const node = p.rig.nodes[id];
+  if (!node || node.kind === 'body' || node.kind === 'eye' || node.kind === 'limb' || node.kind === 'text') return false;
+  const mascot = mascotOf(p.rig, id) ?? p.rig.nodes[p.rig.rootId];
+  if (!mascot) return false;
+  const current = faceOf(p.rig, mascot.id);
+  const kidsOf = (pid: string) => Object.values(p.rig.nodes).filter((n) => n.parentId === pid && (n.kind === 'eye' || n.kind === 'limb' || roleOf(n))).map((n) => n.id);
+  if (!on) {
+    if (current !== id) return false;
+    adopt(p, kidsOf(id), mascot.id, atMs);
+    delete node.role;
+    return true;
+  }
+  if (current === id) return true;
+  if (node.parentId !== mascot.id) placeUnder(p, id, mascot.id, atMs, false);
+  node.role = 'face';
+  const moving = current ? kidsOf(current) : kidsOf(mascot.id).filter((k) => p.rig.nodes[k].kind === 'eye');
+  adopt(p, moving.filter((k) => k !== id), id, atMs);
+  if (current) {
+    const old = p.rig.nodes[current];
+    if (Object.values(p.rig.nodes).some((n) => n.parentId === current)) delete old.role;
+    else removeLayer(p, current, atMs);
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// pinned feet
+
+/**
+ * Plant a limb's end where it is now (`on`), or lift it (`on` false). See `pinLimbPoint`.
+ */
+export function pinLimb(p: Project, id: string, on: boolean, atMs: number): boolean {
+  const l = p.rig.nodes[id]?.limb;
+  if (!l) return false;
+  return pinLimbPoint(p, id, l.c ? 'c' : 'b', on, atMs);
+}
+
+/**
+ * Pin one point of a limb — a hip, a knee, a foot — where it is now in the WORLD (`on`), or
+ * lift it (`on` false).
+ *
+ * Pinned, the body can move, turn, squash or scale and that point stays; the limb stretches
+ * to reach it when it has to. Unpinning writes the pinned pose back into the limb's own points
+ * at the playhead, so nothing jumps — it simply follows the body again from where it stands.
+ * The end point is `limb.pin` (it carries the points between with it); any other is `limb.pins`.
+ */
+export function pinLimbPoint(p: Project, id: string, key: 'a' | 'b' | 'c', on: boolean, atMs: number): boolean {
+  const node = p.rig.nodes[id];
+  if (!node?.limb || (key === 'c' && !node.limb.c)) return false;
+  const frames = new Map<string, LayerFrame>();
+  const ev = evaluateRig(p, atMs);
+  buildScene(ev, compOf(p), frames);
+  const world = frames.get(WORLD), parent = frames.get(node.parentId ?? WORLD), l = ev.nodes[id]?.limb;
+  if (!world || !parent || !l) return false;
+  const keys = (l.c ? ['a', 'b', 'c'] : ['a', 'b']) as ('a' | 'b' | 'c')[];
+  const isEnd = key === keys[keys.length - 1];
+  const pts = pinned(hoseInputOf(l, (v) => toFrame(parent, v), 1), l, world).points;
+  const i = keys.indexOf(key);
+  if (on) {
+    const w = fromFrame(world, pts[i]);
+    const at = { x: r2(w.x), y: r2(w.y) };
+    if (isEnd) node.limb.pin = at;
+    else node.limb.pins = { ...node.limb.pins, [key]: at };
+    return true;
+  }
+  const had = isEnd ? node.limb.pin : node.limb.pins?.[key];
+  if (!had) return true;
+  // write the whole pinned pose back, so the points this pin was carrying do not jump either
+  keys.forEach((k, n) => {
+    if (n === 0 && !node.limb!.pins?.a) return;
+    const local = fromFrame(parent, pts[n]);
+    writeValue(p, id, `limb.${k}.x`, r2(local.x), atMs);
+    writeValue(p, id, `limb.${k}.y`, r2(local.y), atMs);
+  });
+  if (isEnd) delete node.limb.pin;
+  else { delete node.limb.pins![key]; if (!Object.keys(node.limb.pins!).length) delete node.limb.pins; }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// scale → base size
+
+/**
+ * Bake a mascot's current scale into its real size, so scale reads 1 again and nothing on
+ * screen moves.
+ *
+ * Everything under the body was sized and placed THROUGH that scale, so it all has to take
+ * the scale into its own numbers: offsets and limb points in the body's (or the face's)
+ * frame per axis, since those frames stretch per axis; sizes, limb thickness and length, and
+ * text size by the uniform part, since a child's own size scales uniformly. Keyframes on any
+ * of those properties are scaled the same way on every timeline, and the body's own scale
+ * keyframes are divided by what was baked, so an animated scale keeps its motion.
+ */
+export function applyScaleAsBase(p: Project, bodyId: string, atMs: number): boolean {
+  const body = p.rig.nodes[bodyId];
+  if (body?.kind !== 'body') return false;
+  const ev = evaluateRig(p, atMs).nodes[bodyId];
+  const sx = ev?.transform.scale.x ?? 1, sy = ev?.transform.scale.y ?? 1;
+  if (Math.abs(sx - 1) < 1e-4 && Math.abs(sy - 1) < 1e-4) return false;
+  if (sx <= 0 || sy <= 0) return false;
+  const k = Math.sqrt(sx * sy);
+  const round = (v: number) => Math.round(v * 1000) / 1000;
+
+  // which factor a property takes on a node — undefined when it is not a length at all
+  const perAxisFrame = (n: RigNode) => {
+    const parent = n.parentId ? p.rig.nodes[n.parentId] : undefined;
+    return parent?.id === bodyId || (parent?.role === 'face' && parent.kind === 'group' && parent.parentId === bodyId);
+  };
+  const factor = (n: RigNode, path: string): number | undefined => {
+    if (n.id === bodyId) {
+      if (path === 'size.x' || path === 'anchor.x') return sx;
+      if (path === 'size.y' || path === 'anchor.y') return sy;
+      return undefined;
+    }
+    const axis = perAxisFrame(n);
+    if (path === 'flatOffset.x' || /^limb\.[abc]\.x$/.test(path)) return axis ? sx : k;
+    if (path === 'flatOffset.y' || /^limb\.[abc]\.y$/.test(path)) return axis ? sy : k;
+    if (['size.x', 'size.y', 'anchor.x', 'anchor.y', 'limb.length', 'limb.thickness', 'limb.foot.length', 'limb.foot.width', 'text.size'].includes(path)) return k;
+    return undefined;
+  };
+  const paths = ['size.x', 'size.y', 'anchor.x', 'anchor.y', 'flatOffset.x', 'flatOffset.y', 'limb.a.x', 'limb.a.y', 'limb.b.x', 'limb.b.y',
+    'limb.c.x', 'limb.c.y', 'limb.length', 'limb.thickness', 'limb.foot.length', 'limb.foot.width', 'text.size'];
+
+  const nodes = [bodyId, ...descendants(p.rig, bodyId)].map((id) => p.rig.nodes[id]);
+  const frameBefore = (() => { const f = new Map<string, LayerFrame>(); buildScene(evaluateRig(p, atMs), compOf(p), f); return f; })();
+  if (body.size.y === 0) body.size.y = body.size.x;
+  for (const n of nodes) {
+    for (const path of paths) {
+      const f = factor(n, path);
+      if (f === undefined) continue;
+      // a mapped layer's offset is a nudge in the frame, and a flat one's is its position:
+      // both ride the frame's stretch, so both take it
+      const v = getProp(n, path);
+      if (typeof v === 'number' && (path !== 'flatOffset.x' && path !== 'flatOffset.y' || n.surface.flatOffset)) setProp(n, path, round(v * f));
+      for (const tl of p.timelines) {
+        for (const t of tl.tracks) {
+          if (t.nodeId !== n.id || t.property !== path) continue;
+          for (const kf of t.keyframes) if (typeof kf.value === 'number') kf.value = round(kf.value * f);
+        }
+      }
+    }
+  }
+  // the scale itself: what was baked comes out of the base and out of every scale key
+  body.transform.scale = { x: round(body.transform.scale.x / sx), y: round(body.transform.scale.y / sy) };
+  for (const tl of p.timelines) {
+    for (const t of tl.tracks) {
+      if (t.nodeId !== bodyId || (t.property !== 'transform.scale.x' && t.property !== 'transform.scale.y')) continue;
+      const d = t.property === 'transform.scale.x' ? sx : sy;
+      for (const kf of t.keyframes) if (typeof kf.value === 'number') kf.value = round(kf.value / d);
+    }
+  }
+  // Scaling about an anchor moves the centre, and at scale 1 that move is gone: put the body
+  // back where it was drawn, in the frame it stands in, keyframes and all.
+  const after = new Map<string, LayerFrame>();
+  buildScene(evaluateRig(p, atMs), compOf(p), after);
+  const was = frameBefore.get(bodyId), now = after.get(bodyId), parent = after.get(body.parentId ?? WORLD);
+  if (was && now && parent) {
+    const r = (-parent.rot * Math.PI) / 180, dx = was.x - now.x, dy = was.y - now.y;
+    const lx = (dx * Math.cos(r) - dy * Math.sin(r)) / (parent.kx || 1), ly = (dx * Math.sin(r) + dy * Math.cos(r)) / (parent.ky || 1);
+    const fo = body.surface.flatOffset ?? { x: 0, y: 0 };
+    body.surface.flatOffset = { x: round(fo.x + lx), y: round(fo.y + ly) };
+    for (const tl of p.timelines) {
+      for (const t of tl.tracks) {
+        if (t.nodeId !== bodyId || (t.property !== 'flatOffset.x' && t.property !== 'flatOffset.y')) continue;
+        const d = t.property === 'flatOffset.x' ? lx : ly;
+        for (const kf of t.keyframes) if (typeof kf.value === 'number') kf.value = round(kf.value + d);
+      }
+    }
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// roles
+
+/** Every part a layer can play, and what it is called. '' is an ordinary layer. */
+export const ROLE_LABEL: Record<string, string> = {
+  '': 'Normal', body: 'Mascot body', face: 'Face', eyeL: 'Left eye', eyeR: 'Right eye',
+  armL: 'Left hand', armR: 'Right hand', legL: 'Left leg', legR: 'Right leg',
+};
+
+/** The roles that make sense for this layer — what the Layers panel's role menu offers. */
+export function rolesFor(n: RigNode): string[] {
+  if (n.kind === 'body') return ['body'];
+  if (n.kind === 'limb') return ['', 'armL', 'armR', 'legL', 'legR'];
+  if (n.kind === 'text') return [''];
+  const out = ['', 'eyeL', 'eyeR'];
+  if (n.kind === 'primitive' || n.kind === 'group' || n.kind === 'svgLayer') out.splice(1, 0, 'face');
+  if (n.kind === 'primitive' && n.parentId === null) out.push('body');
+  return out;
+}
+
+/**
+ * Give a layer a part to play — or none.
+ *
+ * A role is what presets and the copilot find a part by, so it is unique within a mascot:
+ * taking one moves it off whichever layer had it. Face goes through `setFaceRole` (the eyes
+ * and hands move onto it). A limb that becomes a leg gains a knee and a foot and moves onto
+ * the body; one that becomes a hand loses them and moves onto the face — keeping its shoulder
+ * or hip where it is. A shape in the world can become a mascot body of its own.
+ */
+export function setRole(p: Project, id: string, role: string, atMs: number): boolean {
+  const n = p.rig.nodes[id];
+  if (!n || !rolesFor(n).includes(role)) return false;
+  const current = n.role ?? '';
+  if (current === role) return true;
+  if (current === 'face') setFaceRole(p, id, false, atMs);
+  if (role === 'face') return setFaceRole(p, id, true, atMs);
+  if (role === 'body') {
+    // a world shape becomes a mascot: its drawn box is the body's diameter
+    n.kind = 'body';
+    n.role = 'body';
+    n.size = { x: r2(n.size.x / 2), y: r2(n.size.y / 2) };
+    delete n.primitive;
+    return true;
+  }
+  const mascot = mascotOf(p.rig, id) ?? p.rig.nodes[p.rig.rootId];
+  if (role && mascot) {
+    for (const other of Object.values(p.rig.nodes)) {
+      if (other.id !== id && other.role === role && mascotOf(p.rig, other.id)?.id === mascot.id) delete other.role;
+    }
+  }
+  if (!role) { delete n.role; return true; }
+  n.role = role;
+  if (n.limb) {
+    const type = role.startsWith('leg') ? 'leg' : 'arm';
+    if (n.limb.type !== type) {
+      const l = n.limb;
+      if (type === 'leg' && l.c) {
+        // an arm with an elbow already has three points: they become hip, knee and ankle
+        n.limb = { ...l, type, foot: l.foot ?? { angle: 0, length: 40, width: 24 } };
+      } else if (type === 'leg') {
+        const end = l.b;
+        n.limb = { ...l, type, c: end, b: { x: r2((l.a.x + end.x) / 2), y: r2((l.a.y + end.y) / 2) }, foot: l.foot ?? { angle: 0, length: 40, width: 24 } };
+      } else {
+        const { c, foot, ...rest } = l;
+        void foot;
+        n.limb = { ...rest, type, b: c ?? l.b };
+      }
+    }
+    if (mascot) placeUnder(p, id, limbParent(p.rig, mascot.id, type), atMs);
+  }
+  return true;
+}
+
+/**
+ * Move a layer into another (a group, the face, a shape, a mascot) or out to the world, with
+ * nothing moving on screen. A mapped layer — an eye — stays on the sphere when its new parent
+ * carries one; everything else goes through `placeUnder`, which re-expresses limb points,
+ * offsets, scale and roll in the new frame. False for a move that would make a cycle.
+ */
+export function moveInto(p: Project, id: string, parentId: string | null, atMs: number): boolean {
+  const node = p.rig.nodes[id];
+  if (!node || node.parentId === parentId) return !!node;
+  if (parentId !== null && (!p.rig.nodes[parentId] || parentId === id || isInside(p.rig, parentId, id))) return false;
+  const target = parentId ? p.rig.nodes[parentId] : null;
+  const sphere = target && (target.kind === 'body' || (target.kind === 'group' && target.role === 'face'));
+  if (node.surface.mapped && sphere) { adopt(p, [id], parentId!, atMs); return true; }
+  return placeUnder(p, id, parentId, atMs, target?.kind === 'body');
+}
+
+/**
+ * Whether a layer is left out of the active state entirely — owned by another state (ranged,
+ * with no range here). Such a layer still exists and is listed; this is what the Layers panel
+ * asks to offer bringing it back.
+ */
+export const absentHere = (p: Project, id: string): boolean => {
+  const n = p.rig.nodes[id];
+  return !!n?.ranged && !(activeTimeline(p).appearances ?? []).some((a) => a.nodeId === id);
+};
+
+/**
+ * Bring a layer into the active state (`here`), or make it part of every state (`everywhere`):
+ * no longer ranged, and the whole-state ranges it was owned through are dropped — a range with
+ * its own times or on a clip is animation, and stays.
+ */
+export function showLayerIn(p: Project, id: string, where: 'here' | 'everywhere'): void {
+  const n = p.rig.nodes[id];
+  if (!n) return;
+  if (where === 'here') { ownLayer(p, id); return; }
+  n.ranged = false;
+  for (const tl of p.timelines) {
+    if (tl.appearances) tl.appearances = tl.appearances.filter((a) => a.nodeId !== id || !!a.blockId || a.startMs !== undefined || a.endMs !== undefined);
+  }
 }

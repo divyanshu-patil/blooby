@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   ChipBar, Dialog, EmptyState, ErrorState, PageHeader, activeTimeline, adminApi,
-  assetsApi, defaultProject, relativeTime, useAsync, useEditor,
+  assetsApi, defaultProject, presetPreviewProject, relativeTime, useAsync, useEditor,
   type AssetRow, type Preset, type Project, type SplashscreenRow,
 } from '@blooby/studio';
 import { SplashPreview } from './SplashPreview';
@@ -139,16 +139,12 @@ function SplashEditor({ existing, onClose, onSaved, onAct }: {
    *  the same construction the editor's own preset chips use to draw themselves. */
   const pickPreset = (asset: AssetRow) => {
     const preset = asset.data as Preset;
-    const base = defaultProject();
-    const tl = activeTimeline(base);
-    const project: Project = {
-      ...base,
-      name: asset.name,
-      timelines: [{ ...tl, tracks: preset.tracks ?? [], blocks: [], modifiers: [], timelineDurationMs: preset.durationMs || tl.timelineDurationMs }],
-      activeTimelineId: tl.id,
-    };
+    // the editor's own preview construction: the preset's layers (shapes, hands, legs, SVG,
+    // text, curves, other mascots), its effects and its ranges — not just its tracks, which
+    // dropped every one of those from the splash
+    const project: Project = { ...presetPreviewProject(defaultProject(), { ...preset, tracks: preset.tracks ?? [] }), name: asset.name };
     setData(project);
-    setDuration(clampDuration(preset.durationMs || tl.timelineDurationMs));
+    setDuration(clampDuration(preset.durationMs || activeTimeline(project).timelineDurationMs));
     setPlayKey((k) => k + 1);
   };
 

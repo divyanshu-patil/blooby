@@ -5,7 +5,7 @@ import { defaultProject } from './defaults';
 import { evaluateRig, sceneAt } from './scene';
 import { compOf } from './comp';
 import { activeTimeline } from './types';
-import { addMascot, makeShapeLayer, placeUnder, removeLayer, reorderLayer, saveMascotTemplate } from './layers';
+import { addMascot, layerOrder, makeShapeLayer, placeUnder, removeLayer, reorderLayer, saveMascotTemplate } from './layers';
 import { laneOf, mascotOf, mascotsOf, partOf } from './mascot';
 import { blockStarts } from './timeline';
 import { bakeLottie } from '../export/lottie';
@@ -112,7 +112,7 @@ const ed = () => useEditor.getState();
   const s = makeShapeLayer('star', { id: 'between' });
   p.rig.nodes.between = { ...s, zIndex: 0.5 };
   // numbered among the layers it is not carrying: 'body' sits at o.indexOf('body') of them
-  reorderLayer(p, 'between', o.indexOf('body'));
+  reorderLayer(p, 'between', layerOrder(p.rig).map((n) => n.id).filter((id) => id !== 'between').indexOf('body'));
   const o2 = order(p);
   it('and a layer can sit between two mascots', check(o2.indexOf('between') > o2.indexOf(`${m2}.eyeR`) && o2.indexOf('between') < o2.indexOf('body'), o2.join()));
 }
@@ -188,7 +188,7 @@ const ed = () => useEditor.getState();
   const m3 = addMascot(p, p.mascotTemplates!.find((t) => t.id === tid)!);
   it('a saved mascot comes back as a fresh instance of itself', check(
     m3 !== m2 && p.rig.nodes[m3].shapePath === p.rig.nodes[m2].shapePath && p.rig.nodes[m3].color.g === 200 && !!partOf(p.rig, m3, 'eyeR')));
-  it('with its own ids, wired to its own body', check(p.rig.nodes[partOf(p.rig, m3, 'eyeL')!].parentId === m3));
+  it('with its own ids, wired to its own body', check(p.rig.nodes[partOf(p.rig, m3, 'eyeL')!].parentId === `${m3}.face` && p.rig.nodes[`${m3}.face`]?.parentId === m3));
 }
 
 // --- export: each mascot its own layers ----------------------------------------------------

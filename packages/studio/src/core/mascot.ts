@@ -17,7 +17,7 @@ export const BONE: ColorStop = { r: 242, g: 239, b: 233, a: 1 };
 export const INK: ColorStop = { r: 20, g: 19, b: 24, a: 1 };
 
 /** The parts a preset can name. A node's `role` says which one it is. */
-export const MASCOT_PARTS = ['body', 'eyeL', 'eyeR', 'armL', 'armR', 'legL', 'legR'] as const;
+export const MASCOT_PARTS = ['body', 'face', 'eyeL', 'eyeR', 'armL', 'armR', 'legL', 'legR'] as const;
 const LEGACY = new Set<string>(MASCOT_PARTS);
 
 /** Which part a node plays. The first mascot of an older file has no roles — its ids are. */
@@ -115,9 +115,45 @@ export function makeBody(): RigNode {
   };
 }
 
+/**
+ * The face: a group on the body that the eyes (and hands) live in. It draws nothing; it is
+ * a frame — move, roll, scale or turn it (its yaw/pitch is a look) and everything on it
+ * follows, while the body does its own thing. See buildScene: a group on a sphere hands its
+ * mapped children the head's radius and turn, so eyes still curve round the body.
+ */
+export function makeFace(id: string, parentId: string): RigNode {
+  return {
+    id, name: 'Face', kind: 'group', parentId, role: 'face',
+    surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: 0, y: 0 } },
+    transform: { scale: { x: 1, y: 1 }, rotation: 0 },
+    size: { x: 0, y: 0 }, color: INK, visible: true, zIndex: 1,
+  };
+}
+
+/** A mascot's face — the layer playing that role — or undefined when it has none. */
+export const faceOf = (rig: Rig, mascotId: string): string | undefined => partOf(rig, mascotId, 'face');
+
+/**
+ * Give every body in `nodes` that has none a face, and move the eyes sitting straight on
+ * it into the face. Idempotent. What the migration runs over old files and saved mascots.
+ */
+export function ensureFaces(nodes: Record<string, RigNode>, rootId?: string): void {
+  for (const body of Object.values(nodes)) {
+    if (body?.kind !== 'body') continue;
+    const kids = Object.values(nodes).filter((n) => n?.parentId === body.id);
+    if (kids.some((n) => n.role === 'face')) continue;
+    const eyes = kids.filter((n) => n.kind === 'eye');
+    if (!eyes.length) continue;
+    const id = body.id === rootId && !nodes.face ? 'face' : `${body.id}.face`;
+    if (nodes[id]) continue;
+    nodes[id] = { ...makeFace(id, body.id), zIndex: Math.min(...eyes.map((e) => e.zIndex ?? 0)) };
+    for (const e of eyes) e.parentId = id;
+  }
+}
+
 export function makeEye(id: string, distance: number): RigNode {
   return {
-    id, name: distance < 0 ? 'Left eye' : 'Right eye', kind: 'eye', parentId: 'body',
+    id, name: distance < 0 ? 'Left eye' : 'Right eye', kind: 'eye', parentId: 'face',
     surface: { yaw: 0, pitch: -4, mapped: true },
     transform: { scale: { x: 1, y: 1 }, rotation: 0, length: 1.55 },
     size: { x: 38, y: 38 },
@@ -162,13 +198,13 @@ export function makeMascot(kind: MascotKind, opts: { name: string; id?: string; 
   const eye = (side: -1 | 1): RigNode => {
     const e = makeEye(`${id}.eye${side < 0 ? 'L' : 'R'}`, side * k.eye.distance);
     return {
-      ...e, parentId: id, role: side < 0 ? 'eyeL' : 'eyeR',
+      ...e, parentId: `${id}.face`, role: side < 0 ? 'eyeL' : 'eyeR',
       surface: { ...e.surface, pitch: k.eye.pitch },
       size: { x: k.eye.size, y: k.eye.size },
       transform: { ...e.transform, length: k.eye.length },
     };
   };
-  return [body, eye(-1), eye(1)];
+  return [body, makeFace(`${id}.face`, id), eye(-1), eye(1)];
 }
 
 /** A saved mascot as a fresh instance: the same nodes under new ids, wired to each other. */

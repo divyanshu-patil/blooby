@@ -394,3 +394,106 @@ overwriting each other — it simply no longer names a key.
 `pnpm --filter @blooby/api collapse:versions` migrated the existing bucket (258 objects
 across 3 projects down to 3, dry-run by default). `check:storage` asserts the property
 holds: create, save five times, one object, delete, bucket back where it started.
+
+## Faces, anchors, squish, pins, trims, rules
+
+**The face is a group that hands the sphere down.** A `group` (or any layer with role
+`face`) sitting on a sphere passes the parent's radius, head turn and squash to its
+children, adding its own offset, roll, scale and yaw/pitch as a "look". Mapped eyes inside
+it still arc. Migration step 7 wraps existing eyes in a face at rest, so no pixel moves.
+*Hands* are parented to the face (the requested hierarchy); preset arms written against
+the body are re-parented on placement, which is identical while the face is at rest.
+
+**Anchor is CSS transform-origin, not After Effects' anchor.** Moving it never moves the
+layer at rest; it changes what rotation, scale and squish pivot about. Dragging it on the
+stage compensates position so the layer stays put even when rotated. It does not apply to
+limbs, whose points are their geometry.
+
+**Squish multiplies onto scale and is clamped 0.4–1.8** where it is read, so a bad
+keyframe cannot invert the mascot. Squish presets write keys and clear only squish keys
+inside their own window.
+
+**A pin is a static world point.** It is not animatable. Pinning captures the foot at the
+playhead; unpinning writes the pinned points back as keyframes (or base values) at the
+playhead. The knee follows the hip→foot line as a similarity transform.
+*Upgrade path:* keyframeable pin weight for walk cycles.
+
+**Trim affects the stroke in the preview; Lottie's trim path trims the whole group.**
+Curves have no fill by default, so the two agree there. A filled shape with a trim shows
+its full fill in the editor but a trimmed fill in a Lottie player.
+
+**Rules from any state fan out at export.** `from: "*"` is one transition in the document.
+The engine sees one edge per other state (never into the target itself), after that
+state's own edges. State-to-state edges therefore win where both hold.
+
+**New layers belong to the state they were made in** (`ranged` plus a whole-timeline
+appearance). Layers already leaked across states in older files cannot be attributed
+after the fact and are left as they are.
+
+**Timeline easing popover on a last keyframe edits the incoming segment.** The curve is
+stored on the key a segment leaves, so the last key had nothing to edit.
+
+**The head shape belongs to the face group.** A body with a face GROUP draws its own
+outline in the face's frame (moved, rolled, scaled with it), while the body's frame — what
+legs and hung layers ride — stays where the mascot stands. A shape made the face (not a
+group) is itself the face drawing, so the body outline stays put there. The Layers panel
+shows the head as a "Head shape" row under Face; it selects the mascot.
+
+**Bounce and Elastic are baked into keyframes** (`setEasingIn` in core/store.ts): a key at
+every contact and peak, marked `bakedFrom`, removed when another easing is picked or the key
+is deleted. Peaks within 2% of the target are dropped. Presets that already use the bounce
+formula keep it; only an easing picked in the editor bakes.
+
+**Apply as base size** scales every length under the mascot by the per-axis scale where the
+parent frame stretches per axis (the body, its face group) and by the uniform part elsewhere,
+then puts the body back where its anchor-scaled centre was. Stroke widths are screen px and
+are left alone.
+
+**Layer effects that Lottie cannot carry are kept, drawn and reported, not dropped.** Glow,
+blur, shadow, RGB split, slices, scanlines and goo are SVG filters/clips; gradients and masks
+are not written by the baker yet. All are drawn in the editor, the thumbnails and the raster
+exports (GIF/MP4/PNG), and `bakeLottie` returns a warning naming each layer that lost one.
+Flicker, jitter and echo evaluate to plain opacity/paths/copies per frame, so they bake. Blend
+modes bake as the layer `bm`, trim offset as the trim path's `o`.
+
+**Slice bands sit on a 900px screen grid**, not per layer, so a mascot and its eyes tear along
+the same lines.
+
+**Effects are drawn, not simulated:** everything is a function of time (hashes seeded by frame
+step), so scrubbing back to a frame gives the same picture and a bake is deterministic.
+Echo re-evaluates the rig at earlier times; each echoing layer costs one extra scene per copy.
+
+**Burst particles are closed-form.** Velocity decays with drag, gravity is ½gt², turbulence is
+1D noise — no integration state, so any frame can be evaluated alone. Gathering onto a target
+eases each particle to its own point on the target's outline (or inside a word's letters),
+read as the target WOULD be drawn even while it is hidden.
+
+**Particles are measured by the mascot, unless it has been scaled away.** Below a tenth of its
+scale the emitter unit is taken as if it were whole, so a mascot that bursts into particles
+does not take their size down with it.
+
+**Depth is a simple pinhole**: scale = 1000 / (1000 + z), applied to size and to the distance
+from the composition centre, with the camera pan divided the same way (parallax). rotateX/Y
+narrow a layer by cos(angle); on a mascot they turn the sphere instead.
+
+**Walk cycles** plant each foot in the world by compensating the body's squash, ease up to
+speed over 0.4s, and — given an end — leave the mascot where it walked to for the rest of the
+clip, or until `holdUntilMs` (how `sequence()` keeps a walk inside its own part).
+
+**Per-point limb pins are in world px.** A pinned point stays where it was pinned in the
+world; while the pins pull the limb further than its length, the length stretches to reach,
+and it is the inspector length again as soon as they no longer do. Unpinning writes the
+pinned pose back into the points (so nothing jumps within reach); a stretched limb then
+shortens to its own length.
+
+**Preset layers with a negative zIndex go behind the rig** when placed (`addPresetLayers`);
+any other goes on top, as before.
+
+**Cinematic presets open on the mascot's rest pose for one held instant** (`settled` in
+core/cinematicPresets.ts) and start their own pose 1ms in. The builtin rule is that a preset
+closes on its opening value; opening on rest means a portal or glitch that starts with no
+mascot never hands an invisible mascot to the next clip or the next part of a sequence.
+
+**Keyframe copy goes through the system clipboard** (`blooby-keyframes:` + JSON), from the
+`copy` event. A keydown-only copy left an earlier SVG on the clipboard, which the editor's
+SVG paste then took as a new layer, so the keys never arrived.

@@ -18,18 +18,18 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
   p.rig.nodes.star = { ...makeShapeLayer('star', { id: 'star' }), zIndex: 10 };
   const ids = () => layerOrder(p.rig).map((n) => n.id).join(',');
   const drawn = () => buildScene(evaluateRig(p, 0), compOf(p)).map((s) => s.id).join(',');
-  it('the order is back to front by zIndex', check(ids() === 'body,eyeL,eyeR,star', ids()));
-  it('and the stage paints in exactly that order', check(drawn() === ids(), drawn()));
+  it('the order is back to front by zIndex', check(ids() === 'body,face,eyeL,eyeR,star', ids()));
+  it('and the stage paints in exactly that order', check(drawn() === ids().replace('face,', ''), drawn()));
 
   reorderLayer(p, 'star', 'back');
-  it('send to back puts it first', check(ids() === 'star,body,eyeL,eyeR', ids()));
+  it('send to back puts it first', check(ids() === 'star,body,face,eyeL,eyeR', ids()));
   it('so it is painted behind the body', check(drawn().startsWith('star,'), drawn()));
   reorderLayer(p, 'star', 'forward');
-  it('forward moves exactly one step', check(ids() === 'body,star,eyeL,eyeR', ids()));
+  it('forward moves exactly one step', check(ids() === 'body,star,face,eyeL,eyeR', ids()));
   reorderLayer(p, 'star', 'front');
   it('bring to front puts it last', check(ids().endsWith(',star'), ids()));
   reorderLayer(p, 'star', 'backward');
-  it('backward moves exactly one step', check(ids() === 'body,eyeL,star,eyeR', ids()));
+  it('backward moves exactly one step', check(ids() === 'body,face,eyeL,star,eyeR', ids()));
   reorderLayer(p, 'star', 0);
   it('a number is a position', check(ids().startsWith('star,'), ids()));
   it('zIndex stays dense and unique, so a step is always one layer', check(layerOrder(p.rig).every((n, i) => n.zIndex === i)));

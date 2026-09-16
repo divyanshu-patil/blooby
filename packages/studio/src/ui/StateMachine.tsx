@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { useDismiss } from './bits';
 import { useEditor } from '../core/store';
 import { Collapsible } from './Collapsible';
 import { CurveEditor } from './CurveEditor';
@@ -10,7 +11,7 @@ import {
 } from '../core/stateMachine';
 import { valueAt } from '../core/scene';
 import { shapeById, shapeIdOf } from '../core/emitters';
-import type { ConditionOp, EasingCurve, InputType, InputValue, SmCondition, SmInput, SmTransition } from '../core/types';
+import { ANY_STATE, type ConditionOp, type EasingCurve, type InputType, type InputValue, type SmCondition, type SmInput, type SmTransition } from '../core/types';
 
 /**
  * The State Editor: a visual authoring environment for a real dotLottie state machine.
@@ -56,8 +57,12 @@ export function StateMachine() {
   return (
     <>
       <MachineHeader errors={errors.length} />
-      <Collapsible title="Current → target" storageKey="sm-direct">
-        <StateDirector selectedId={selectedTransition} onSelect={setSelectedTransition} />
+      <Collapsible title="Rules" storageKey="sm-rules" badge={machine.transitions.filter((t) => t.from === ANY_STATE).length || undefined}>
+        <StateGraph selectedId={selectedTransition} onSelect={(t) => setSelectedTransition(t?.id ?? null)} />
+        <Rules selectedId={selectedTransition} onSelect={setSelectedTransition} />
+      </Collapsible>
+      <Collapsible title="Current → target" storageKey="sm-direct" defaultOpen={false}>
+        <StateDirector />
       </Collapsible>
       <Collapsible title="Inputs" storageKey="sm-inputs" badge={machine.inputs.length || undefined}>
         <Inputs />
@@ -65,7 +70,7 @@ export function StateMachine() {
       <Collapsible title="States" storageKey="sm-states" badge={project.timelines.length}>
         <States />
       </Collapsible>
-      <Collapsible title="Transitions" storageKey="sm-transitions" badge={machine.transitions.length || undefined}>
+      <Collapsible title="All transitions (advanced)" storageKey="sm-transitions" defaultOpen={false} badge={machine.transitions.length || undefined}>
         <Transitions selectedId={selectedTransition} onSelect={setSelectedTransition} />
       </Collapsible>
       <Collapsible title="Validation" storageKey="sm-validation" badge={issues.length || 'ok'} defaultOpen={errors.length > 0}>
@@ -91,7 +96,7 @@ export function StateMachine() {
  * The current values are here so "where am I" is a set of numbers, not a guess: the
  * selected layer's (or the body's) scale, roll, opacity, shape, yaw and pitch right now.
  */
-function StateDirector({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string | null) => void }) {
+function StateDirector() {
   const project = useEditor((s) => s.project);
   const playhead = useEditor((s) => s.playhead);
   const selection = useEditor((s) => s.selection);
@@ -194,7 +199,6 @@ function StateDirector({ selectedId, onSelect }: { selectedId: string | null; on
       <p className="hint" style={{ margin: 0 }}>
         {fromAny ? 'Every state' : active.name} → <b>{targetName}</b> directly, when <code>{inputName} == {fires}</code>. Nothing in between — and the preview takes it now.
       </p>
-      <StateGraph selectedId={selectedId} onSelect={(t) => onSelect(t?.id ?? null)} />
     </div>
   );
 }
@@ -398,6 +402,9 @@ function States() {
   const setInitialState = useEditor((s) => s.setInitialState);
   const commit = useEditor((s) => s.commit);
   const [curveFor, setCurveFor] = useState<string | null>(null);
+  const addRule = useAddRule();
+  const curveRef = useRef<HTMLDivElement>(null);
+  useDismiss(curveFor !== null, () => setCurveFor(null), [curveRef]);
   const machine = machineOf(project);
   const initialId = machine.initialStateId ?? project.timelines[0]?.id;
 
@@ -408,12 +415,12 @@ function States() {
         const incoming = machine.transitions.filter((t) => t.to === tl.id);
         const outgoing = machine.transitions.filter((t) => t.from === tl.id);
         const easing: EasingCurve = tl.transitionEasing ?? DEFAULT_EASING;
-        const name = (id: string) => project.timelines.find((t) => t.id === id)?.name ?? '?';
+        const name = (id: string) => (id === ANY_STATE ? 'any state' : project.timelines.find((t) => t.id === id)?.name ?? '?');
         const cond = (t: SmTransition) => t.conditions.map((c) => conditionText(c, machine.inputs)).join(t.logic === 'OR' ? ' or ' : ' and ') || 'nothing';
         const animation = tl.animationId ?? slug(tl.name);
 
         return (
-          <div key={tl.id} className="sm-card" data-active={active} style={{ position: 'relative' }}>
+          <div key={tl.id} className="sm-card" data-active={active} style={{ position: 'relative' }} ref={curveFor === tl.id ? curveRef : undefined}>
             <div className="sm-head">
               <button className="dot-status" data-on={active}
                 title={active ? `"${tl.name}" is the state showing on the stage` : `Show "${tl.name}" on the stage`}
@@ -469,6 +476,9 @@ function States() {
               </div>
             )}
 
+            <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }}
+              title={`A rule: whatever state is current, when its condition holds, play "${tl.name}"`}
+              onClick={() => addRule(tl.id)}>+ Play “{tl.name}” when…</button>
             <p className="sm-note" title={tl.animationId
               ? `Plays the imported animation "${animation}", which is copied into the .lottie untouched`
               : `Plays this timeline, baked into the .lottie as the animation "${animation}"`}>
@@ -478,6 +488,73 @@ function States() {
         );
       })}
       <p className="hint" style={{ margin: 0 }}>★ marks where the machine starts. Add or remove states from the timeline tabs below the stage.</p>
+    </>
+  );
+}
+
+// --- rules: "when this input is…, play that state" -------------------------
+
+/**
+ * A rule into `to`, from whatever state is current, on the first input that can carry a
+ * value — made for you, as a Numeric `value`, when there is none yet. Each new rule on a
+ * Numeric input takes the next number, so three clicks read value = 1, 2, 3.
+ */
+function useAddRule() {
+  const addInput = useEditor((s) => s.addInput);
+  const addStateTransition = useEditor((s) => s.addStateTransition);
+  return (to: string) => {
+    const p = useEditor.getState().project;
+    const m = machineOf(p);
+    let input = m.inputs.find((i) => i.type !== 'Event') ?? m.inputs[0];
+    if (!input) { input = { name: 'value', type: 'Numeric', value: 0 }; addInput(input); }
+    const n = m.transitions.filter((t) => t.from === ANY_STATE && t.conditions[0]?.input === input!.name).length;
+    const target = p.timelines.find((x) => x.id === to);
+    const value: InputValue | undefined = input.type === 'Numeric' ? n + 1 : input.type === 'Boolean' ? true
+      : input.type === 'String' ? target?.name ?? '' : undefined;
+    addStateTransition(ANY_STATE, to, [{ input: input.name, operator: input.type === 'Event' ? 'Fired' : 'Equal', value }]);
+  };
+}
+
+function Rules({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string | null) => void }) {
+  const project = useEditor((s) => s.project);
+  const update = useEditor((s) => s.updateStateTransition);
+  const remove = useEditor((s) => s.removeStateTransition);
+  const addRule = useAddRule();
+  const machine = machineOf(project);
+  const rules = machine.transitions.filter((t) => t.from === ANY_STATE);
+  const initial = machine.initialStateId ?? project.timelines[0]?.id;
+  const next = project.timelines.find((t) => t.id !== initial && !rules.some((r) => r.to === t.id)) ?? project.timelines[0];
+
+  return (
+    <>
+      {rules.map((t) => {
+        const open = t.id === selectedId;
+        return (
+          <div key={t.id} className="sm-card" data-open={open}>
+            {t.conditions[0]
+              ? <ConditionRow condition={t.conditions[0]} index={0} joiner={t.logic ?? 'AND'}
+                onChange={(patch) => update(t.id, { conditions: t.conditions.map((c, i) => (i === 0 ? { ...c, ...patch } : c)) })}
+                onRemove={() => remove(t.id)} />
+              : <p className="hint" style={{ margin: 0 }}>No condition yet — open More to add one.</p>}
+            <div className="sm-row">
+              <span className="sm-key">Play</span>
+              <select className="prop-num" style={{ flex: 1, minWidth: 0 }} value={t.to} aria-label="Play this state"
+                onChange={(e) => update(t.id, { to: e.target.value })}>
+                {project.timelines.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+              <button className="btn ghost sm" aria-expanded={open} title="Blend time, easing, more conditions"
+                onClick={() => onSelect(open ? null : t.id)}>{open ? 'Less' : 'More'}</button>
+            </div>
+            {t.conditions.length > 1 && !open && <p className="hint" style={{ margin: 0 }}>+ {t.conditions.length - 1} more condition{t.conditions.length > 2 ? 's' : ''}</p>}
+            {open && <TransitionRow transition={t} open onToggle={() => onSelect(null)} />}
+          </div>
+        );
+      })}
+      <button className="btn sm" style={{ alignSelf: 'flex-start' }} disabled={!next} onClick={() => next && addRule(next.id)}>+ Rule</button>
+      <p className="hint" style={{ margin: 0 }}>
+        A rule works from whatever state is current — <code>value = 2 → Dance</code> takes Idle, Happy or Sad straight to Dance.
+        Drag between states in the graph for a transition out of one state only.
+      </p>
     </>
   );
 }
@@ -512,8 +589,10 @@ function TransitionRow({ transition: t, open, onToggle }: { transition: SmTransi
   const update = useEditor((s) => s.updateStateTransition);
   const remove = useEditor((s) => s.removeStateTransition);
   const [curveOpen, setCurveOpen] = useState(false);
+  const curveRef = useRef<HTMLDivElement>(null);
+  useDismiss(curveOpen, () => setCurveOpen(false), [curveRef]);
   const machine = machineOf(project);
-  const name = (id: string) => project.timelines.find((x) => x.id === id)?.name ?? '?';
+  const name = (id: string) => (id === ANY_STATE ? 'Any state' : project.timelines.find((x) => x.id === id)?.name ?? '?');
   const easing: EasingCurve = t.easing ?? DEFAULT_EASING;
   const joiner = t.logic === 'OR' ? 'OR' : 'AND';
   // a new edge is created carrying the target state's own blend, so that — not zero — is
@@ -538,7 +617,7 @@ function TransitionRow({ transition: t, open, onToggle }: { transition: SmTransi
   };
 
   return (
-    <div className="sm-card" data-open={open} style={{ position: 'relative' }}>
+    <div className="sm-card" data-open={open} style={{ position: 'relative' }} ref={curveRef}>
       <button className="sm-head" style={{ textAlign: 'left' }} onClick={onToggle} aria-expanded={open}
         title={open ? 'Collapse this transition' : `Edit: the machine goes from "${name(t.from)}" to "${name(t.to)}" when its conditions hold`}>
         <span className="sm-name">{name(t.from)} → {name(t.to)}</span>
@@ -554,6 +633,7 @@ function TransitionRow({ transition: t, open, onToggle }: { transition: SmTransi
             <select className="prop-num" style={{ flex: 1, minWidth: 0 }} value={t.from} aria-label="Transition from"
               title="The state this transition leaves"
               onChange={(e) => update(t.id, { from: e.target.value })}>
+              <option value={ANY_STATE}>Any state</option>
               {project.timelines.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
             </select>
             <span className="sm-key" style={{ flex: '0 0 auto' }} title="Where the machine ends up">To</span>

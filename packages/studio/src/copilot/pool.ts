@@ -34,6 +34,8 @@ export interface CopilotSettings {
   model: string;
   keys: PoolKey[];
   server?: ServerPolicy;
+  /** how many think → act → observe steps one run may take */
+  maxSteps?: number;
 }
 
 const KEY = 'blooby.copilot.v1';

@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { emitterFrame, type SceneItem, type Viewport } from '../core/scene';
+import { emitterFrame, emitterPathAt, type SceneItem, type Viewport } from '../core/scene';
+import { applyEasing } from '../core/easing';
 import { useEditor } from '../core/store';
 import { cssColor } from '../core/color';
 import type { Emitter, Rig, Vec2 } from '../core/types';
@@ -60,17 +61,21 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
     window.addEventListener('pointerup', up);
   }, [emitter.id, f, targets, toComp, updateEmitter]);
 
-  // the fade knob rides the straight line between the ends — dragging it along projects
-  // onto that line, so it cannot be pulled off the path it is describing
+  // the fade knob rides the particles' own path: dragging picks the point of the life whose
+  // position on that path is nearest the pointer, so it cannot be pulled off what it describes
   const dragFade = useCallback((down: React.PointerEvent) => {
     down.preventDefault();
     down.stopPropagation();
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len2 = dx * dx + dy * dy || 1;
     const move = (ev: PointerEvent) => {
       const at = toComp(ev);
-      const t = ((at.x - a.x) * dx + (at.y - a.y) * dy) / len2;
-      updateEmitter(emitter.id, (x) => { x.fadeStart = Math.max(0, Math.min(1, Math.round(t * 100) / 100)); });
+      let best = 0, bestD = Infinity;
+      for (let k = 0; k <= 100; k++) {
+        const u = k / 100, travel = emitter.easing ? applyEasing(emitter.easing, u) : u;
+        const q = emitterPathAt(emitter, a, b, f.unit, travel);
+        const d = Math.hypot(q.x - at.x, q.y - at.y);
+        if (d < bestD) { bestD = d; best = u; }
+      }
+      updateEmitter(emitter.id, (x) => { x.fadeStart = best; });
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
@@ -78,7 +83,7 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-  }, [a.x, a.y, b.x, b.y, emitter.id, toComp, updateEmitter]);
+  }, [a, b, emitter, f.unit, toComp, updateEmitter]);
 
   const dragRadius = useCallback((down: React.PointerEvent) => {
     down.preventDefault();
@@ -116,22 +121,25 @@ export function TrajectoryHandles({ emitter, rig, scene, view, toComp }: {
     );
   }
 
-  // a quadratic whose control point sits at the bow, so the drawn curve is the path the
-  // particles actually take rather than an idealised straight line between the dots
-  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const bow = emitter.bow * f.unit * 2;
-  const cx = mx + (-dy / len) * bow, cy = my + (dx / len) * bow;
-  const fade = { x: a.x + dx * emitter.fadeStart, y: a.y + dy * emitter.fadeStart };
+  // sampled from the particles' own path function, so the drawn curve IS the path they take —
+  // an arc bent by its bow, or a fall's gravity curve with its outer lanes either side
+  const along = (lane: number) => {
+    const pts = Array.from({ length: 33 }, (_, k) => emitterPathAt(emitter, a, b, f.unit, k / 32, lane));
+    return `M ${pts.map((q) => `${q.x.toFixed(1)} ${q.y.toFixed(1)}`).join(' L ')}`;
+  };
+  const travelAt = (u: number) => (emitter.easing ? applyEasing(emitter.easing, u) : u);
+  const fade = emitterPathAt(emitter, a, b, f.unit, travelAt(emitter.fadeStart));
 
   return (
     <g className="traj">
       {/* the outline being latched onto, so it is obvious what the point is about to
           belong to rather than only obvious afterwards */}
       {snap && <SnapRing target={snap} />}
-      <path d={`M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`} fill="none" stroke={stroke} strokeWidth={1.25}
+      <path d={along(0)} fill="none" stroke={stroke} strokeWidth={1.25}
         strokeDasharray="5 5" opacity={0.85} markerEnd="url(#traj-arrow)" />
+      {emitter.path === 'fall' && emitter.bow !== 0 && [-0.5, 0.5].map((lane) => (
+        <path key={lane} d={along(lane)} fill="none" stroke={stroke} strokeWidth={1} strokeDasharray="2 6" opacity={0.45} />
+      ))}
       <defs>
         <marker id="traj-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 1 L 7 4 L 0 7 z" fill={stroke} />

@@ -1,22 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../core/store';
-import { chatJson, listModels, verifyKeys, type ChatMessage } from '../copilot/client';
+import { listModels, verifyKeys, type ChatMessage } from '../copilot/client';
 import { copilotApi } from '../cloud/api';
 import { acceptsKeys, baseUrl, DEFAULT_CLOUD_MODEL, displayModel, ENDPOINT_INFO, loadSettings, maskKey, resolveModel, saveSettings, usesBackend, type CopilotSettings, type KeyStatus } from '../copilot/pool';
-import { applyCalls, describe, normaliseCall, RESPONSE_SCHEMA, validateBatch } from '../copilot/tools';
-import { systemPrompt } from '../copilot/prompt';
-import { parseTurn } from '../copilot/parse';
-import { critique } from '../copilot/critique';
+import { applyCalls, describe, type ToolCall } from '../copilot/tools';
+import { DEFAULT_MAX_STEPS, runAgent } from '../copilot/agent';
 import { CLOUD_CATALOGUE } from '../copilot/pool';
-import { useCopilotSession, type Turn } from '../copilot/session';
+import { useCopilotSession, type AgentRun, type Turn } from '../copilot/session';
 import { Panel } from './bits';
 
-const PHASE_LABEL = {
-  thinking: 'thinking…',
-  retrying: 'that batch did not validate — asking again…',
-  revising: 'the animation was weak — asking for a better one…',
-  applying: 'applying changes…',
-} as const;
 
 export function Copilot() {
   const project = useEditor((s) => s.project);
@@ -25,7 +17,7 @@ export function Copilot() {
   const [models, setModels] = useState<string[]>(() => (loadSettings().endpoint === 'cloud' ? [...CLOUD_CATALOGUE] : []));
   // the thread lives in a store, not here: this panel is one tab in the right rail, and
   // switching to Node or Effects unmounts it — which used to throw the conversation away
-  const { turns, input, phase, status, abort, push, patchTurn, setInput, setPhase, setStatus, setAbort, clear } = useCopilotSession();
+  const { turns, input, phase, status, abort, push, patchTurn, patchRun, logAction, setInput, setPhase, setStatus, setAbort, clear } = useCopilotSession();
   const busy = phase !== 'idle';
   const [showKeys, setShowKeys] = useState(false);
   const [newKey, setNewKey] = useState('');
@@ -84,68 +76,30 @@ export function Copilot() {
     if (!text || busy) return;
     setInput('');
     setRecalled(null);
+    const history: ChatMessage[] = turns.filter((t) => t.role === 'user' || t.role === 'bot').slice(-12)
+      .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: asHistory(t) }));
     push({ role: 'user', text });
+    // the run's checkpoint starts at the document as it is now
+    const at = useCopilotSession.getState().turns.length;
+    push({ role: 'bot', text: '', run: { status: 'running', actions: [], usage: { input: 0, output: 0 }, steps: 0, startedAt: Date.now(), before: useEditor.getState().project, applied: true } });
     setPhase('thinking');
     const ac = new AbortController();
     setAbort(ac);
-
-    const history: ChatMessage[] = [
-      // only the real exchange: an error or a "stopped" note is about the copilot, not
-      // something the model said, and replaying it just teaches it to say that
-      // Capped, because the system prompt now carries the whole timeline — an unbounded
-      // thread on top of that is how a reply gets cut off mid-JSON.
-      { role: 'system', content: systemPrompt(project, made(turns), useEditor.getState().playhead) },
-      ...turns.filter((t) => t.role === 'user' || t.role === 'bot').slice(-12)
-        .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', content: asHistory(t) })),
-      { role: 'user', content: text },
-    ];
-
-    const attempt = async (extra?: string): Promise<Turn> => {
-      const msgs = extra ? [...history, { role: 'user' as const, content: extra }] : history;
-      const { content, thinking } = await chatJson(settings, msgs, RESPONSE_SCHEMA, markKey, ac.signal);
-      const parsed = parseTurn(content);
-      const calls = parsed.calls.map((c) => normaliseCall(project, c));
-      // as a batch: create_preset followed by add_preset_to_timeline is correct, and only
-      // reads as "no preset" if each call is judged against the project as it stands now
-      const problems = validateBatch(project, calls).filter(Boolean) as string[];
-      if (problems.length) throw new ValidationError(problems.join('; '));
-      if (!parsed.reply && !calls.length) throw new ValidationError('no tool calls and nothing to say');
-      // the model's own plan is more useful than a reasoning trace, and every model
-      // produces one because the schema requires it
-      return {
-        role: 'bot', calls,
-        text: parsed.reply || `${calls.length} change${calls.length === 1 ? '' : 's'} ready.`,
-        thinking: parsed.plan ?? thinking,
-      };
+    const finish = (patch: Partial<AgentRun>, reply: string, calls?: ToolCall[]) => {
+      patchRun(at, { ...patch, endedAt: Date.now(), after: useEditor.getState().project });
+      patchTurn(at, { text: reply, calls, done: true });
     };
-
     try {
-      let turn: Turn;
-      try { turn = await attempt(); }
-      catch (e) {
-        // one re-prompt with the validator's complaint, then give up
-        if (!(e instanceof ValidationError)) throw e;
-        setPhase('retrying');
-        turn = await attempt(`Your previous tool calls were rejected: ${e.message}. Use only the layer ids, expression names and preset names listed above, and only the listed properties. Try again.`);
-      }
-
-      // Everything validate lets through is legal, and most of it is lifeless. Judge it
-      // as animation and give the model one shot at fixing what is specifically wrong —
-      // a complaint about the thing it just made lands where craft advice in the prompt
-      // gets skimmed. One revision only: a weak animation beats making the user wait.
-      const notes = critique(project, turn.calls ?? [], text);
-      if (notes.length) {
-        setPhase('revising');
-        try {
-          const better = await attempt(`That is not good enough as animation yet. ${notes.join(' ')} Send the whole turn again, fixed — same request, better execution.`);
-          if (critique(project, better.calls ?? [], text).length < notes.length) turn = better;
-        } catch { /* keep the first answer: a weak animation beats no animation */ }
-      }
-
-      push(turn);
+      const r = await runAgent({
+        settings, request: text, history, made: made(turns), signal: ac.signal, markKey,
+        onEvent: (e) => logAction(at, e),
+        onUsage: (usage, steps) => patchRun(at, { usage, steps }),
+      });
+      finish({ status: r.ended }, r.reply, r.edits);
     } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') push({ role: 'note', text: 'Stopped — nothing was changed.' });
-      else push({ role: 'error', text: e instanceof Error ? e.message : String(e) });
+      const edits = (useCopilotSession.getState().turns[at]?.run?.actions ?? []).filter((x) => x.kind === 'edit').length;
+      if (e instanceof Error && e.name === 'AbortError') finish({ status: 'stopped' }, edits ? `Stopped — ${edits} change${edits === 1 ? '' : 's'} applied; Revert takes them back.` : 'Stopped — nothing was changed.');
+      else finish({ status: 'failed' }, e instanceof Error ? e.message : String(e));
     } finally {
       setAbort(null);
       setPhase('idle');
@@ -271,6 +225,11 @@ export function Copilot() {
                 </div>
               </>
             )}
+            <div className="row">
+              <span className="prop-label" style={{ flex: 1 }}>Steps per run</span>
+              <input className="prop-num" type="number" min={2} max={80} style={{ width: 80 }} aria-label="Steps per run"
+                value={settings.maxSteps ?? DEFAULT_MAX_STEPS} onChange={(e) => patch({ maxSteps: Math.min(80, Math.max(2, Math.round(+e.target.value))) })} />
+            </div>
             <p className="hint">
               Keys live in this browser's localStorage. On a custom endpoint they are sent straight there;
               on Ollama Cloud they are forwarded per-request through the blooby backend, which never stores them.
@@ -303,7 +262,8 @@ export function Copilot() {
             {turns.map((t, i) => (
               <div key={i} className={`msg ${t.role === 'user' ? 'user' : t.role === 'error' ? 'err' : t.role === 'note' ? 'note' : 'bot'}`}>
                 <span className="who">{t.role === 'user' ? 'you' : t.role === 'error' ? 'failed' : t.role === 'note' ? 'stopped' : 'copilot'}</span>
-                <div className="bubble">{t.text}</div>
+                {t.run && <RunCard index={i} run={t.run} />}
+                {(t.text || !t.run) && <div className="bubble">{t.text}</div>}
                 {t.thinking && (
                   <details className="think">
                     <summary>plan</summary>
@@ -316,7 +276,7 @@ export function Copilot() {
                   </button>
                 </div>
                 {t.rejected && <p className="hint">Rejected — the copilot has been told not to propose it again.</p>}
-                {!!t.calls?.length && !t.rejected && (
+                {!!t.calls?.length && !t.rejected && !t.run && (
                   <div className="proposal" style={{ marginTop: 6 }}>
                     <ul>
                       {t.calls.map((c, n) => <li key={n}>{describe(project, c)} <code>{c.name}</code></li>)}
@@ -333,7 +293,7 @@ export function Copilot() {
                 )}
               </div>
             ))}
-            {busy && <p className="hint working">{PHASE_LABEL[phase as keyof typeof PHASE_LABEL]}</p>}
+
           </div>
           <textarea ref={box} className="ask" placeholder="Describe the animation you want…" value={input}
             onChange={(e) => { setInput(e.target.value); setRecalled(null); }}
@@ -360,7 +320,6 @@ export function Copilot() {
   );
 }
 
-class ValidationError extends Error {}
 
 /**
  * What this conversation has actually built, newest last.
@@ -394,4 +353,65 @@ function asHistory(t: Turn): string {
     : 'proposed, the user has not applied them yet';
   const json = JSON.stringify(t.calls);
   return `${t.text}\n[${status}] ${json.length > 1200 ? t.calls.map((c) => c.name).join(', ') : json}`;
+}
+
+const RUN_LABEL: Record<AgentRun['status'], string> = {
+  running: 'working', done: 'done', stopped: 'stopped', failed: 'failed', steps: 'hit the step limit',
+};
+
+/**
+ * One agent run as the user sees it: what it is doing now, every action it took, the tokens
+ * and time it used — and the checkpoint. Revert puts the document back to before the run
+ * (all of it, as one undo step); Reapply puts back exactly what the run left.
+ */
+function RunCard({ index, run }: { index: number; run: AgentRun }) {
+  const project = useEditor((s) => s.project);
+  const restoreProject = useEditor((s) => s.restoreProject);
+  const patchRun = useCopilotSession((s) => s.patchRun);
+  const [, tick] = useState(0);
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    if (run.status !== 'running') return;
+    const t = setInterval(() => tick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, [run.status]);
+  const elapsed = ((run.endedAt ?? Date.now()) - run.startedAt) / 1000;
+  const used = run.usage.input + run.usage.output;
+  const edits = run.actions.filter((a) => a.kind === 'edit').length;
+  const status = [...run.actions].reverse().find((a) => a.kind === 'status')?.text;
+  const changedSince = !!run.after && project !== (run.applied ? run.after : run.before);
+  return (
+    <div className="agent-run" data-status={run.status}>
+      <div className="row" style={{ gap: 6 }}>
+        <span className={`dot-status ${run.status === 'running' ? 'ok' : run.status === 'failed' ? 'error' : ''}`} />
+        <span className="hint" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {run.status === 'running' ? status ?? 'Thinking…' : RUN_LABEL[run.status]}
+        </span>
+        <span className="tag" title={`${run.usage.input.toLocaleString()} sent · ${run.usage.output.toLocaleString()} generated`}>
+          {used.toLocaleString()} tokens
+        </span>
+      </div>
+      <p className="hint" style={{ margin: '2px 0 0' }}>
+        {run.steps} step{run.steps === 1 ? '' : 's'} · {run.actions.filter((a) => a.kind !== 'status').length} actions · {edits} edit{edits === 1 ? '' : 's'} · {elapsed.toFixed(0)}s
+      </p>
+      {run.actions.length > 0 && (
+        <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+          <summary className="hint">Activity</summary>
+          <ol className="agent-log">
+            {run.actions.map((a, i) => <li key={i} data-kind={a.kind}>{a.text}</li>)}
+          </ol>
+        </details>
+      )}
+      {run.status !== 'running' && run.after && edits > 0 && (
+        <div className="row" style={{ gap: 4, marginTop: 4 }}>
+          {run.applied
+            ? <button className="btn sm" title={changedSince ? 'Puts the document back to before this run — edits made after it are undone too (⌘Z brings them back)' : 'Puts the document back to before this run, as one undo step'}
+              onClick={() => { restoreProject(run.before, 'agent.revert'); patchRun(index, { applied: false }); }}>Revert agent decision</button>
+            : <button className="btn sm" title="Restores exactly what this run left — nothing is regenerated"
+              onClick={() => { restoreProject(run.after!, 'agent.reapply'); patchRun(index, { applied: true }); }}>Reapply agent decision</button>}
+          <span className="hint">{run.applied ? `${edits} changes applied` : 'reverted'}{changedSince ? ' · edited since' : ''}</span>
+        </div>
+      )}
+    </div>
+  );
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useEditor, writeKeyframe } from '../core/store';
 import { valueAt } from '../core/scene';
 import { hasItalic as italicAvailable, loadFont } from '../core/fonts';
@@ -198,6 +199,32 @@ export function TextLettersSection({ node }: { node: RigNode }) {
         </>
       )}
       {typeof typing === 'number' && typing < length && <p className="hint">{Math.max(0, Math.floor(typing))} of {length} characters showing at the playhead.</p>}
+      <div className="divider" />
+      <OneLetter node={node} />
+    </>
+  );
+}
+
+/** One letter on its own: pick it, then move, turn, scale and fade just that letter — each keyframeable. */
+function OneLetter({ node }: { node: RigNode }) {
+  const setText = useEditor((s) => s.setText);
+  const t = node.text!;
+  const chars = [...t.content.replace(/\n/g, '')];
+  const [i, setI] = useState(0);
+  const at = Math.min(i, Math.max(0, chars.length - 1));
+  return (
+    <>
+      <div className="row">
+        <span className="prop-label" style={{ flex: 1 }}>One letter</span>
+        <select className="sel" aria-label="Letter" value={at} onChange={(e) => setI(+e.target.value)}>
+          {chars.slice(0, 32).map((ch, k) => <option key={k} value={k}>{k + 1}: {ch === ' ' ? '␣' : ch}</option>)}
+        </select>
+      </div>
+      {(['x', 'y', 'rotation', 'scale', 'opacity'] as const).map((k) => <PropRow key={k} nodeId={node.id} property={`text.char.${at}.${k}`} label={k} />)}
+      <label className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Each letter turns to face the way its own offset is moving it">
+        <input type="checkbox" checked={!!t.charOrient} onChange={(e) => setText(node.id, (x) => { x.charOrient = e.target.checked || undefined; })} />
+        Letters face the way they fly
+      </label>
     </>
   );
 }
