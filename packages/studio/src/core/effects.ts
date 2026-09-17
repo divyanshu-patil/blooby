@@ -57,6 +57,17 @@ export function makeEffect(kind: EffectKind): LayerEffect {
   };
 }
 
+/** The one param that makes each effect disappear at 0 — what a preset keys to switch a look on and off. */
+export const EFFECT_STRENGTH: Record<EffectKind, string> = {
+  glow: 'strength', blur: 'radius', shadow: 'opacity', rgbSplit: 'amount', slices: 'amount', scanlines: 'opacity', flicker: 'amount',
+  jitter: 'amount', echo: 'falloff', goo: 'radius', wave: 'amount', outline: 'width', grain: 'amount', hueShift: 'speed',
+};
+/** An effect of a kind that is present but does nothing until its strength is keyed up. */
+export function quietEffect(kind: EffectKind): LayerEffect {
+  const e = makeEffect(kind);
+  return { ...e, params: { ...e.params, [EFFECT_STRENGTH[kind]]: 0 } };
+}
+
 export const effectOf = (n: RigNode, kind: string) => n.effects?.find((e) => e.kind === kind && e.enabled !== false);
 
 /** A deterministic pseudo-random number in [0,1) from integers — the same frame always tears the same way. */

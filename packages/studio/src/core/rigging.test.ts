@@ -339,7 +339,7 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
   const pre = structuredClone(old);
   const drawnBefore = buildScene(evaluateRig(pre, 0), compOf(pre)).find((s) => s.id === 'eyeL')!;
   const { project, applied } = migrateProject(old);
-  it('a v6 file runs the faces step', check(applied.join() === 'faces,app screen presets,cinematic presets,app mascot kit,each timeline keeps its own layers', applied.join()));
+  it('a v6 file runs the faces step', check(applied.join() === 'faces,app screen presets,cinematic presets,app mascot kit,each timeline keeps its own layers,cartoon and character presets', applied.join()));
   it('its mascot gets a face', check(project.rig.nodes.face?.role === 'face' && project.rig.nodes.face.parentId === 'body'));
   it('with its eyes in it', check(project.rig.nodes.eyeL.parentId === 'face'));
   const drawnAfter = buildScene(evaluateRig(project, 0), compOf(project)).find((s) => s.id === 'eyeL')!;

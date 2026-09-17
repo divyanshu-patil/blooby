@@ -10,6 +10,8 @@ import { showcasePresets } from './showcase';
 import { textPresets } from './textPresets';
 import { appPresets } from './appPresets';
 import { cinematicPresets } from './cinematicPresets';
+import { creativePresets } from './creativePresets';
+import { quietEffect } from './effects';
 import { mascotKitPresets } from './mascotKit';
 import { BONE, faceOf, INK, makeBody, makeEye, makeFace, retargetId, roleOf } from './mascot';
 
@@ -107,6 +109,8 @@ export function builtinPresets(): Preset[] {
     ...mascotKitPresets(),
     // then the cinematic ones: portal, morph, walk + parallax … the 20s showreel — core/cinematicPresets.ts
     ...cinematicPresets(),
+    // then the characters: the Cartoon look and ten expressive presets — core/creativePresets.ts
+    ...creativePresets(),
     {
       // no tracks at all — dropped into a sequence it just holds whatever pose already
       // precedes it (the rig's own rest pose if it's first). The "base state" clip §8
@@ -530,6 +534,12 @@ export function addPresetLayers(rig: Rig, preset: Preset, mascotId?: string): vo
   const body = mascotId && rig.nodes[mascotId] ? mascotId : rig.rootId;
   const top = Math.max(0, ...Object.values(rig.nodes).map((n) => n.zIndex));
   const bottom = Math.min(0, ...Object.values(rig.nodes).map((n) => n.zIndex));
+  // a look: its effects onto layers the rig already has, switched off until the clip keys them up
+  for (const l of preset.looks ?? []) {
+    const node = rig.nodes[to(l.nodeId)];
+    if (!node) continue;
+    for (const kind of l.effects) if (!node.effects?.some((e) => e.kind === kind)) node.effects = [...(node.effects ?? []), quietEffect(kind)];
+  }
   for (const layer of preset.layers ?? []) {
     const id = to(layer.id);
     if (rig.nodes[id]) continue;
@@ -566,7 +576,7 @@ export function presetPreviewProject(project: Project, preset: Preset): Project 
   // a preset that brings its own layers has to preview with them, or "Hii!" is a mascot
   // moving an arm it does not have
   let rig = project.rig;
-  if (preset.layers?.length) { rig = structuredClone(project.rig); addPresetLayers(rig, preset); }
+  if (preset.layers?.length || preset.looks?.length) { rig = structuredClone(project.rig); addPresetLayers(rig, preset); }
   return {
     ...project,
     rig,

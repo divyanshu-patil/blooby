@@ -626,6 +626,12 @@ export interface Preset {
   layers?: RigNode[];
   /** when those layers are on screen, scoped to the clip like the effects above */
   appearances?: Omit<Appearance, 'id' | 'blockId'>[];
+  /**
+   * Effects a preset switches on for a layer the rig already has — the Cartoon look's outline and
+   * boil on the mascot. Added switched OFF (`quietEffect`) when missing, so outside the clip the
+   * layer looks exactly as it did; the preset's own `effect.<kind>.<param>` keys turn it up.
+   */
+  looks?: { nodeId: string; effects: EffectKind[] }[];
   /** what it shows off, for the preset browser — "Hand + SVG + Rubber Hose" */
   tagline?: string;
   thumbnail?: string;
