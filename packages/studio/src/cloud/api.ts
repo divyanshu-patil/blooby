@@ -47,6 +47,11 @@ export const communityApi = {
     api.get<Page<AssetRow>>('/api/community/official', params),
 };
 
+export const authApi = {
+  /** What's New: everything up to `version` has been seen. The server never moves it backwards. */
+  seenRelease: (version: string) => api.put<{ lastSeenRelease: string | null }>('/api/auth/whats-new', { version }),
+};
+
 export const splashApi = {
   /** Public — no session needed, and null is a normal answer. */
   active: () => api.get<SplashscreenRow | null>('/api/splashscreen/active', undefined, { auth: false }),

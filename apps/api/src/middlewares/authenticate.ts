@@ -52,7 +52,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     const profile = await prisma.profile.findUnique({ where: { id: claims.sub } });
     if (!profile) throw HttpError.unauthorized('No profile for this account');
 
-    req.user = { id: profile.id, email: (claims.email as string | undefined) ?? null, role: profile.role };
+    req.user = { id: profile.id, email: (claims.email as string | undefined) ?? null, role: profile.role, lastSeenRelease: profile.lastSeenRelease ?? null };
     next();
   } catch (e) {
     next(e);

@@ -147,6 +147,18 @@ the bottom. Never edit an existing step.
 **One store, one action per mutation.** Don't reach into `project.timelines[i]` from a
 component — the store has `at(p)` for the active timeline and `commit()` for undo.
 
+## What's New — update it with every user-visible change
+
+`packages/studio/src/whatsNew.ts` is the changelog people see: a "What's new" button in the
+editor toolbar and the dashboard footer, opening by itself when there is something unseen.
+**Any change a user would notice adds an item there in the same change** — a new release at the
+top of `RELEASES` (version `YYYY.MM.DD`, `.2` for a second one that day), or an item on today's
+release if it already exists and has not shipped. Write it for a person (what they can do now,
+where to find it), set `surface: 'editor' | 'dashboard'`, and give it a `tour` of `data-tour`
+steps when it has a place on screen — `whatsNew.test.ts` fails on an anchor the UI doesn't render.
+What each person has seen is `profiles.last_seen_release` (PUT `/api/auth/whats-new`; localStorage
+when signed out); everything newer is shown. Never edit an old release's version.
+
 ## Documents worth reading before a big change
 
 - `ASSUMPTIONS.md` — what is verified, what is guessed, and what is known-unverified.

@@ -5,7 +5,7 @@ import type { UserRole } from '@prisma/client';
 declare global {
   namespace Express {
     interface Request {
-      user?: { id: string; email: string | null; role: UserRole };
+      user?: { id: string; email: string | null; role: UserRole; lastSeenRelease?: string | null };
     }
   }
 }

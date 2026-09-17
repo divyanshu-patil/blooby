@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import {
-  EmptyState, Shell, Splashscreen, auth, startTour, startTourWhenReady, useSession,
+  EmptyState, Shell, Splashscreen, WhatsNewButton, auth, authApi, configureWhatsNew, startTour, startTourWhenReady, useSession,
   type DriveStep, type NavGroup, type SessionUser,
 } from '@blooby/studio';
 import { AuthScreen } from './features/auth/AuthScreen';
@@ -29,6 +29,11 @@ const WEB_TOUR: DriveStep[] = [
 export function App() {
   const { user, ready } = useSession();
   const [splashDone, setSplashDone] = useState(false);
+
+  // What's New reads and writes what this person has seen on their profile, in the dashboard and the editor alike
+  useEffect(() => {
+    if (user) configureWhatsNew({ seen: user.lastSeenRelease ?? null, save: (v) => authApi.seenRelease(v) });
+  }, [user]);
 
   // The splash sits above everything and removes itself; the app renders underneath the
   // whole time, so a splash that never loads costs nothing but a frame.
@@ -96,6 +101,7 @@ function AppShell({ user, tourReady }: { user: SessionUser; tourReady: boolean }
       onNavigate={(id) => navigate(id)}
       footer={
         <div className="who">
+          <WhatsNewButton surface="dashboard" autoOpen={tourReady} />
           <span className="who-name">{user.email ?? 'Signed in'}</span>
           <button className="btn ghost sm" title="Replay the tour"
             onClick={() => startTour('web', WEB_TOUR, { force: true })}>?</button>

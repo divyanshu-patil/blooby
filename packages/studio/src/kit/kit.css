@@ -232,3 +232,14 @@
 .thumb-frame { position: absolute; inset: 0; opacity: 0; transition: opacity .45s ease; }
 .thumb-frame[data-on] { opacity: 1; }
 .thumb-frame svg { width: 100%; height: 100%; }
+
+/* --- what's new --------------------------------------------------------- */
+.whatsnew-btn { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.whatsnew-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); }
+.whatsnew { display: flex; flex-direction: column; gap: 16px; max-height: min(60vh, 560px); overflow: auto; margin: 0 -4px; padding: 0 4px; }
+.whatsnew-release header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.whatsnew-release ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.whatsnew-item { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.whatsnew-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+.whatsnew-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.dialog .whatsnew-item p { margin: 0; font-size: 13px; }

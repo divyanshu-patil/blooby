@@ -137,6 +137,12 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
 - Keyframe copy/paste: `copy`/`paste` events in Timeline.tsx, clipboard text `blooby-keyframes:` + JSON.
 - `valueAt` samples loop-resolved tracks, same as `evaluateRig`.
 
+## What's New
+- `packages/studio/src/whatsNew.ts` RELEASES (newest first) + `unseenReleases(seen)`; seen = `profiles.last_seen_release`
+  (session user `lastSeenRelease`, PUT `/api/auth/whats-new`, never backwards) wired by web `App` via `configureWhatsNew`,
+  localStorage otherwise. UI `kit/WhatsNew.tsx WhatsNewButton` (editor toolbar, dashboard footer); item tours = driver steps
+  on `data-tour` anchors, checked by `whatsNew.test.ts`. Every user-visible change adds an item (CLAUDE.md).
+
 ## Tests
 - `pnpm --filter @blooby/studio test` (vitest, node). Style: script of `it(name, check(v, detail))`.
 - `pnpm ci` = lint + typecheck + test across the workspace.
