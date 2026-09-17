@@ -1,5 +1,5 @@
 import { fallbackMetrics, type TextMetrics } from './text';
-import type { FontRef, Project } from './types';
+import { rigOf, type FontRef, type Project } from './types';
 
 /**
  * Google Fonts, loaded on demand.
@@ -188,10 +188,11 @@ export function loadFont(f: FontRef): Promise<boolean> {
 export function projectFonts(p: Project): FontRef[] {
   const out = new Map<string, FontRef>();
   const add = (f: FontRef) => out.set(fontKey(f), { ...f, weight: snapWeight(f.weight) });
-  for (const n of Object.values(p.rig.nodes)) {
-    if (!n.text) continue;
-    add(n.text.font);
-    for (const tl of p.timelines) {
+  // every state's own layers — an export carries them all
+  for (const tl of p.timelines) {
+    for (const n of Object.values(rigOf(p, tl).nodes)) {
+      if (!n.text) continue;
+      add(n.text.font);
       for (const t of tl.tracks) {
         if (t.nodeId !== n.id) continue;
         for (const k of t.keyframes) {

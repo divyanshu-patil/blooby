@@ -7,7 +7,7 @@ import { screenToSurface } from './curvature';
 import { getProp, setProp } from './props';
 import { activeTrackFor, appearanceSpans, buildScene, evaluateRig, fromFrame, pinned, toFrame, WORLD, type LayerFrame } from './scene';
 import { hoseInputOf } from './limb';
-import { activeTimeline } from './types';
+import { activeTimeline, emptyRig } from './types';
 import { MORPH_MODES, type MorphMode } from './easing';
 import { relayoutBlocks } from './timeline';
 import { faceOf, instantiateTemplate, laneOfMascot, makeMascot, mascotOf, mascotsOf, nextMascotName, partOf, roleOf, type MascotKind } from './mascot';
@@ -337,7 +337,7 @@ export function removeLayer(p: Project, id: string, atMs = 0): Set<string> {
   if (id === p.rig.rootId || !node) return new Set();
   if (node.kind === 'body') {
     for (const c of Object.values(p.rig.nodes)) if (c.parentId === id && !isOwnPart(c)) placeUnder(p, c.id, null, atMs);
-    for (const tl of p.timelines) {
+    for (const tl of [activeTimeline(p)]) {
       const gone = new Set(tl.blocks.filter((b) => b.mascotId === id).map((b) => b.id));
       if (!gone.size) continue;
       tl.tracks = tl.tracks.filter((t) => !t.blockId || !gone.has(t.blockId));
@@ -347,7 +347,7 @@ export function removeLayer(p: Project, id: string, atMs = 0): Set<string> {
   const doomed = new Set([id, ...descendants(p.rig, id)]);
   for (const d of doomed) delete p.rig.nodes[d];
   for (const n of Object.values(p.rig.nodes)) if (n.eye?.linkedToId && doomed.has(n.eye.linkedToId)) n.eye.linkedToId = null;
-  for (const tl of p.timelines) {
+  for (const tl of [activeTimeline(p)]) {
     tl.tracks = tl.tracks.filter((t) => !doomed.has(t.nodeId));
     tl.modifiers = tl.modifiers.filter((m) => !doomed.has(m.nodeId));
     if (tl.appearances) tl.appearances = tl.appearances.filter((a) => !doomed.has(a.nodeId));
@@ -400,7 +400,7 @@ export function duplicateLayer(p: Project, id: string): string | null {
   }
   denseZ(p.rig);
   const copies = new Set(map.values());
-  for (const tl of p.timelines) {
+  for (const tl of [activeTimeline(p)]) {
     for (const t of tl.tracks.filter((x) => map.has(x.nodeId))) {
       tl.tracks.push({ ...t, id: uid('t'), nodeId: map.get(t.nodeId)!, keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k') })) });
     }
@@ -595,6 +595,8 @@ export function addMascot(p: Project, kind: MascotKind | MascotTemplate, opts: {
     p.rig.nodes[node.id] = node;
   });
   denseZ(p.rig);
+  // a blank timeline's first mascot is its root
+  if (!p.rig.nodes[p.rig.rootId]) p.rig.rootId = nodes[0].id;
   return nodes[0].id;
 }
 
@@ -860,7 +862,7 @@ export function applyScaleAsBase(p: Project, bodyId: string, atMs: number): bool
       // both ride the frame's stretch, so both take it
       const v = getProp(n, path);
       if (typeof v === 'number' && (path !== 'flatOffset.x' && path !== 'flatOffset.y' || n.surface.flatOffset)) setProp(n, path, round(v * f));
-      for (const tl of p.timelines) {
+      for (const tl of [activeTimeline(p)]) {
         for (const t of tl.tracks) {
           if (t.nodeId !== n.id || t.property !== path) continue;
           for (const kf of t.keyframes) if (typeof kf.value === 'number') kf.value = round(kf.value * f);
@@ -870,7 +872,7 @@ export function applyScaleAsBase(p: Project, bodyId: string, atMs: number): bool
   }
   // the scale itself: what was baked comes out of the base and out of every scale key
   body.transform.scale = { x: round(body.transform.scale.x / sx), y: round(body.transform.scale.y / sy) };
-  for (const tl of p.timelines) {
+  for (const tl of [activeTimeline(p)]) {
     for (const t of tl.tracks) {
       if (t.nodeId !== bodyId || (t.property !== 'transform.scale.x' && t.property !== 'transform.scale.y')) continue;
       const d = t.property === 'transform.scale.x' ? sx : sy;
@@ -887,7 +889,7 @@ export function applyScaleAsBase(p: Project, bodyId: string, atMs: number): bool
     const lx = (dx * Math.cos(r) - dy * Math.sin(r)) / (parent.kx || 1), ly = (dx * Math.sin(r) + dy * Math.cos(r)) / (parent.ky || 1);
     const fo = body.surface.flatOffset ?? { x: 0, y: 0 };
     body.surface.flatOffset = { x: round(fo.x + lx), y: round(fo.y + ly) };
-    for (const tl of p.timelines) {
+    for (const tl of [activeTimeline(p)]) {
       for (const t of tl.tracks) {
         if (t.nodeId !== bodyId || (t.property !== 'flatOffset.x' && t.property !== 'flatOffset.y')) continue;
         const d = t.property === 'flatOffset.x' ? lx : ly;
@@ -1007,7 +1009,18 @@ export function showLayerIn(p: Project, id: string, where: 'here' | 'everywhere'
   if (!n) return;
   if (where === 'here') { ownLayer(p, id); return; }
   n.ranged = false;
+  const here = activeTimeline(p);
+  if (here.appearances) here.appearances = here.appearances.filter((a) => a.nodeId !== id || !!a.blockId || a.startMs !== undefined || a.endMs !== undefined);
+  // every other state has its own layers: it gets its own copy, with its parts, where it has none
+  const family = [id, ...descendants(p.rig, id)];
   for (const tl of p.timelines) {
-    if (tl.appearances) tl.appearances = tl.appearances.filter((a) => a.nodeId !== id || !!a.blockId || a.startMs !== undefined || a.endMs !== undefined);
+    if (tl === here) continue;
+    const rig = (tl.rig ??= emptyRig(p.rig));
+    if (rig.nodes[id]) continue;
+    for (const f of family) rig.nodes[f] = structuredClone({ ...p.rig.nodes[f], ranged: false });
+    // parented to something that state lacks: it stands in the world there instead
+    const copy: RigNode = rig.nodes[id]!;
+    if (copy.parentId && !rig.nodes[copy.parentId]) copy.parentId = null;
+    if (!rig.nodes[rig.rootId]) rig.rootId = Object.values(rig.nodes).find((x) => x.kind === 'body')?.id ?? rig.rootId;
   }
 }

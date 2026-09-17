@@ -1100,7 +1100,8 @@ function outlineItem(d: string): { cx: number; cy: number; w: number; h: number;
  * layer's frame, keyed by id (and the world's under WORLD).
  */
 export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerFrame>): SceneItem[] {
-  if (!rig.nodes[rig.rootId]) return [];
+  // a timeline can hold shapes and text with no mascot at all — only a truly empty one draws nothing
+  if (!Object.keys(rig.nodes).length) return [];
   const out: SceneItem[] = [];
   // every outline's placement this frame, drawn or not — what text on a path reads
   const placed = new Map<string, Placement>();

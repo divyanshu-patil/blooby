@@ -29,7 +29,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 interface Migration {
   /** the version this step produces */
@@ -263,6 +263,20 @@ const MIGRATIONS: Migration[] = [
       const have = new Set(p.presets.map((x) => x?.id));
       const lastApp = Math.max(-1, ...appPresets().map((t) => p.presets.findIndex((x) => x?.id === t.id)));
       p.presets.splice(lastApp + 1 || p.presets.length, 0, ...mascotKitPresets().filter((x) => !have.has(x.id)));
+    },
+  },
+  {
+    to: 11,
+    label: 'each timeline keeps its own layers',
+    /**
+     * Rigs became per-timeline. Every inactive timeline gets its own copy of the one shared rig,
+     * so an older project opens looking exactly as it did — it just stops leaking edits between
+     * states from here on. The active timeline's rig stays `p.rig`.
+     */
+    run(p) {
+      if (!p.rig || !Array.isArray(p.timelines)) return;
+      const active = p.timelines.find((t) => t?.id === p.activeTimelineId) ?? p.timelines[0];
+      for (const tl of p.timelines) if (tl && tl !== active && !tl.rig) tl.rig = structuredClone(p.rig);
     },
   },
 ];

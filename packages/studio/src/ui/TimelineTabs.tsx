@@ -2,15 +2,16 @@ import { useState } from 'react';
 import { useEditor } from '../core/store';
 
 /**
- * Switches between a project's independent animation sequences — same rig, different
- * motion. Each one becomes its own state in the exported `.lottie`. Distinct from the
- * Gallery (separate projects, separate rigs) — this is *within* one project.
+ * Switches between a project's independent animation sequences. Each keeps its own layers and
+ * motion — editing one never changes another — and each becomes its own state in the exported
+ * `.lottie`. + makes a blank one; ⧉ copies a timeline, layers and all.
  */
 export function TimelineTabs() {
   const project = useEditor((s) => s.project);
   const addTimeline = useEditor((s) => s.addTimeline);
   const renameTimeline = useEditor((s) => s.renameTimeline);
   const deleteTimeline = useEditor((s) => s.deleteTimeline);
+  const duplicateTimeline = useEditor((s) => s.duplicateTimeline);
   const setActiveTimeline = useEditor((s) => s.setActiveTimeline);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -38,13 +39,16 @@ export function TimelineTabs() {
           ) : (
             <span title="Double-click to rename">{tl.name}</span>
           )}
+          <button className="tl-tab-x" title="Duplicate this timeline — its layers and animation"
+            aria-label={`Duplicate ${tl.name}`}
+            onClick={(e) => { e.stopPropagation(); duplicateTimeline(tl.id); }}>⧉</button>
           {project.timelines.length > 1 && (
             <button className="tl-tab-x" title="Delete this timeline"
               onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${tl.name}"?`)) deleteTimeline(tl.id); }}>✕</button>
           )}
         </div>
       ))}
-      <button className="tl-tab-add" data-tour="timeline-add" title="Add a new timeline (a new state for export)" onClick={() => addTimeline()}>+</button>
+      <button className="tl-tab-add" data-tour="timeline-add" title="A new, blank timeline (a new state for export). ⧉ on a tab copies one instead." onClick={() => addTimeline()}>+</button>
     </div>
   );
 }

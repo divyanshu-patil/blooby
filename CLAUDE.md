@@ -36,7 +36,7 @@ Everything else reads a `Project`.
 | Concept | Type | Note |
 |---|---|---|
 | the character | `Rig` / `RigNode` | features are placed by **angle** on a sphere, not pixels |
-| one animation | `Timeline` | a project has several; each is one **state** |
+| one animation | `Timeline` | a project has several; each is one **state**, with its **own layers** (`tl.rig`; the active one is `Project.rig`) — see AGENT_MAP |
 | a placed preset | `Block` | clip on the strip |
 | a freeform object | `RigNode` (`primitive` / `svgLayer` / `limb` / `group`) | `parentId: null` = world, child of the body = attached |
 | a mascot | a `body` `RigNode` + parts with a `role` (`face` is a group holding the eyes and hands) | several per project; `rig.rootId` is the first, and keeps the legacy ids |

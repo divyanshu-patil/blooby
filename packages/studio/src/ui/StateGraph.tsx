@@ -4,7 +4,7 @@ import { conditionText, defaultValues, machineOf, nextTransition } from '../core
 import { sceneAt, type SceneItem } from '../core/scene';
 import { compOf } from '../core/comp';
 import { MascotThumb } from './Mascot';
-import { ANY_STATE, type SmTransition, type Vec2 } from '../core/types';
+import { ANY_STATE, asTimeline, type SmTransition, type Vec2 } from '../core/types';
 
 /**
  * The machine as a node editor: states as nodes, rules and transitions as wires.
@@ -54,7 +54,7 @@ export function StateGraph({ selectedId, onSelect }: { selectedId: string | null
 
   // a small still of each state, at the middle of its own timeline
   const thumbs = useMemo(() => new Map<string, SceneItem[]>(states.map((tl) => {
-    const p = { ...project, activeTimelineId: tl.id };
+    const p = asTimeline(project, tl.id);
     try { return [tl.id, sceneAt(p, tl.timelineDurationMs / 2, compOf(p))]; } catch { return [tl.id, []]; }
   })), [project, states]);
 

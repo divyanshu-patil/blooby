@@ -681,6 +681,14 @@ export interface Transition {
 export interface Timeline {
   id: string;
   name: string;
+  /**
+   * This state's own layers, while it is NOT the active one. Every timeline keeps its own rig —
+   * its own mascots, shapes and their base values — so editing one state never changes another.
+   * The active timeline's rig is `Project.rig` (what every editor action reads and writes);
+   * switching parks it here and brings the other one out: `switchTimeline`. Read another
+   * timeline's through `rigOf` / `asTimeline`, never `Project.rig` directly.
+   */
+  rig?: Rig;
   tracks: Track[];
   modifiers: Modifier[];
   /** optional, so every project saved before emitters existed loads with no migration */
@@ -850,4 +858,35 @@ export const CAMERA_ID = '__camera';
 /** The one timeline every editor action and every renderer actually reads/writes. */
 export function activeTimeline(p: Project): Timeline {
   return p.timelines.find((t) => t.id === p.activeTimelineId) ?? p.timelines[0];
+}
+
+/** A rig with nothing on it — what a new timeline starts as. `rootId` is filled by the first mascot added. */
+export const emptyRig = (like: Rig): Rig => ({ ...like, id: like.id, nodes: {}, rootId: '', camera: structuredClone(like.camera) });
+
+/** The rig `tl` plays on: the live `p.rig` when it is active, its own otherwise. */
+export function rigOf(p: Project, tl: Timeline): Rig {
+  return tl.id === activeTimeline(p).id ? p.rig : tl.rig ?? p.rig;
+}
+
+/** `p` as if timeline `id` were active, with that timeline's own rig — for drawing or exporting another state. */
+export function asTimeline(p: Project, id: string): Project {
+  const tl = p.timelines.find((t) => t.id === id);
+  if (!tl || tl.id === activeTimeline(p).id) return p;
+  return { ...p, activeTimelineId: id, rig: rigOf(p, tl) };
+}
+
+/**
+ * Make timeline `id` the active one, in place: the current rig is parked on the timeline being
+ * left, and the incoming timeline's own rig becomes `p.rig`. The only way the active timeline
+ * should change, so layers never leak from one state into another.
+ */
+export function switchTimeline(p: Project, id: string): boolean {
+  const from = activeTimeline(p), to = p.timelines.find((t) => t.id === id);
+  if (!to) return false;
+  if (to.id === from.id) return true;
+  if (p.timelines.includes(from)) from.rig = p.rig;
+  p.rig = to.rig ?? emptyRig(p.rig);
+  delete to.rig;
+  p.activeTimelineId = to.id;
+  return true;
 }

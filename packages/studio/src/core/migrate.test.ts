@@ -50,7 +50,7 @@ const v1Timelines = () => JSON.parse(JSON.stringify({
 {
   const { project, from, applied } = migrateProject(v0Flat());
   it('an unversioned document is recognised as v0', check(from === 0, String(from)));
-  it('and every step runs on it', check(applied.length === 10, applied.join(', ')));
+  it('and every step runs on it', check(applied.length === 11, applied.join(', ')));
   it('it comes out stamped at the current version', check(project.schemaVersion === SCHEMA_VERSION));
 
   it('the flat animation became exactly one timeline', check(project.timelines.length === 1));
@@ -115,7 +115,7 @@ const v2Sticker = () => JSON.parse(JSON.stringify({
 })) as unknown as Project;
 {
   const { project, from, applied } = migrateProject(v2Sticker());
-  it('a v2 document runs only the steps after it', check(from === 2 && applied.join() === 'freeform layers,showcase presets,several mascots,mascot and text presets,faces,app screen presets,cinematic presets,app mascot kit', applied.join()));
+  it('a v2 document runs only the steps after it', check(from === 2 && applied.join() === 'freeform layers,showcase presets,several mascots,mascot and text presets,faces,app screen presets,cinematic presets,app mascot kit,each timeline keeps its own layers', applied.join()));
   it('its composition is pinned at the size it always rendered at', check(project.composition?.width === 720 && project.composition?.height === 720));
   it('a never-drawn offset on a mapped layer is dropped', check(project.rig.nodes.dot.surface.flatOffset === undefined));
   it('and so is its track', check(!project.timelines[0].tracks.some((t) => t.nodeId === 'dot')));
@@ -136,7 +136,7 @@ const v3Library = () => JSON.parse(JSON.stringify({
 {
   const { project, applied } = migrateProject(v3Library());
   const ids = project.presets.map((x) => x.id);
-  it('a v3 document runs only the steps after it', check(applied.join() === 'showcase presets,several mascots,mascot and text presets,faces,app screen presets,cinematic presets,app mascot kit', applied.join()));
+  it('a v3 document runs only the steps after it', check(applied.join() === 'showcase presets,several mascots,mascot and text presets,faces,app screen presets,cinematic presets,app mascot kit,each timeline keeps its own layers', applied.join()));
   it('the showcase presets it lacked are added, first in the library', check(
     ids.slice(0, 6).join() === 'p_shapeshift,p_sticker,p_peek,p_newshape,p_dance,p_reveal', ids.join()));
   it('one it already had is kept as it was, not doubled', check(
@@ -171,7 +171,7 @@ const v4Hidden = (visible: boolean) => JSON.parse(JSON.stringify({
 })) as unknown as Project;
 {
   const hidden = migrateProject(v4Hidden(false));
-  it('a v4 document runs only the steps after it', check(hidden.applied.join() === 'several mascots,mascot and text presets,faces,app screen presets,cinematic presets,app mascot kit', hidden.applied.join()));
+  it('a v4 document runs only the steps after it', check(hidden.applied.join() === 'several mascots,mascot and text presets,faces,app screen presets,cinematic presets,app mascot kit,each timeline keeps its own layers', hidden.applied.join()));
   const b = hidden.project.rig.nodes.body;
   it('a hidden body becomes an unpainted one, so its eyes still show', check(b.visible === true && b.fill?.enabled === false && b.stroke?.enabled === false));
   const shown = migrateProject(v4Hidden(true)).project.rig.nodes.body;
@@ -263,4 +263,16 @@ const v4Hidden = (visible: boolean) => JSON.parse(JSON.stringify({
     try { survives(seed); return false; } catch { return true; }
   });
   it('no single missing top-level field breaks opening a project', check(!broke.length, broke.join(', ')));
+}
+
+// --- v10 → 11: each timeline keeps its own layers --------------------------------------
+{
+  const p = defaultProject();
+  const idle = p.timelines[0];
+  p.timelines.push({ ...structuredClone(idle), id: 'tl_other', name: 'Other' });
+  p.schemaVersion = 10;
+  const { project } = migrateProject(p);
+  const other = project.timelines.find((t) => t.id === 'tl_other')!;
+  it('an older project gives every inactive timeline its own copy of the shared layers', check(!!other.rig && Object.keys(other.rig.nodes).join() === Object.keys(project.rig.nodes).join() && other.rig !== project.rig));
+  it('and the active timeline keeps the live rig', check(!project.timelines[0].rig));
 }

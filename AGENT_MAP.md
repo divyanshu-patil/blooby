@@ -36,8 +36,9 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
   children share one filter group). Lottie: `bm`, trim `o`; the rest → `bakeLottie().warnings`.
 - 2.5D: `depthFrame(z)` = 1000/(1000+z) on world layers; rotateX/Y cos-narrow; on a body they
   add to yaw/pitch. Camera `zoom`; modifiers with nodeId `CAMERA_ID` move the camera.
-- Modifiers `walk` (planted feet, `holdUntilMs`), `follow` (spring over past samples), `jelly`
-  (outline from vertical velocity). `past` sampler = resolved timeline cache.
+- Modifiers `walk` (planted feet, `holdUntilMs`, two-bone `knee` IK, `footFacing`), `follow` (spring over past samples), `jelly`
+  (outline from vertical velocity). `past` sampler = resolved timeline cache + `modifierMotion` (float/shake/pendulum/walk
+  displacement), so drivers feel modifier motion too. Per-kind defaults: `MODIFIERS[k].defaults`.
 - Emitters `path:'burst'`: closed-form physics in `emitterItems`; `attract` onto an outline or
   text glyphs (hidden target rebuilt); `emitterPathAt` shared with TrajectoryHandles. Glyphless
   particles draw as dots; `emitterFrame` unit ignores a mascot scaled below 0.1.
@@ -62,10 +63,17 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
 - Undo: `commit(fn,label)` clones project; same label within 700ms coalesces.
 
 ## Layers / ownership
-- Rig nodes are PROJECT-GLOBAL; timelines own tracks/modifiers/emitters/appearances.
+- Every timeline has its OWN rig. `p.rig` is the ACTIVE timeline's (every editor action reads/writes it);
+  inactive ones keep theirs in `tl.rig`. Change the active timeline only through `switchTimeline(p,id)`
+  (types.ts — parks/unparks rigs). Draw/export another state with `asTimeline(p,id)` / `rigOf(p,tl)`, never
+  `{...p, activeTimelineId}` (that would pair its tracks with the wrong layers). New timeline = empty rig
+  (`emptyRig`, rootId '' until `addMascot`); `addTimeline(name,{copyLayers})`, `duplicateTimeline`.
+  Copilot `add_timeline` copies layers unless `copyLayers:false`. Migration 11 gave old timelines copies.
+- Layer ops in layers.ts touch only the active timeline's tracks; `showLayerIn(...,'everywhere')` copies
+  the layer into every other timeline's rig.
 - Visibility per timeline: `appearanceAt(tl,node,t)` — no entry → visible unless `node.ranged`.
 - `core/layers.ts` = every layer op (store + copilot both call it). `removeLayer` cleans
-  tracks/appearances/links in every timeline.
+  tracks/appearances/links in the active timeline (the others have their own layers).
 - NEW layers are owned by the active state: `ownLayer()` (store.addLayer + copilot add_*)
   sets `ranged` + a whole-timeline appearance. Mascots/faces are not owned (shared rig).
 - Mascot = `body` node + parts with `role`. Roles: body, face (group), eyeL/R (in face),

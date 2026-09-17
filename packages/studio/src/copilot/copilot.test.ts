@@ -534,7 +534,7 @@ import { activeTimeline } from '../core/types';
   const staged = normaliseCall(P(), mk);
   it('set_shape validates', check(validate(P(), staged) === null, String(validate(P(), staged))));
   it('a shape nobody has is refused', check(validate(P(), { name: 'set_shape', args: { nodeId: 'eyeL', shape: 'trapezoid' } }) !== null));
-  ed().addTimeline('CopilotShapes');
+  ed().addTimeline('CopilotShapes', { copyLayers: true });
   applyCalls([{ name: 'set_shape', args: { nodeId: 'eyeL', shape: 'pill', atMs: 0 } },
               { name: 'set_shape', args: { nodeId: 'eyeL', shape: 'star', points: 5, atMs: 600 } }]);
   const pathAt = (t: number) => buildScene(evaluateRig(P(), t), { width: 720, height: 720 }).find((i) => i.id === 'eyeL')?.path;
