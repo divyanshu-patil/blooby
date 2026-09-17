@@ -252,7 +252,10 @@ function followThrough(rig: Rig, node: RigNode, m: Modifier, tSec: number, past:
   const host = mascotOfRig(rig, node.parentId ?? '') ?? (node.parentId ? rig.nodes[node.parentId] : undefined);
   if (!host) return;
   const w = 2 * Math.PI * Math.max(0.2, m.frequency), zeta = 0.22, h = 1 / (Math.max(0.2, m.frequency) * 12);
-  const gain = (m.amount / 100) * (m.amplitude / 100);
+  // A true spring only lags while its host accelerates, by about a/ω² — a 40px hop moved a face
+  // 2px, which read as nothing. Cartoon follow-through exaggerates: the lag is scaled back up by
+  // the spring's stiffness, so a stiffer spring snaps back faster without swinging less.
+  const gain = (m.amount / 100) * (m.amplitude / 100) * Math.max(1, Math.max(0.2, m.frequency) ** 2 * 1.2);
   let dx = 0, dy = 0, dr = 0;
   const at = (k: number, path: string) => past(host.id, path, tSec - k * h);
   for (let k = 1; k <= 36; k++) {
@@ -262,6 +265,9 @@ function followThrough(rig: Rig, node: RigNode, m: Modifier, tSec: number, past:
     dy -= (at(k - 1, 'flatOffset.y') - at(k, 'flatOffset.y')) * ring;
     dr -= (at(k - 1, 'transform.rotation') - at(k, 'transform.rotation')) * ring;
   }
+  // never flung off: the swing is capped
+  const cap = (v: number, c: number) => Math.max(-c, Math.min(c, v));
+  dx = cap(dx * gain, 90) / (gain || 1); dy = cap(dy * gain, 90) / (gain || 1); dr = cap(dr * gain, 40) / (gain || 1);
   if (node.limb) {
     const l = node.limb;
     const end = l.c ?? l.b;
@@ -311,7 +317,7 @@ function jellyBody(node: RigNode, m: Modifier, tSec: number, past: Past) {
 }
 
 /** The modifiers that move a layer bodily — what a motion-driven driver can feel. Never follow or jelly themselves. */
-const MOVERS = new Set<Modifier['kind']>(['float', 'shake', 'pendulum', 'walk']);
+const MOVERS = new Set<Modifier['kind']>(['float', 'shake', 'pendulum', 'walk', 'bounce', 'orbit']);
 const MOTION_PATHS = new Set(['flatOffset.x', 'flatOffset.y', 'transform.rotation']);
 
 /**
@@ -388,6 +394,39 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number, past?: Past, absSec 
   if (m.kind === 'pendulum') {
     const s = Math.sin(2 * Math.PI * m.frequency * tSec + (m.phase ?? 0)) * gain;
     bump(PENDULUM_AXIS[m.axis ?? 'rotation'], s);
+    return;
+  }
+  // a hop: a parabola up and back, the squash landing on contact and a little stretch on the way up
+  if (m.kind === 'bounce') {
+    const u = frac(m.frequency * tSec + (m.phase ?? 0) / (2 * Math.PI));
+    const air = 4 * u * (1 - u);
+    if (isRoot) bump('flatOffset.y', -air * gain); else bump('surface.pitch', -air * gain * 0.3);
+    const land = Math.exp(-((Math.min(u, 1 - u) / 0.07) ** 2)) * (m.amount / 100);
+    const rise = Math.sin(Math.PI * Math.min(1, u / 0.45)) * (u < 0.45 ? 1 : 0) * (m.amount / 100);
+    const sx = 1 + 0.14 * land - 0.05 * rise, sy = 1 - 0.14 * land + 0.07 * rise;
+    node.squish = { x: (node.squish?.x ?? 1) * sx, y: (node.squish?.y ?? 1) * sy };
+    return;
+  }
+  // an inhale: taller, a touch narrower — squish, so an anchor at the feet keeps it standing
+  if (m.kind === 'breathe') {
+    const s = (1 - Math.cos(2 * Math.PI * m.frequency * tSec + (m.phase ?? 0))) / 2 * (gain / 100);
+    node.squish = { x: (node.squish?.x ?? 1) * (1 - s * 0.4), y: (node.squish?.y ?? 1) * (1 + s) };
+    return;
+  }
+  // round a small ellipse, tilting with it
+  if (m.kind === 'orbit') {
+    const a = 2 * Math.PI * m.frequency * tSec + (m.phase ?? 0);
+    if (isRoot) { bump('flatOffset.x', Math.cos(a) * gain); bump('flatOffset.y', Math.sin(a) * gain * 0.55); }
+    else { bump('surface.yaw', Math.cos(a) * gain * 0.4); bump('surface.pitch', Math.sin(a) * gain * 0.25); }
+    bump('transform.rotation', -Math.sin(a) * gain * 0.12);
+    return;
+  }
+  // lub-dub: two quick swells a beat, the second smaller, then a rest
+  if (m.kind === 'heartbeat') {
+    const u = frac(m.frequency * tSec + (m.phase ?? 0) / (2 * Math.PI));
+    const pulse = (c: number, w: number) => Math.exp(-(((u - c) / w) ** 2));
+    const s = 1 + (gain / 100) * (pulse(0.1, 0.045) + 0.65 * pulse(0.3, 0.05));
+    node.transform.scale = { x: node.transform.scale.x * s, y: node.transform.scale.y * s };
     return;
   }
   if (m.kind === 'shake') {
@@ -673,7 +712,7 @@ export function appearanceSpans(tl: Timeline, nodeId: string): { entry: Appearan
  */
 const SETTLE_MS = 350;
 function settleOf(tl: Timeline, m: Modifier, local: number): number {
-  if (m.kind !== 'shake' && m.kind !== 'float' && m.kind !== 'stretch' && m.kind !== 'pendulum') return 1;
+  if (m.kind === 'walk' || m.kind === 'follow' || m.kind === 'jelly') return 1;
   // a clip alone on its timeline loops into itself, so its edges are not edges
   const clip = m.blockId && tl.blocks.length > 1 ? blockWindow(tl, m.blockId) : null;
   const scopeEnd = m.endMs ?? (clip ? clip[1] - clip[0] : undefined);
@@ -1000,9 +1039,9 @@ export function pinned(input: HoseInput, l: LimbRig, world: LayerFrame): HoseInp
 }
 
 /** Effects the renderer draws; flicker, jitter and echo are evaluated into the scene itself. */
-const DRAWN_EFFECTS = new Set(['glow', 'blur', 'shadow', 'rgbSplit', 'slices', 'scanlines']);
+const DRAWN_EFFECTS = new Set(['glow', 'blur', 'shadow', 'rgbSplit', 'slices', 'scanlines', 'outline', 'grain', 'hueShift']);
 /** the ones a layer hands to its children: a glow or a shadow belongs to the one outline, a tear to the whole thing */
-const INHERITED_EFFECTS = new Set(['rgbSplit', 'slices', 'scanlines', 'blur']);
+const INHERITED_EFFECTS = new Set(['rgbSplit', 'slices', 'scanlines', 'blur', 'grain', 'hueShift']);
 
 /** The key `buildScene` files the world frame under — the parent of every WORLD layer. */
 export const WORLD = '';
@@ -1135,6 +1174,16 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
   };
   /** a layer's outline boiling: every anchor nudged by noise that changes `rate` times a second */
   const boil = (node: RigNode, d: string, w: number, h: number) => {
+    const wv = effectOf(node, 'wave');
+    if (wv && wv.params.amount > 0) {
+      // a wave travelling along the outline: up/down with x, a little side to side with y
+      const ph = (clock / 1000) * (wv.params.speed ?? 1), k = wv.params.waves ?? 2;
+      const ax = wv.params.amount / Math.max(1, Math.abs(w)), ay = wv.params.amount / Math.max(1, Math.abs(h));
+      d = mapPath(d, (q) => ({
+        x: q.x + Math.sin(2 * Math.PI * (q.y * k + ph + 0.25)) * ax * 0.5,
+        y: q.y + Math.sin(2 * Math.PI * (q.x * k + ph)) * ay,
+      }));
+    }
     const j = effectOf(node, 'jitter');
     if (!j || !(j.params.amount > 0)) return d;
     const step = Math.floor((clock / 1000) * (j.params.rate ?? 8)), seed = j.params.seed ?? 1;
@@ -1199,7 +1248,7 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
         r: Math.min(rx, ry) * limb * seen, rotation: roll,
         ...paintOf(node, seen * alpha),
         depth: -2, zIndex: node.zIndex,
-        ...(node.shapePath || effectOf(node, 'jitter') ? { path: boil(node, node.shapePath ?? CIRCLE, rx * 2, ry * 2) } : {}),
+        ...(node.shapePath || effectOf(node, 'jitter') || effectOf(node, 'wave') ? { path: boil(node, node.shapePath ?? CIRCLE, rx * 2, ry * 2) } : {}),
         ...drawn(node, f),
         ...(goo ? { goo } : {}),
       });
@@ -1288,7 +1337,7 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
           const shape = node.primitive?.shape === 'circle' ? 'ellipse' : 'pill';
           out.push({
             ...base, shape, cx: ax, cy: ay, w, h, r: Math.min(w, h) / 2, rotation: rot,
-            ...(node.shapePath || effectOf(node, 'jitter') ? { path: boil(node, node.shapePath ?? (shape === 'ellipse' ? CIRCLE : PILL), w, h) } : {}),
+            ...(node.shapePath || effectOf(node, 'jitter') || effectOf(node, 'wave') ? { path: boil(node, node.shapePath ?? (shape === 'ellipse' ? CIRCLE : PILL), w, h) } : {}),
             ...(node.shapePath && node.trim && (node.trim.start > 0 || node.trim.end < 1 || node.trim.offset) ? { trim: { ...node.trim } } : {}),
             ...(node.stroke?.taper ? { taper: node.stroke.taper } : {}),
           });

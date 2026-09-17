@@ -191,6 +191,16 @@ function withEffects(s: SceneItem, uid: string, guides: boolean): ReactNode {
   const list = s.fx?.list ?? [];
   const clock = s.fx?.clock ?? 0;
 
+  // a sticker outline: the same drawing in the ink colour with a fat round stroke, behind it
+  const outline = list.find((e) => e.kind === 'outline');
+  if (outline && param(outline, 'width', 6) > 0.01) {
+    const ink = { ...(outline.color ?? { r: 20, g: 19, b: 24, a: 1 }), a: 1 };
+    const width = (s.stroke?.width ?? 0) + param(outline, 'width', 6) * 2;
+    // an unfilled line (a drawn curve) outlines its stroke only, never fills in its inside
+    const back = drawItem({ ...s, gradient: undefined, stroke: { color: ink, width, cap: 'round', join: 'round' } }, s.color.a < 0.01 && !s.gradient ? 'none' : cssColor(ink), false);
+    node = <g><g opacity={param(outline, 'opacity', 1)}>{back}</g>{node}</g>;
+  }
+
   const chain = list.filter((e) => e.kind === 'blur' || e.kind === 'glow' || e.kind === 'shadow');
   if (chain.length) {
     const prims: ReactNode[] = [];
@@ -267,6 +277,33 @@ function withEffects(s: SceneItem, uid: string, guides: boolean): ReactNode {
         <rect x={s.cx - r} y={s.cy - r} width={2 * r} height={2 * r} fill={`url(#${id}-p)`} opacity={param(lines, 'opacity', 0.3)} mask={`url(#${id}-m)`} />
       </g>
     );
+  }
+
+  // film grain: fractal noise, reseeded `rate` times a second, overlaid inside the layer's own shape
+  const grain = list.find((e) => e.kind === 'grain');
+  if (grain && param(grain, 'amount', 0.35) > 0.005) {
+    const amt = Math.min(1, param(grain, 'amount', 0.35));
+    const seed = Math.floor((clock / 1000) * param(grain, 'rate', 12));
+    defs.push(
+      <filter key="n" id={`${id}-n`} x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency={0.9 / Math.max(0.2, param(grain, 'size', 1))} numOctaves={2} seed={seed} result="noise" />
+        <feColorMatrix in="noise" type="saturate" values="0" result="grey" />
+        <feBlend in="grey" in2="SourceGraphic" mode="overlay" result="grained" />
+        <feComposite in="grained" in2="SourceGraphic" operator="arithmetic" k1={0} k2={amt} k3={1 - amt} k4={0} result="mixed" />
+        <feComposite in="mixed" in2="SourceAlpha" operator="in" />
+      </filter>,
+    );
+    node = <g filter={`url(#${id}-n)`}>{node}</g>;
+  }
+
+  // every colour turned round the wheel, by the clock
+  const hue = list.find((e) => e.kind === 'hueShift');
+  if (hue) {
+    const deg = ((param(hue, 'offset', 0) + (clock / 1000) * param(hue, 'speed', 0.25) * 360) % 360 + 360) % 360;
+    if (deg > 0.01) {
+      defs.push(<filter key="h" id={`${id}-h`}><feColorMatrix type="hueRotate" values={String(deg)} /></filter>);
+      node = <g filter={`url(#${id}-h)`}>{node}</g>;
+    }
   }
 
   const style = s.blend && BLEND[s.blend] ? { mixBlendMode: BLEND[s.blend] as React.CSSProperties['mixBlendMode'] } : undefined;

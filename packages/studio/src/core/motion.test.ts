@@ -7,7 +7,7 @@ import { compOf } from './comp';
 import { buildScene, emitterFrame, emitterPathAt, evaluateRig, sceneAt, sceneFrames, valueAt } from './scene';
 import { makeCurveLayer, makeLimbPair, makeShapeLayer, makeTextLayer, pinLimbPoint } from './layers';
 import { applyEasing } from './easing';
-import { makeEffect } from './effects';
+import { EFFECTS, makeEffect } from './effects';
 import { useEditor } from './store';
 import { bakeLottie } from '../export/lottie';
 import { Shapes } from '../ui/Mascot';
@@ -306,4 +306,68 @@ const html = (p: Project, t = 0) => renderToStaticMarkup(createElement('svg', nu
   it('and undo takes them off', check(!useEditor.getState().project.rig.nodes.body.effects));
   const scene1 = JSON.stringify(buildScene(evaluateRig(json, 1234), compOf(json)));
   it('the same project and time always evaluate to the same scene', check(scene1 === JSON.stringify(buildScene(evaluateRig(json, 1234), compOf(json)))));
+}
+
+// --- new modifiers: bounce, breathe, orbit, heartbeat -------------------------------------------
+{
+  const withMod = (kind: 'bounce' | 'breathe' | 'orbit' | 'heartbeat') => {
+    const p = bare();
+    activeTimeline(p).modifiers = [{ id: kind, nodeId: 'body', kind, ...MODIFIERS[kind].defaults }];
+    return p;
+  };
+  const b = withMod('bounce');
+  const bodyY = (p: Project, t: number) => sceneFrames(evaluateRig(p, t), compOf(p)).get('body')!.y;
+  // 1.2 hops a second: contact at 0, top of the hop at ~417ms
+  it('bounce lifts the mascot mid-hop and lands it again', check(bodyY(b, 417) < bodyY(b, 0) - 30 && near(bodyY(b, 833), bodyY(b, 0), 1)));
+  const landing = evaluateRig(b, 833).nodes.body.squish!;
+  it('and squashes on the landing', check(landing.x > 1.08 && landing.y < 0.92, JSON.stringify(landing)));
+
+  const br = withMod('breathe');
+  const inhale = evaluateRig(br, 2000).nodes.body.squish!; // half a 0.25 Hz breath: fullest
+  it('breathe draws in: taller and a little narrower', check(inhale.y > 1.04 && inhale.x < 1 && inhale.x > 0.97, JSON.stringify(inhale)));
+  it('and is back at rest after a whole breath', check(near(evaluateRig(br, 4000).nodes.body.squish?.y ?? 1, 1, 1e-6)));
+
+  const o = withMod('orbit');
+  const at = (t: number) => { const f = sceneFrames(evaluateRig(o, t), compOf(o)).get('body')!; return { x: f.x, y: f.y }; };
+  const q0 = at(0), q1 = at(833), q2 = at(1667); // quarter turns at 0.3 Hz
+  it('orbit drifts round an ellipse, wider than tall', check(Math.abs(q0.x - q2.x) > 20 && Math.abs(q1.y - at(2500).y) > 10 && Math.abs(q0.x - q2.x) > Math.abs(q1.y - at(2500).y)));
+
+  const h = withMod('heartbeat');
+  const scaleAt = (t: number) => evaluateRig(h, t).nodes.body.transform.scale.x;
+  const beat = 1000 / 1.1;
+  it('heartbeat swells twice a beat, the second smaller, then rests', check(scaleAt(beat * 0.1) > 1.08 && scaleAt(beat * 0.3) > 1.04 && scaleAt(beat * 0.3) < scaleAt(beat * 0.1) && near(scaleAt(beat * 0.7), 1, 0.01)));
+
+  // a moving modifier is felt by follow-through, like a keyframed move
+  it('bounce and orbit count as motion for follow-through and jelly', check(['bounce', 'orbit'].every((k) => {
+    const p = withMod(k as 'bounce');
+    const faceRel = (t: number) => { const f = sceneFrames(evaluateRig(p, t), compOf(p)); return f.get('face')!.y - f.get('body')!.y; };
+    const before = [300, 450, 600].map(faceRel);
+    activeTimeline(p).modifiers.push({ id: 'f', nodeId: 'face', kind: 'follow', ...MODIFIERS.follow.defaults });
+    return [300, 450, 600].some((t, i) => Math.abs(faceRel(t) - before[i]) > 1);
+  })));
+}
+
+// --- new effects: wave, outline, grain, hue shift ------------------------------------------------
+{
+  const p = bare();
+  const body = p.rig.nodes.body;
+  body.effects = [makeEffect('wave')];
+  const d0 = item(p, 'body', 0)!.path, d1 = item(p, 'body', 250)!.path;
+  it('wave ripples the outline, and the ripple travels', check(!!d0 && !!d1 && d0 !== d1));
+  it('wave is geometry, so it survives the Lottie export', check(EFFECTS.wave.lottie));
+
+  body.effects = [makeEffect('outline')];
+  const outlined = html(p);
+  it('outline draws a fat ink stroke behind the layer', check(/stroke-width="1[2-9]/.test(outlined) || /stroke-width="[2-9]\d/.test(outlined), outlined.slice(0, 400)));
+
+  body.effects = [makeEffect('grain')];
+  const a = html(p, 0), b2 = html(p, 400);
+  it('grain overlays fractal noise that reseeds over time', check(a.includes('feTurbulence') && a !== b2));
+
+  body.effects = [makeEffect('hueShift')];
+  it('hue shift turns the colours with the clock', check(html(p, 1000).includes('hueRotate') && html(p, 1000) !== html(p, 2000)));
+  it('the eyes are handed grain and hue shift from the body they sit on', check((() => {
+    body.effects = [makeEffect('hueShift')];
+    return (item(p, 'eyeL', 1000)?.fx?.list ?? []).some((e) => e.kind === 'hueShift');
+  })()));
 }

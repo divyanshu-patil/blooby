@@ -295,7 +295,7 @@ export interface RigNode {
 export type ShapeKind = 'circle' | 'pill' | 'rect' | 'polygon' | 'star' | 'pebble' | 'capsule' | 'roundedRect' | 'blob' | 'octopus';
 
 export type BlendMode = 'normal' | 'screen' | 'multiply' | 'overlay' | 'add' | 'difference';
-export type EffectKind = 'glow' | 'blur' | 'shadow' | 'rgbSplit' | 'slices' | 'scanlines' | 'flicker' | 'jitter' | 'echo' | 'goo';
+export type EffectKind = 'glow' | 'blur' | 'shadow' | 'rgbSplit' | 'slices' | 'scanlines' | 'flicker' | 'jitter' | 'echo' | 'goo' | 'wave' | 'outline' | 'grain' | 'hueShift';
 export interface LayerEffect {
   kind: EffectKind;
   enabled?: boolean;
@@ -382,6 +382,18 @@ export const MODIFIERS = {
   follow: { label: 'Follow-through', maxFrequency: 6, defaults: { amount: 100, frequency: 3, amplitude: 70, phase: 0 },
     blurb: 'Secondary motion: the layer lags behind its mascot and springs back past its rest — faces, hands, antennae.',
     help: 'Follow-through on a PART (the face, a hand, a hat): when its mascot moves, it lags and overshoots like it is on a spring. frequency is the spring (2-5 Hz, lower = floppier), amplitude the lag strength 20-100.' },
+  bounce: { label: 'Bounce', maxFrequency: 4, defaults: { amount: 100, frequency: 1.2, amplitude: 40, phase: 0 },
+    blurb: 'Hops on the spot: up, hang, down, and a squash on every landing — excitement, a tap target calling out.',
+    help: 'Hops the node on the spot \u2014 a parabola up and down with a squash on each landing. frequency hops per second (0.8-2), amplitude the hop height in px (15-80).' },
+  breathe: { label: 'Breathe', maxFrequency: 2, defaults: { amount: 100, frequency: 0.25, amplitude: 5, phase: 0 },
+    blurb: 'A slow inhale and exhale: taller and a touch narrower, then back — the quietest sign of life for an idle.',
+    help: 'Breathing: the node grows taller and slightly narrower on a slow sine and back (squish, so a feet anchor keeps it grounded). frequency 0.15-0.5 Hz, amplitude percent 2-10.' },
+  orbit: { label: 'Orbit', maxFrequency: 3, defaults: { amount: 100, frequency: 0.3, amplitude: 14, phase: 0 },
+    blurb: 'Drifts round a small ellipse with a gentle tilt — weightless, dreamy, underwater.',
+    help: 'Drifts the node around a small ellipse (wider than tall) with a slight tilt that follows it. frequency 0.15-0.8 Hz, amplitude radius px 5-40.' },
+  heartbeat: { label: 'Heartbeat', maxFrequency: 3, defaults: { amount: 100, frequency: 1.1, amplitude: 10, phase: 0 },
+    blurb: 'Lub-dub: two quick pulses in size, then a rest — love, a like, something alive and eager.',
+    help: 'Pulses the node\'s size twice per beat (lub-dub) then rests. frequency beats per second 0.8-2, amplitude percent 5-25.' },
   jelly: { label: 'Jelly', maxFrequency: 8, defaults: { amount: 100, frequency: 4, amplitude: 70, phase: 0 },
     blurb: 'Soft-body deformation: the outline stretches with speed, splats flat on impact and wobbles back.',
     help: 'Soft body on a MASCOT or shape: its OUTLINE deforms from its own vertical motion \u2014 stretched when moving fast, flattened and widened at the bottom when it lands (volume kept), then wobbles. amplitude 20-100 (strength), frequency 3-6 Hz (wobble).' },

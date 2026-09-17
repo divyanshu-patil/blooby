@@ -33,6 +33,14 @@ export const EFFECTS: Record<EffectKind, EffectSpec> = {
     params: { amount: [0, 30, 0.5, 'px', 3], rate: [1, 30, 1, 'fps', 8], seed: [0, 999, 1, '', 1] } },
   echo: { label: 'Echo', blurb: 'Fading copies of where the layer was — trails and motion blur.', lottie: true,
     params: { count: [1, 8, 1, '', 4], delay: [10, 300, 5, 'ms', 40], falloff: [0.1, 0.95, 0.05, '', 0.55] } },
+  wave: { label: 'Wave', blurb: 'The outline ripples, a wave travelling across it — flags, water, wobbly cartoon lines.', lottie: true,
+    params: { amount: [0, 30, 0.5, 'px', 4], waves: [0.5, 8, 0.5, '', 2], speed: [-4, 4, 0.1, 'Hz', 1] } },
+  outline: { label: 'Outline', blurb: 'A thick sticker outline behind the layer, in a colour — cartoon ink, die-cut stickers.', color: true, lottie: false,
+    params: { width: [0, 40, 0.5, 'px', 6], opacity: [0, 1, 0.01, '', 1] } },
+  grain: { label: 'Grain', blurb: 'Animated film grain over the layer — vintage, risograph, texture.', lottie: false,
+    params: { amount: [0, 1, 0.01, '', 0.35], size: [0.2, 4, 0.1, '', 1], rate: [0, 30, 1, 'fps', 12] } },
+  hueShift: { label: 'Hue shift', blurb: 'Every colour rotates round the colour wheel — rainbow, party, power-up.', lottie: false,
+    params: { speed: [-2, 2, 0.05, 'turns/s', 0.25], offset: [0, 360, 1, '°', 0] } },
   goo: { label: 'Goo', blurb: 'The layer and the shapes inside it melt together where they touch — liquid, metaballs.', lottie: false,
     params: { radius: [1, 40, 0.5, 'px', 12] } },
 };
@@ -45,7 +53,7 @@ export function makeEffect(kind: EffectKind): LayerEffect {
   return {
     kind,
     params: Object.fromEntries(Object.entries(spec.params).map(([k, p]) => [k, p[4]])),
-    ...(spec.color ? { color: kind === 'shadow' ? { r: 0, g: 0, b: 0, a: 1 } : { r: 140, g: 200, b: 255, a: 1 } } : {}),
+    ...(spec.color ? { color: kind === 'shadow' || kind === 'outline' ? { r: 20, g: 19, b: 24, a: 1 } : { r: 140, g: 200, b: 255, a: 1 } } : {}),
   };
 }
 
