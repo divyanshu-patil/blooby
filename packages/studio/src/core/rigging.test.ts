@@ -5,13 +5,13 @@ import { compOf } from './comp';
 import { buildScene, evaluateRig, sceneAt, sceneFrames, valueAt, WORLD } from './scene';
 import { applyPose } from './poses';
 import { limbPoints as limbPointsOf } from './limb';
-import { absentHere, applyScaleAsBase, moveInto, setRole, makeCurveLayer, makeLimb, makeLimbPair, makeShapeLayer, ownLayer, pinLimb, removeLayer, setFaceRole } from './layers';
+import { applyScaleAsBase, moveInto, setRole, makeCurveLayer, makeLimb, makeLimbPair, makeShapeLayer, ownLayer, pinLimb, removeLayer, setFaceRole } from './layers';
 import { faceOf, mascotOf } from './mascot';
 import { applyEyeAction, applySquish, SQUISH_PRESETS } from './squish';
 import { migrateProject } from './migrate';
 import { useEditor } from './store';
 import { applyEasing } from './easing';
-import { activeTimeline, type Project } from './types';
+import { activeTimeline, asTimeline, rigOf, type Project } from './types';
 
 const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), compOf(p)).find((s) => s.id === id);
 
@@ -186,20 +186,21 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
 {
   const ed = useEditor.getState();
   ed.loadProject(defaultProject());
-  ed.addTimeline('Happy');
+  ed.addTimeline('Happy', { copyLayers: true });
   const happy = useEditor.getState().project.activeTimelineId;
   ed.addLayer(makeLimb('arm', 1, 'body', { id: 'wave' }));
   ed.addLayer(makeShapeLayer('star', { id: 'star1' }));
   const p = useEditor.getState().project;
-  const shown = (id: string, tlId: string) => !!sceneAt({ ...p, activeTimelineId: tlId }, 100, compOf(p)).find((s) => s.id === id);
+  const shown = (id: string, tlId: string) => !!sceneAt(asTimeline(p, tlId), 100, compOf(p)).find((s) => s.id === id);
   const idle = p.timelines.find((t) => t.id !== happy)!.id;
   it('a hand made in Happy is on screen in Happy', check(shown('wave', happy)));
   it('and not in Idle', check(!shown('wave', idle)));
   it('same for a shape', check(shown('star1', happy) && !shown('star1', idle)));
-  it('it is one node, not a copy per state', check(Object.keys(p.rig.nodes).filter((k) => k === 'star1').length === 1));
-  const q = structuredClone(p);
-  q.rig.nodes.star1.ranged = false;
-  it('unticking "only in its ranges" shares it with every state', check(!!sceneAt({ ...q, activeTimelineId: idle }, 100, compOf(q)).find((s) => s.id === 'star1')));
+  it('Idle does not even hold it: its layers are its own', check(!rigOf(p, p.timelines.find((t) => t.id === idle)!).nodes.star1));
+  // copying the layers copied them: moving the body in Happy leaves Idle's where it was
+  ed.setValue('body', 'flatOffset.x', 120, 'move');
+  const q = useEditor.getState().project;
+  it('changing a layer in one state never changes it in another', check(rigOf(q, q.timelines.find((t) => t.id === idle)!).nodes.body.surface.flatOffset?.x !== 120));
   const r = structuredClone(p);
   ownLayer(r, 'star1');
   it('owning twice adds no second range', check(activeTimeline(r).appearances!.filter((a) => a.nodeId === 'star1').length === 1));
@@ -268,18 +269,18 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
   const q = useEditor.getState().project;
   it('keyed, a pose is keyframes at the playhead', check(activeTimeline(q).tracks.some((t) => t.nodeId === armR.id && t.property === 'limb.c.y' && t.keyframes.some((k) => k.time === 500))));
 
-  // a layer made in Idle is absent from a new state until it is brought in
+  // every state keeps its own layers: a new one is blank, and a layer is copied in on request
   ed.loadProject(defaultProject());
   ed.addLayer(makeShapeLayer('star', { id: 'starA' }));
+  const idleId = useEditor.getState().project.activeTimelineId;
   ed.addTimeline('Happy');
-  it('a layer from another state is absent here', check(absentHere(useEditor.getState().project, 'starA')));
-  ed.showLayersIn(['starA'], 'here');
-  const h = useEditor.getState().project;
-  it('"show here" brings it into this state', check(!absentHere(h, 'starA') && sceneAt(h, 100, compOf(h)).some((s) => s.id === 'starA')));
+  it('a new state is a blank canvas', check(Object.keys(useEditor.getState().project.rig.nodes).length === 0));
   ed.addTimeline('Sad');
+  ed.setActiveTimeline(idleId);
+  it('switching back brings that state\'s own layers back', check(!!useEditor.getState().project.rig.nodes.starA && !!useEditor.getState().project.rig.nodes.body));
   ed.showLayersIn(['starA'], 'everywhere');
   const e = useEditor.getState().project;
-  it('"everywhere" puts it in every state, new ones too', check(!e.rig.nodes.starA.ranged && e.timelines.every((tl) => sceneAt({ ...e, activeTimelineId: tl.id }, 100, compOf(e)).some((s) => s.id === 'starA'))));
+  it('"everywhere" copies it into every state', check(e.timelines.every((tl) => sceneAt(asTimeline(e, tl.id), 100, compOf(e)).some((s) => s.id === 'starA'))));
 }
 
 // --- any layer's role can be changed ---------------------------------------------------
@@ -338,7 +339,7 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
   const pre = structuredClone(old);
   const drawnBefore = buildScene(evaluateRig(pre, 0), compOf(pre)).find((s) => s.id === 'eyeL')!;
   const { project, applied } = migrateProject(old);
-  it('a v6 file runs the faces step', check(applied.join() === 'faces,app screen presets,cinematic presets,app mascot kit', applied.join()));
+  it('a v6 file runs the faces step', check(applied.join() === 'faces,app screen presets,cinematic presets,app mascot kit,each timeline keeps its own layers,cartoon and character presets', applied.join()));
   it('its mascot gets a face', check(project.rig.nodes.face?.role === 'face' && project.rig.nodes.face.parentId === 'body'));
   it('with its eyes in it', check(project.rig.nodes.eyeL.parentId === 'face'));
   const drawnAfter = buildScene(evaluateRig(project, 0), compOf(project)).find((s) => s.id === 'eyeL')!;

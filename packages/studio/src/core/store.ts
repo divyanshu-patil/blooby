@@ -25,7 +25,7 @@ import { fetchCatalog } from './catalog';
 import { defaultValues, directTransition, machineOf, nextTransition, slug, type DirectOptions } from './stateMachine';
 import { migrateProject, SCHEMA_VERSION } from './migrate';
 import type { Block, CurveType, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, TextStyle, Timeline, Track, Transition, Vec2 } from './types';
-import { activeTimeline, CAMERA_ID } from './types';
+import { activeTimeline, CAMERA_ID, rigOf, switchTimeline } from './types';
 
 const STORAGE_KEY = 'blooby.project.v1';
 const HISTORY_LIMIT = 80;
@@ -215,7 +215,10 @@ export interface Editor {
   setTransition: (afterBlockId: string, patch: Partial<Pick<Transition, 'durationMs' | 'easing'>>) => void;
   removeTransition: (afterBlockId: string) => void;
 
-  addTimeline: (name?: string) => void;
+  /** a new timeline — a blank canvas, or with `copyLayers` a copy of this state's layers (not its animation) */
+  addTimeline: (name?: string, opts?: { copyLayers?: boolean }) => void;
+  /** a copy of a timeline: its own copy of the layers, and its clips, keys, effects and ranges */
+  duplicateTimeline: (id: string) => void;
   renameTimeline: (id: string, name: string) => void;
   deleteTimeline: (id: string) => void;
   setActiveTimeline: (id: string) => void;
@@ -1139,14 +1142,28 @@ export const useEditor = create<Editor>((set, get) => ({
     }, 'tldur');
   },
 
-  addTimeline(name) {
+  addTimeline(name, opts) {
     const { project } = get();
     const base = name?.trim() || `Timeline ${project.timelines.length + 1}`;
     const tl = makeTimeline(uniqueName(base, project.timelines.map((t) => t.name)));
-    get().commit((p) => { p.timelines.push(tl); p.activeTimelineId = tl.id; });
+    // a new timeline is a blank canvas: switching parks this state's layers and brings out none
+    if (opts?.copyLayers) tl.rig = structuredClone(project.rig);
+    get().commit((p) => { p.timelines.push(tl); switchTimeline(p, tl.id); });
     // the same reset switching to an existing timeline does. Without it a clip and an
     // emitter from the OLD timeline stayed selected, so the clip inspector described
     // something not on screen and a new effect got scoped to a block that is not here.
+    set({ selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null });
+  },
+
+  duplicateTimeline(id) {
+    const { project } = get();
+    const src = project.timelines.find((t) => t.id === id);
+    if (!src) return;
+    const copy: Timeline = {
+      ...structuredClone(src), id: uid('tl'), name: uniqueName(`${src.name} copy`, project.timelines.map((t) => t.name)),
+      rig: structuredClone(rigOf(project, src)),
+    };
+    get().commit((p) => { p.timelines.splice(p.timelines.indexOf(p.timelines.find((t) => t.id === id)!) + 1, 0, copy); switchTimeline(p, copy.id); });
     set({ selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, selectedTrackId: null });
   },
 
@@ -1161,8 +1178,9 @@ export const useEditor = create<Editor>((set, get) => ({
     const { project } = get();
     if (project.timelines.length <= 1) return; // always at least one
     get().commit((p) => {
+      // leaving the deleted state first brings the next one's own layers out
+      if (p.activeTimelineId === id) switchTimeline(p, p.timelines.find((t) => t.id !== id)!.id);
       p.timelines = p.timelines.filter((t) => t.id !== id);
-      if (p.activeTimelineId === id) p.activeTimelineId = p.timelines[0].id;
       // an edge into or out of a state that no longer exists is a broken transition —
       // dropped here rather than left for validation to complain about forever
       const m = p.stateMachine;
@@ -1187,7 +1205,7 @@ export const useEditor = create<Editor>((set, get) => ({
     const { project } = get();
     if (!project.timelines.some((t) => t.id === id)) return;
     const prevId = project.activeTimelineId;
-    get().commit((p) => { p.activeTimelineId = id; });
+    get().commit((p) => { switchTimeline(p, id); });
     // tracked here too (not just setState) so returnToPreviousState reflects a manual
     // tab click the same as a programmatic switch — "previous" means whatever was active
     // right before this one, regardless of which path changed it.
@@ -1214,7 +1232,7 @@ export const useEditor = create<Editor>((set, get) => ({
     // raw keyframe — same principle the clip-transition blend uses one level down.
     const fromRig = durationMs > 0 ? evaluateRig(project, playhead) : null;
     const prevId = project.activeTimelineId;
-    get().commit((p) => { p.activeTimelineId = target.id; });
+    get().commit((p) => { switchTimeline(p, target.id); });
     set({
       selection: [], playhead: 0, selectedBlockId: null, selectedEmitterId: null, pendingStateChange: null,
       previousTimelineId: prevId,

@@ -1,6 +1,7 @@
 import { it } from 'vitest';
 import { appPresets } from './appPresets';
 import { cinematicPresets } from './cinematicPresets';
+import { creativePresets } from './creativePresets';
 import { mascotKitPresets } from './mascotKit';
 import { check } from './testkit';
 import { useEditor } from './store';
@@ -15,7 +16,7 @@ import { bakeLottie } from '../export/lottie';
 import { activeTimeline } from './types';
 import type { Preset, Project } from './types';
 
-const SHOWCASE = [...showcasePresets(), ...textPresets(), ...appPresets(), ...mascotKitPresets(), ...cinematicPresets()];
+const SHOWCASE = [...showcasePresets(), ...textPresets(), ...appPresets(), ...mascotKitPresets(), ...cinematicPresets(), ...creativePresets()];
 
 // --- the seven are real presets, first in the library ------------------------------------
 {
@@ -278,4 +279,19 @@ for (const preset of SHOWCASE) {
     const at = (t: number) => sceneAt(project, start + t, compOf(project)).find((s) => s.id === 'glitchScreen');
     it('Glitch: the screen is clipped by the wipe', check(!!at(1500)?.clip?.d));
   }
+}
+
+// --- the Cartoon look: an outline and a boil on the mascot, only while its clip plays ------------
+{
+  const { project, start } = placed(creativePresets()[0]);
+  const body = project.rig.nodes.body;
+  it('Cartoon adds its outline and jitter to the mascot, switched off', check(['outline', 'jitter'].every((k) => body.effects?.some((e) => e.kind === k && Object.values(e.params).some((v) => v === 0)))));
+  const fxAt = (t: number) => sceneAt(project, t, compOf(project)).find((s) => s.id === 'body')!;
+  const inside = fxAt(start + 1200);
+  const outline = inside.fx?.list.find((e) => e.kind === 'outline');
+  it('inside the clip the mascot is inked and boiling', check((outline?.params.width ?? 0) > 5 && !!inside.path));
+  const before = fxAt(Math.max(0, start - 300));
+  it('outside it, the mascot looks exactly as it did', check((before.fx?.list.find((e) => e.kind === 'outline')?.params.width ?? 0) === 0));
+  it('the eyes get the look too', check(['eyeL', 'eyeR'].every((id) => project.rig.nodes[id].effects?.some((e) => e.kind === 'outline'))));
+  it('ten character presets besides it, each with a tagline', check(creativePresets().length === 11 && creativePresets().every((p) => (p.tagline ?? '').length > 20)));
 }

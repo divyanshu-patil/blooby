@@ -31,6 +31,9 @@ const markSeen = (key: string) => {
  */
 let active: { destroy: () => void } | null = null;
 
+/** Whether a tour is on screen — anything else that would pop up waits for it. */
+export const isTourRunning = () => active !== null;
+
 export function startTour(key: string, steps: DriveStep[], opts?: { force?: boolean }) {
   if (!opts?.force && hasSeenTour(key)) return;
 

@@ -7,7 +7,7 @@ export type AssetSource = 'builtin' | 'official' | 'user' | 'community';
 export type AssetStatus = 'draft' | 'pending_review' | 'published' | 'rejected' | 'archived';
 export type SplashStatus = 'draft' | 'published' | 'archived';
 
-export interface SessionUser { id: string; email: string | null; role: UserRole }
+export interface SessionUser { id: string; email: string | null; role: UserRole; /** What's New: the newest release version this person has seen */ lastSeenRelease?: string | null }
 
 export interface Profile {
   id: string; role: UserRole; username: string | null; avatarUrl: string | null;

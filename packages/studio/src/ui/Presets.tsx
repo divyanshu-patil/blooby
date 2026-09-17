@@ -7,7 +7,7 @@ import { MascotThumb } from './Mascot';
 import { Panel } from './bits';
 import { EASING_NAMES, namedEasing } from '../core/easing';
 import { characteristicTime } from '../core/timeline';
-import { activeTimeline } from '../core/types';
+import { activeTimeline, asTimeline } from '../core/types';
 import { hasBackend } from '../core/catalog';
 import { PublishDialog } from '../cloud/PublishDialog';
 import { assetsApi } from '../cloud/api';
@@ -297,7 +297,7 @@ export function OtherTimelines() {
         {others.map((t) => (
           <button key={t.id} className="chip" title={`Add all of "${t.name}" as one clip · ${(t.timelineDurationMs / 1000).toFixed(1)}s`}
             onClick={() => addClipFrom({ label: t.name, timeline: t })}>
-            <MascotThumb className="glyph" scene={sceneAt({ ...project, activeTimelineId: t.id }, t.timelineDurationMs * 0.45, compOf(project))} view={compOf(project)} />
+            <MascotThumb className="glyph" scene={sceneAt(asTimeline(project, t.id), t.timelineDurationMs * 0.45, compOf(project))} view={compOf(project)} />
             {t.name}
           </button>
         ))}

@@ -132,11 +132,7 @@ export const MODIFIER_CHOICES: EffectChoice[] = MODIFIER_KINDS.map((k: ModifierK
   label: MODIFIERS[k].label,
   help: MODIFIERS[k].blurb,
   group: 'modifier' as const,
-  modifier: {
-    kind: k,
-    ...(k === 'shake' ? { amount: 100, frequency: 12, amplitude: 6, seed: 1 }
-      : k === 'float' ? { amount: 100, frequency: 0.6, amplitude: 8, phase: 0 }
-      : k === 'stretch' ? { amount: 100, frequency: 0.8, amplitude: 12, phase: 0 }
-      : { amount: 100, frequency: 0.7, amplitude: 10, phase: 0 }),
-  },
+  // each kind's own starting values — a walk at a pendulum's 10 px stride and a follow-through at 10%
+  // strength both looked like they did nothing
+  modifier: { kind: k, ...MODIFIERS[k].defaults },
 }));

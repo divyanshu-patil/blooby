@@ -13,7 +13,7 @@ import { layoutLines, TEXT_DEFAULTS } from '../core/text';
 import { metricsFor } from '../core/fonts';
 import { naturalOutline } from '../core/path';
 import { presetTargets } from '../core/defaults';
-import { activeTimeline, ANY_STATE, CAMERA_ID, MODIFIER_KINDS, MODIFIERS } from '../core/types';
+import { activeTimeline, ANY_STATE, CAMERA_ID, MODIFIER_KINDS, MODIFIERS, switchTimeline } from '../core/types';
 import { defaultValueFor, directTransition, machineOf, OPERATORS } from '../core/stateMachine';
 import { libraryOutline, shapeById, SHAPE_LIBRARY } from '../core/emitters';
 import { NUMERIC_PROPS, PROPS, resolveProp } from '../core/props';
@@ -96,7 +96,7 @@ clear_animation       { nodeId?, property? }                   // drop tracks; o
 set_block_duration    { block, durationMs }                    // block = id, name, or 0-based index on the strip
 remove_block          { block }
 move_block            { block, index }
-add_timeline          { name }                                 // a new timeline = a new exported Lottie state
+add_timeline          { name, copyLayers? }                    // a new timeline = a new exported Lottie state. Every state has its OWN layers: copyLayers (default true) starts it with a copy of the current state's layers (not its animation); false = a blank canvas
 set_camera            { property: "perspective"|"distance", value }  // perspective is the field-of-view angle
 
 remove_keyframe       { nodeId, property, atMs }               // atMs must match a keyframe listed under "Keyframes"
@@ -1369,7 +1369,7 @@ export function applyCalls(calls: ToolCall[]) {
           p.composition = compOf({ composition: { width: preset?.width ?? num(a.width) ?? cur.width, height: preset?.height ?? num(a.height) ?? cur.height } });
           break;
         }
-        case 'set_state': p.activeTimelineId = findState(p, a.state)!.id; break;
+        case 'set_state': switchTimeline(p, findState(p, a.state)!.id); break;
         case 'set_transition': {
           const to = findState(p, a.to)!;
           const from = a.from && a.from !== 'current' && a.from !== 'any' ? findState(p, a.from)!.id : p.activeTimelineId;
@@ -1793,9 +1793,11 @@ export function applyCalls(calls: ToolCall[]) {
         }
         case 'add_timeline': {
           const tl = makeTimeline(uniqueName(String(a.name).trim(), p.timelines.map((t) => t.name)));
+          // a state for the same mascot is what "add a Happy state" means — blank only when asked
+          if (a.copyLayers !== false) tl.rig = structuredClone(p.rig);
           p.timelines.push(tl);
           // anything the model emits after this belongs to the state it just made
-          p.activeTimelineId = tl.id;
+          switchTimeline(p, tl.id);
           break;
         }
         case 'add_input': {

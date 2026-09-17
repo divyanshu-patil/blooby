@@ -7,9 +7,10 @@ const create = vi.fn();
 const update = vi.fn();
 const duplicate = vi.fn();
 const remove = vi.fn();
+const getData = vi.fn(() => Promise.resolve({ data: {} }));
 vi.mock('@blooby/studio', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('@blooby/studio');
-  return { ...actual, projectsApi: { list, create, update, duplicate, remove } };
+  return { ...actual, projectsApi: { list, create, update, duplicate, remove, getData } };
 });
 
 const { Dashboard } = await import('./Dashboard');

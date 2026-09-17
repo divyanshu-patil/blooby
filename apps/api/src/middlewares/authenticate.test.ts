@@ -67,7 +67,7 @@ it('takes the role from the profile and ignores any role claimed in the token', 
   findUnique.mockResolvedValue({ id: 'u1', role: 'user' });
   const r = req('Bearer x');
   expect(await run(authenticate, r)).toBeUndefined();
-  expect(r.user).toEqual({ id: 'u1', email: 'a@b.c', role: 'user' });
+  expect(r.user).toEqual({ id: 'u1', email: 'a@b.c', role: 'user', lastSeenRelease: null });
 });
 
 it('looks the profile up by the token subject, not by anything the caller sent', async () => {

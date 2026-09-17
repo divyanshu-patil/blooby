@@ -3,7 +3,7 @@ import { unzip, zipStore } from './zip';
 import { animationIds, fromDotLottie, machineOf, toDotLottie } from '../core/stateMachine';
 import { dotLottieLayout } from './strip';
 import { makeTimeline, uid } from '../core/defaults';
-import type { Project, SmTransition, Timeline } from '../core/types';
+import { activeTimeline, switchTimeline, type Project, type SmTransition, type Timeline } from '../core/types';
 
 /**
  * .lottie container, per the dotLottie v2.0 spec (dotlottie.io/spec/2.0/, checked
@@ -176,7 +176,9 @@ export async function importDotLottie(file: Blob, into: Project): Promise<{ proj
     inputs: [...read.inputs, ...(existing?.inputs ?? []).filter((i) => !read.inputs.some((r) => r.name === i.name))],
     transitions: dedupe([...(existing?.transitions ?? []), ...read.transitions]),
   };
-  project.activeTimelineId = project.stateMachine.initialStateId ?? project.timelines[0].id;
+  // imported states play on the rig they came in with: each gets its own copy, then the initial one opens
+  for (const tl of project.timelines) if (tl !== activeTimeline(project) && !tl.rig) tl.rig = structuredClone(project.rig);
+  switchTimeline(project, project.stateMachine.initialStateId ?? project.timelines[0].id);
 
   return { project, states: project.timelines.length, inputs: read.inputs.length, warnings };
 }

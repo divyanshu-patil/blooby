@@ -58,8 +58,8 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
         setName(meta.name);
         loadedFor.current = projectId;
         setLoading(false);
-        // "recently opened" only means something if opening records itself — your own list only
-        if (mine ?? true) void projectsApi.markOpened(projectId).catch(() => {});
+        // opening records itself: "recent" on your own project, a view on someone else's
+        void projectsApi.markOpened(projectId).catch(() => {});
       })
       .catch((e: unknown) => {
         if (!live) return;

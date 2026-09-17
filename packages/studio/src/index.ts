@@ -19,7 +19,7 @@ export type { DriveStep } from 'driver.js';
 
 // cloud
 export { api, ApiError } from './cloud/client';
-export { projectsApi, assetsApi, communityApi, splashApi, adminApi, copilotApi } from './cloud/api';
+export { projectsApi, assetsApi, communityApi, splashApi, adminApi, copilotApi, authApi } from './cloud/api';
 export type { CopilotAdminView, CopilotConfig, CopilotKeyRow } from './cloud/api';
 export { useSession, auth, consumeAuthError } from './cloud/auth';
 export { useAsync } from './cloud/useAsync';
@@ -28,5 +28,7 @@ export { Splashscreen } from './cloud/Splashscreen';
 export { ProjectThumb, AssetThumb } from './cloud/Thumb';
 export { AssetPreview } from './cloud/AssetPreview';
 export { ProjectCard, AssetCard } from './cloud/cards';
+export { WhatsNewButton } from './kit/WhatsNew';
+export { RELEASES, LATEST_RELEASE, configureWhatsNew, markWhatsNewSeen, unseenReleases, type Release, type WhatsNewItem } from './whatsNew';
 export { PublishDialog } from './cloud/PublishDialog';
 export type * from './cloud/types';

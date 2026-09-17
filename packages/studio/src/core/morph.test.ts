@@ -25,7 +25,7 @@ import { activeTimeline } from './types';
 {
   const ed = () => useEditor.getState();
   ed().loadProject(defaultProject());
-  ed().addTimeline('Shapes');
+  ed().addTimeline('Shapes', { copyLayers: true });
   const P = () => ed().project;
   const tl = () => activeTimeline(P());
   const shapeTrack = () => activeTrackFor(tl(), 'body', 'shape.path', 0)!;

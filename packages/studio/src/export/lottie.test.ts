@@ -124,7 +124,7 @@ import { activeTimeline } from '../core/types';
   it('and uses real primitives', check(kinds(plain).has('el') || kinds(plain).has('rc')));
 
   // a morphing outline becomes bezier vertices, and is reported as baked
-  ed().addTimeline('Morph');
+  ed().addTimeline('Morph', { copyLayers: true });
   ed().setPlayhead(0);
   ed().setValue('eyeL', 'shape.path', primitivePath('pill'), 'a');
   ed().toggleKeyframe('eyeL', 'shape.path');

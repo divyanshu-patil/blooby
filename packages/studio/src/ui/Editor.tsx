@@ -23,6 +23,7 @@ import { makeSvgLayer } from '../core/layers';
 import { activeTimeline } from '../core/types';
 import { startTourWhenReady } from '../kit/tour';
 import { GithubLink, TourMenu } from '../kit/TourMenu';
+import { WhatsNewButton } from '../kit/WhatsNew';
 import { EDITOR_TOURS, INTRO_TOUR } from './tours';
 import type { ReactNode } from 'react';
 import type { Project } from '../core/types';
@@ -188,6 +189,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
           onClick={() => confirm(`Reset "${project.name}"?\n\nThe rig, every timeline, the state machine and all keyframes go back to the default mascot. This cannot be undone — save or export first if you want to keep it.`) && resetProject()}>New</button>
         <GithubLink />
         <span data-tour="export"><ExportBar /></span>
+        <WhatsNewButton surface="editor" />
         <TourMenu tours={EDITOR_TOURS} label="Show me around" />
       </header>
 

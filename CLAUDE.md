@@ -36,7 +36,7 @@ Everything else reads a `Project`.
 | Concept | Type | Note |
 |---|---|---|
 | the character | `Rig` / `RigNode` | features are placed by **angle** on a sphere, not pixels |
-| one animation | `Timeline` | a project has several; each is one **state** |
+| one animation | `Timeline` | a project has several; each is one **state**, with its **own layers** (`tl.rig`; the active one is `Project.rig`) — see AGENT_MAP |
 | a placed preset | `Block` | clip on the strip |
 | a freeform object | `RigNode` (`primitive` / `svgLayer` / `limb` / `group`) | `parentId: null` = world, child of the body = attached |
 | a mascot | a `body` `RigNode` + parts with a `role` (`face` is a group holding the eyes and hands) | several per project; `rig.rootId` is the first, and keeps the legacy ids |
@@ -146,6 +146,18 @@ the bottom. Never edit an existing step.
 
 **One store, one action per mutation.** Don't reach into `project.timelines[i]` from a
 component — the store has `at(p)` for the active timeline and `commit()` for undo.
+
+## What's New — update it with every user-visible change
+
+`packages/studio/src/whatsNew.ts` is the changelog people see: a "What's new" button in the
+editor toolbar and the dashboard footer, opening by itself when there is something unseen.
+**Any change a user would notice adds an item there in the same change** — a new release at the
+top of `RELEASES` (version `YYYY.MM.DD`, `.2` for a second one that day), or an item on today's
+release if it already exists and has not shipped. Write it for a person (what they can do now,
+where to find it), set `surface: 'editor' | 'dashboard'`, and give it a `tour` of `data-tour`
+steps when it has a place on screen — `whatsNew.test.ts` fails on an anchor the UI doesn't render.
+What each person has seen is `profiles.last_seen_release` (PUT `/api/auth/whats-new`; localStorage
+when signed out); everything newer is shown. Never edit an old release's version.
 
 ## Documents worth reading before a big change
 

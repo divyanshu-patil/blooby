@@ -327,7 +327,7 @@ import type { Preset, Project } from './types';
   const P = () => useEditor.getState().project;
 
   const firstId = P().activeTimelineId;
-  ed.addTimeline('Wave');
+  ed.addTimeline('Wave', { copyLayers: true });
   it('a new timeline is created and becomes active', check(P().timelines.length === 2 && P().activeTimelineId !== firstId));
   it('the new timeline starts with no blocks — a genuinely fresh sequence', check(activeTimeline(P()).blocks.length === 0));
 
@@ -552,7 +552,7 @@ import type { Preset, Project } from './types';
   // removing the LAST keyframe must not move the mascot. Done on an empty timeline: inside
   // a clip writeKeyframe anchors a second keyframe at the clip start, so there is never
   // exactly one to be the last.
-  ed().addTimeline('Blank');
+  ed().addTimeline('Blank', { copyLayers: true });
   ed().setPlayhead(0);
   ed().toggleKeyframe('body', 'surface.pitch');   // at 0 there is no anchor, so exactly one
   ed().setValue('body', 'surface.pitch', 17, 'probe');
@@ -574,7 +574,7 @@ import type { Preset, Project } from './types';
   const VIEW = { width: 720, height: 720 };
   const eye = (t: number) => buildScene(evaluateRig(P(), t), VIEW).find((i) => i.id === 'eyeL');
 
-  ed().addTimeline('Leave');
+  ed().addTimeline('Leave', { copyLayers: true });
   ed().setPlayhead(0);
   ed().toggleKeyframe('eyeL', 'visible');
   ed().setPlayhead(600);

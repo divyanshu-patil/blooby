@@ -55,7 +55,7 @@ import { PROPS } from './props';
   const pill = primitivePath('rect', { cornerRadius: 0.5 });
   const star = primitivePath('star', { points: 5 });
 
-  ed().addTimeline('Shapes');
+  ed().addTimeline('Shapes', { copyLayers: true });
   ed().setPlayhead(0);
   ed().setValue('eyeL', 'shape.path', pill, 'a');
   ed().toggleKeyframe('eyeL', 'shape.path');

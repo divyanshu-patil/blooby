@@ -17,6 +17,8 @@ export const profilesRepository = {
 
   setRole: (id: string, role: UserRole) => prisma.profile.update({ where: { id }, data: { role } }),
 
+  setLastSeenRelease: (id: string, version: string) => prisma.profile.update({ where: { id }, data: { lastSeenRelease: version } }),
+
   touchLogin: (id: string) => prisma.profile.update({ where: { id }, data: { lastLoginAt: new Date() } }),
 
   count: (where?: Prisma.ProfileWhereInput) => prisma.profile.count({ where }),

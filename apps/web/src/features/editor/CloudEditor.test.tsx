@@ -94,9 +94,8 @@ it('opens someone else’s view-only project without saving, and offers a copy',
   expect(await screen.findByText('View only')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /save now/i })).toBeNull();
   expect(screen.getByRole('button', { name: 'Duplicate' })).toBeInTheDocument();
-  // not the owner's: no sharing controls, and it does not enter their recent list
+  // not the owner's: no sharing controls
   expect(screen.queryByLabelText('Who can see it')).toBeNull();
-  expect(markOpened).not.toHaveBeenCalled();
 });
 
 it('gives the owner visibility, and access once public', async () => {

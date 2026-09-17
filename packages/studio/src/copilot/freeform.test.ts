@@ -108,7 +108,7 @@ const run = (calls: ToolCall[]) => {
   // "change the current shape to octopus", then a morph
   run([{ name: 'set_shape', args: { nodeId: 'body', shape: 'octopus' } }]);
   it('"change the shape to octopus" changes the mascot', check(shapeIdOf(P().rig.nodes.body.shapePath) === 'octopus'));
-  ed().addTimeline('Shapes');
+  ed().addTimeline('Shapes', { copyLayers: true });
   run([
     { name: 'set_shape', args: { nodeId: 'body', shape: 'pebble', atMs: 0 } },
     { name: 'set_shape', args: { nodeId: 'body', shape: 'capsule', atMs: 500 } },

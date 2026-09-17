@@ -295,7 +295,7 @@ export interface RigNode {
 export type ShapeKind = 'circle' | 'pill' | 'rect' | 'polygon' | 'star' | 'pebble' | 'capsule' | 'roundedRect' | 'blob' | 'octopus';
 
 export type BlendMode = 'normal' | 'screen' | 'multiply' | 'overlay' | 'add' | 'difference';
-export type EffectKind = 'glow' | 'blur' | 'shadow' | 'rgbSplit' | 'slices' | 'scanlines' | 'flicker' | 'jitter' | 'echo' | 'goo';
+export type EffectKind = 'glow' | 'blur' | 'shadow' | 'rgbSplit' | 'slices' | 'scanlines' | 'flicker' | 'jitter' | 'echo' | 'goo' | 'wave' | 'outline' | 'grain' | 'hueShift';
 export interface LayerEffect {
   kind: EffectKind;
   enabled?: boolean;
@@ -364,25 +364,37 @@ export interface Track {
 export const MODIFIERS = {
   // `help` is written for the copilot: argument names, units and useful ranges. `blurb` is
   // written for a person choosing from a list, where a backtick is noise.
-  shake: { label: 'Shake', maxFrequency: 30,
+  shake: { label: 'Shake', maxFrequency: 30, defaults: { amount: 100, frequency: 12, amplitude: 6, seed: 1 },
     blurb: 'Jitters it with noise. Fast and small is a shiver; slower and wider is a rattle.',
     help: 'Jitters the node with noise. frequency 6-20 Hz, amplitude 3-15 (degrees, or px on the body).' },
-  float: { label: 'Float', maxFrequency: 6,
+  float: { label: 'Float', maxFrequency: 6, defaults: { amount: 100, frequency: 0.6, amplitude: 8, phase: 0 },
     blurb: 'Bobs it up and down on a slow sine — the idle drift of something weightless.',
     help: 'Bobs the node on a slow sine. frequency 0.3-1.5 Hz, amplitude 3-15.' },
-  stretch: { label: 'Stretch', maxFrequency: 6,
+  stretch: { label: 'Stretch', maxFrequency: 6, defaults: { amount: 100, frequency: 0.8, amplitude: 12, phase: 0 },
     blurb: 'Pulses its size, carrying everything mapped onto it — squash and stretch for the whole rig.',
     help: 'Pulses the node and everything mapped onto it as one \u2014 squash-and-stretch for the whole rig. frequency 0.3-1.5 Hz, amplitude 3-15.' },
-  pendulum: { label: 'Pendulum', maxFrequency: 6,
+  pendulum: { label: 'Pendulum', maxFrequency: 6, defaults: { amount: 100, frequency: 0.7, amplitude: 10, phase: 0 },
     blurb: 'Swings it back and forth on one axis, like a hanging weight. Rotation by default; the axis is a dial.',
     help: 'Swings the node back and forth on ONE axis, like a hanging weight \u2014 set `axis` to "rotation" (default), "x", "y", "yaw" or "pitch". frequency 0.3-1.5 Hz, amplitude 6-20.' },
-  walk: { label: 'Walk', maxFrequency: 4,
+  walk: { label: 'Walk', maxFrequency: 4, defaults: { amount: 100, frequency: 1.8, amplitude: 36, phase: 0 },
     blurb: 'A procedural walk cycle: travels, bobs, plants each foot and swings the arms. On a mascot with legs.',
     help: 'Walks a MASCOT (nodeId = its body): it travels amplitude px per step (negative walks left), frequency steps per second (1.5-2.5), feet planted on the ground during each stance, knees bend, arms swing opposite, body bobs and leans. Legs need knees. Use set_effect_range for when it walks.' },
-  follow: { label: 'Follow-through', maxFrequency: 6,
+  follow: { label: 'Follow-through', maxFrequency: 6, defaults: { amount: 100, frequency: 3, amplitude: 70, phase: 0 },
     blurb: 'Secondary motion: the layer lags behind its mascot and springs back past its rest — faces, hands, antennae.',
     help: 'Follow-through on a PART (the face, a hand, a hat): when its mascot moves, it lags and overshoots like it is on a spring. frequency is the spring (2-5 Hz, lower = floppier), amplitude the lag strength 20-100.' },
-  jelly: { label: 'Jelly', maxFrequency: 8,
+  bounce: { label: 'Bounce', maxFrequency: 4, defaults: { amount: 100, frequency: 1.2, amplitude: 40, phase: 0 },
+    blurb: 'Hops on the spot: up, hang, down, and a squash on every landing — excitement, a tap target calling out.',
+    help: 'Hops the node on the spot \u2014 a parabola up and down with a squash on each landing. frequency hops per second (0.8-2), amplitude the hop height in px (15-80).' },
+  breathe: { label: 'Breathe', maxFrequency: 2, defaults: { amount: 100, frequency: 0.25, amplitude: 5, phase: 0 },
+    blurb: 'A slow inhale and exhale: taller and a touch narrower, then back — the quietest sign of life for an idle.',
+    help: 'Breathing: the node grows taller and slightly narrower on a slow sine and back (squish, so a feet anchor keeps it grounded). frequency 0.15-0.5 Hz, amplitude percent 2-10.' },
+  orbit: { label: 'Orbit', maxFrequency: 3, defaults: { amount: 100, frequency: 0.3, amplitude: 14, phase: 0 },
+    blurb: 'Drifts round a small ellipse with a gentle tilt — weightless, dreamy, underwater.',
+    help: 'Drifts the node around a small ellipse (wider than tall) with a slight tilt that follows it. frequency 0.15-0.8 Hz, amplitude radius px 5-40.' },
+  heartbeat: { label: 'Heartbeat', maxFrequency: 3, defaults: { amount: 100, frequency: 1.1, amplitude: 10, phase: 0 },
+    blurb: 'Lub-dub: two quick pulses in size, then a rest — love, a like, something alive and eager.',
+    help: 'Pulses the node\'s size twice per beat (lub-dub) then rests. frequency beats per second 0.8-2, amplitude percent 5-25.' },
+  jelly: { label: 'Jelly', maxFrequency: 8, defaults: { amount: 100, frequency: 4, amplitude: 70, phase: 0 },
     blurb: 'Soft-body deformation: the outline stretches with speed, splats flat on impact and wobbles back.',
     help: 'Soft body on a MASCOT or shape: its OUTLINE deforms from its own vertical motion \u2014 stretched when moving fast, flattened and widened at the bottom when it lands (volume kept), then wobbles. amplitude 20-100 (strength), frequency 3-6 Hz (wobble).' },
 } as const;
@@ -614,6 +626,12 @@ export interface Preset {
   layers?: RigNode[];
   /** when those layers are on screen, scoped to the clip like the effects above */
   appearances?: Omit<Appearance, 'id' | 'blockId'>[];
+  /**
+   * Effects a preset switches on for a layer the rig already has — the Cartoon look's outline and
+   * boil on the mascot. Added switched OFF (`quietEffect`) when missing, so outside the clip the
+   * layer looks exactly as it did; the preset's own `effect.<kind>.<param>` keys turn it up.
+   */
+  looks?: { nodeId: string; effects: EffectKind[] }[];
   /** what it shows off, for the preset browser — "Hand + SVG + Rubber Hose" */
   tagline?: string;
   thumbnail?: string;
@@ -681,6 +699,14 @@ export interface Transition {
 export interface Timeline {
   id: string;
   name: string;
+  /**
+   * This state's own layers, while it is NOT the active one. Every timeline keeps its own rig —
+   * its own mascots, shapes and their base values — so editing one state never changes another.
+   * The active timeline's rig is `Project.rig` (what every editor action reads and writes);
+   * switching parks it here and brings the other one out: `switchTimeline`. Read another
+   * timeline's through `rigOf` / `asTimeline`, never `Project.rig` directly.
+   */
+  rig?: Rig;
   tracks: Track[];
   modifiers: Modifier[];
   /** optional, so every project saved before emitters existed loads with no migration */
@@ -850,4 +876,35 @@ export const CAMERA_ID = '__camera';
 /** The one timeline every editor action and every renderer actually reads/writes. */
 export function activeTimeline(p: Project): Timeline {
   return p.timelines.find((t) => t.id === p.activeTimelineId) ?? p.timelines[0];
+}
+
+/** A rig with nothing on it — what a new timeline starts as. `rootId` is filled by the first mascot added. */
+export const emptyRig = (like: Rig): Rig => ({ ...like, id: like.id, nodes: {}, rootId: '', camera: structuredClone(like.camera) });
+
+/** The rig `tl` plays on: the live `p.rig` when it is active, its own otherwise. */
+export function rigOf(p: Project, tl: Timeline): Rig {
+  return tl.id === activeTimeline(p).id ? p.rig : tl.rig ?? p.rig;
+}
+
+/** `p` as if timeline `id` were active, with that timeline's own rig — for drawing or exporting another state. */
+export function asTimeline(p: Project, id: string): Project {
+  const tl = p.timelines.find((t) => t.id === id);
+  if (!tl || tl.id === activeTimeline(p).id) return p;
+  return { ...p, activeTimelineId: id, rig: rigOf(p, tl) };
+}
+
+/**
+ * Make timeline `id` the active one, in place: the current rig is parked on the timeline being
+ * left, and the incoming timeline's own rig becomes `p.rig`. The only way the active timeline
+ * should change, so layers never leak from one state into another.
+ */
+export function switchTimeline(p: Project, id: string): boolean {
+  const from = activeTimeline(p), to = p.timelines.find((t) => t.id === id);
+  if (!to) return false;
+  if (to.id === from.id) return true;
+  if (p.timelines.includes(from)) from.rig = p.rig;
+  p.rig = to.rig ?? emptyRig(p.rig);
+  delete to.rig;
+  p.activeTimelineId = to.id;
+  return true;
 }

@@ -1,5 +1,5 @@
 import { CardMenu, relativeTime } from '../kit';
-import { AssetThumb, ProjectThumb } from './Thumb';
+import { AssetThumb, LiveProjectThumb, ProjectThumb } from './Thumb';
 import type { AssetRow, ProjectRow } from './types';
 import type { Preset, Project } from '../core/types';
 
@@ -10,10 +10,12 @@ import type { Preset, Project } from '../core/types';
  * what a user actually sees.
  */
 
-export function ProjectCard({ project, data, onOpen, menu, footer }: {
+export function ProjectCard({ project, data, load, onOpen, menu, footer }: {
   project: ProjectRow;
   /** The loaded animation, when the list has it. Absent is fine — the card still renders. */
   data?: Project | null;
+  /** Fetches the project's JSON when the card scrolls into view — its frames become the picture. */
+  load?: () => Promise<unknown>;
   onOpen: () => void;
   menu?: { label: string; onSelect: () => void; danger?: boolean }[];
   footer?: string;
@@ -22,7 +24,11 @@ export function ProjectCard({ project, data, onOpen, menu, footer }: {
     <div className="card" role="button" tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}>
-      <div className="card-thumb"><ProjectThumb project={data ?? null} /></div>
+      <div className="card-thumb">
+        {!data && load
+          ? <LiveProjectThumb cacheKey={`${project.id}@${project.updatedAt}`} load={load} />
+          : <ProjectThumb project={data ?? null} />}
+      </div>
       <div className="card-body">
         <div className="card-name">{project.name}</div>
         <div className="card-meta">
