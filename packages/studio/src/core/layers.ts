@@ -1,6 +1,6 @@
 import { uid } from './id';
 import { compOf } from './comp';
-import { primitivePath, SHAPE_LABEL } from './path';
+import { mapPath, pathSampler, primitivePath, SHAPE_LABEL } from './path';
 import { importSvg, parseSvg } from './svg';
 import { restLength } from './limb';
 import { screenToSurface } from './curvature';
@@ -220,6 +220,34 @@ export function makeCurveLayer(pts: CurvePoint[], opts: {
     stroke: { enabled: true, color: opts.color ?? SHAPE_FILL, width: opts.width ?? 4, lineCap: 'round', lineJoin: 'round' },
     ...(opts.guide ? { guide: true } : {}),
   };
+}
+
+/**
+ * A drawn curve made a rubber hose: the same id, place and ink, now a limb through its start,
+ * its middle and its end. The hose keeps the curve's length, so dragging an end bows or
+ * straightens it rather than stretching it, and it pins like any limb. One way — undo reverts.
+ */
+export function curveToHose(p: Project, id: string): boolean {
+  const n = p.rig.nodes[id];
+  if (!n?.curve || !n.shapePath) return false;
+  const off = n.surface.flatOffset ?? { x: 0, y: 0 };
+  const rad = (n.transform.rotation * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const sx = n.size.x * n.transform.scale.x, sy = n.size.y * n.transform.scale.y;
+  // the outline in the parent's frame — the frame a limb's points are in
+  const sampler = pathSampler(mapPath(n.shapePath, (u) => ({ x: off.x + u.x * sx * cos - u.y * sy * sin, y: off.y + u.x * sx * sin + u.y * sy * cos })));
+  if (!sampler || sampler.length < 1) return false;
+  const at = (k: number) => { const q = sampler.at(sampler.length * k); return { x: r2(q.x), y: r2(q.y) }; };
+  const a = at(0), b = at(0.5), c = at(1);
+  const side = Math.sign((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) || 1;
+  const ink = n.stroke?.color ?? n.color;
+  n.kind = 'limb';
+  n.limb = { type: 'arm', a, b, c, hose: 1, thickness: Math.max(2, n.stroke?.width ?? 4), bend: side, roundness: 1, taper: 0, length: r2(sampler.length) };
+  n.color = ink;
+  n.transform = { scale: { x: 1, y: 1 }, rotation: 0 };
+  n.size = { x: 1, y: 1 };
+  n.surface = { ...n.surface, flatOffset: undefined };
+  delete n.curve; delete n.shapePath; delete n.primitive; delete n.shape; delete n.stroke; delete n.fill; delete n.trim;
+  return true;
 }
 
 /** A container: draws nothing, carries its children through its own move, turn and scale. */

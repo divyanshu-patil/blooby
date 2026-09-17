@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useEditor } from '../core/store';
 import { faceOf, mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
 import { isInside, makeLimbPair } from '../core/layers';
-import { applySquish, SQUISH_PRESETS, squishPreset } from '../core/squish';
+import { applySquish, EYE_ACTIONS, SQUISH_PRESETS, squishPreset } from '../core/squish';
 import { applyPose, POSES } from '../core/poses';
 import { makeTimeline } from '../core/defaults';
 import { sceneAt } from '../core/scene';
@@ -122,6 +122,48 @@ export function SquishSection({ node }: { node: RigNode }) {
       </div>
       <SquishPreview nodeId={node.id} presetId={pick} />
       <p className="hint">{SQUISH_PRESETS.find((sp) => sp.id === pick)?.blurb} — lands at the playhead as squish keyframes you can edit.</p>
+    </>
+  );
+}
+
+/**
+ * Eye actions at the playhead: blink, squint, close — and the squish presets, onto the eyes.
+ * On a mascot they go to all its eyes; on one eye, to both by default or just that one.
+ * Like squish presets they are keyframes the moment they land, nothing opaque.
+ */
+export function EyesSection({ node }: { node: RigNode }) {
+  const rig = useEditor((s) => s.project.rig);
+  const playhead = useEditor((s) => s.playhead);
+  const applyEyeAction = useEditor((s) => s.applyEyeAction);
+  const applySquishTo = useEditor((s) => s.applySquishTo);
+  const [justThis, setJustThis] = useState(false);
+  const [pick, setPick] = useState(SQUISH_PRESETS[0].id);
+  const mascot = mascotOf(rig, node.id);
+  const all = Object.values(rig.nodes).filter((n) => n.kind === 'eye' && mascotOf(rig, n.id)?.id === mascot?.id).map((n) => n.id);
+  const eyes = node.kind === 'eye' && justThis ? [node.id] : all;
+  if (!eyes.length) return <p className="empty-note">No eyes on this mascot.</p>;
+  const when = `at ${(playhead / 1000).toFixed(2)}s`;
+  return (
+    <>
+      {node.kind === 'eye' && all.length > 1 && (
+        <div className="seg" style={{ display: 'flex' }}>
+          <button style={{ flex: 1 }} aria-pressed={!justThis} onClick={() => setJustThis(false)}>Both eyes</button>
+          <button style={{ flex: 1 }} aria-pressed={justThis} onClick={() => setJustThis(true)}>{node.name}</button>
+        </div>
+      )}
+      <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+        {EYE_ACTIONS.map((a) => (
+          <button key={a.id} className="btn sm" title={`${a.blurb} — ${when}`} onClick={() => applyEyeAction(eyes, a.id)}>{a.name}</button>
+        ))}
+      </div>
+      <div className="divider" />
+      <div className="row" style={{ gap: 4 }}>
+        <select className="sel" style={{ flex: 1, minWidth: 0 }} aria-label="Eye squish preset" value={pick} onChange={(e) => setPick(e.target.value)}>
+          {SQUISH_PRESETS.map((sp) => <option key={sp.id} value={sp.id} title={sp.blurb}>{sp.name}</option>)}
+        </select>
+        <button className="btn sm" title={`Squish the eyes ${when}`} onClick={() => applySquishTo(eyes, pick)}>Squish</button>
+      </div>
+      <p className="hint">Lands at the playhead as keyframes you can edit.</p>
     </>
   );
 }

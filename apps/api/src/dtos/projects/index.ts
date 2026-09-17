@@ -13,6 +13,8 @@ export const updateProjectDto = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     visibility: z.enum(['private', 'public']).optional(),
+    /** only meaningful while public: 'edit' lets any signed-in user save to it */
+    access: z.enum(['view', 'edit']).optional(),
     thumbnailUrl: z.string().url().max(2048).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
@@ -34,3 +36,8 @@ export const listProjectsDto = paginationDto.extend({
   sort: z.enum(['recent', 'created', 'name']).default('recent'),
 });
 export type ListProjectsDto = z.infer<typeof listProjectsDto>;
+
+export const listPublicProjectsDto = paginationDto.extend({
+  sort: z.enum(['trending', 'newest']).default('trending'),
+});
+export type ListPublicProjectsDto = z.infer<typeof listPublicProjectsDto>;

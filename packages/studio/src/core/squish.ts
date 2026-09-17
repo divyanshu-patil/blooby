@@ -67,3 +67,35 @@ export function applySquish(p: Project, nodeId: string, presetId: string, atMs: 
   }
   return true;
 }
+
+/**
+ * Eye actions: the same idea for `eye.openness` — a blink, a squint, a slow close — written as
+ * ordinary keyframes on each eye from the playhead. Keys are [ms from the playhead, openness,
+ * easing out of that key]. An action that ends somewhere other than open (close, squint) holds.
+ */
+export interface EyeAction { id: string; name: string; blurb: string; keys: [number, number, Ease][] }
+
+export const EYE_ACTIONS: EyeAction[] = [
+  { id: 'blink', name: 'Blink', blurb: 'One quick blink', keys: [[0, 1, 'easeIn'], [90, 0.05, 'easeOut'], [220, 1, 'easeOut']] },
+  { id: 'double', name: 'Double blink', blurb: 'Two quick blinks — surprise, or clearing the view', keys: [
+    [0, 1, 'easeIn'], [80, 0.05, 'easeOut'], [180, 1, 'linear'], [260, 1, 'easeIn'], [340, 0.05, 'easeOut'], [460, 1, 'easeOut']] },
+  { id: 'slow', name: 'Slow blink', blurb: 'A sleepy, content close and open', keys: [[0, 1, 'easeInOut'], [360, 0.05, 'linear'], [520, 0.05, 'easeInOut'], [900, 1, 'easeOut']] },
+  { id: 'squint', name: 'Squint', blurb: 'Narrows and holds — suspicion, or a big smile', keys: [[0, 1, 'easeOut'], [180, 0.4, 'easeOut']] },
+  { id: 'close', name: 'Close', blurb: 'Shuts and stays shut', keys: [[0, 1, 'easeIn'], [200, 0.02, 'easeOut']] },
+  { id: 'open', name: 'Open', blurb: 'Opens wide from wherever it is', keys: [[0, 0.02, 'easeOut'], [240, 1, 'overshoot']] },
+];
+
+/** Write an eye action onto every eye in `eyeIds` from `atMs`, clearing openness keys inside its window. */
+export function applyEyeAction(p: Project, eyeIds: string[], actionId: string, atMs: number): boolean {
+  const action = EYE_ACTIONS.find((a) => a.id === actionId);
+  const eyes = eyeIds.filter((id) => p.rig.nodes[id]?.eye);
+  if (!action || !eyes.length) return false;
+  const t0 = Math.max(0, Math.round(atMs));
+  const end = t0 + action.keys[action.keys.length - 1][0];
+  for (const t of activeTimeline(p).tracks) {
+    if (!eyes.includes(t.nodeId) || t.property !== 'eye.openness') continue;
+    t.keyframes = t.keyframes.filter((k) => k.time < t0 - 0.5 || k.time > end + 0.5);
+  }
+  for (const id of eyes) for (const [dt, v, e] of action.keys) writeKeyframe(p, id, 'eye.openness', t0 + dt, v, EASE[e]);
+  return true;
+}

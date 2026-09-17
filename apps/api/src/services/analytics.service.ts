@@ -82,11 +82,15 @@ export const analyticsService = {
     };
   },
 
-  /** Secondary insights: what people actually use, and who is most active. */
-  async insights(limit = 8) {
+  /**
+   * Secondary insights: what people actually use, and who is most active. `publicOnly` is
+   * the community page's version: only published community/official assets, and creators
+   * ranked by their PUBLIC projects, so nobody's private work is counted in the open.
+   */
+  async insights(limit = 8, publicOnly = false) {
     const [topAssets, topCreators] = await Promise.all([
       prisma.asset.findMany({
-        where: { status: 'published' },
+        where: { status: 'published', ...(publicOnly ? { source: { in: ['community', 'official'] } } : {}) },
         orderBy: { downloadCount: 'desc' },
         take: limit,
         select: { id: true, name: true, kind: true, source: true, downloadCount: true },
@@ -95,6 +99,7 @@ export const analyticsService = {
         select p.user_id, pr.username, count(*)::bigint as projects
         from public.projects p
         join public.profiles pr on pr.id = p.user_id
+        where ${publicOnly} = false or p.visibility = 'public'
         group by p.user_id, pr.username
         order by projects desc
         limit ${limit}`,
@@ -102,7 +107,8 @@ export const analyticsService = {
 
     return {
       topAssets,
-      topCreators: topCreators.map((c) => ({ userId: c.user_id, username: c.username, projects: Number(c.projects) })),
+      // the community page gets names, not account ids
+      topCreators: topCreators.map((c) => ({ ...(publicOnly ? {} : { userId: c.user_id }), username: c.username, projects: Number(c.projects) })),
     };
   },
 };

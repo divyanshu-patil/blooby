@@ -3,7 +3,7 @@ import { projectsRepository } from '../repositories/projects.repository.js';
 import { assetsRepository } from '../repositories/assets.repository.js';
 import { HttpError } from '../utils/httpError.js';
 import * as storage from './storage.service.js';
-import type { CreateProjectDto, ListProjectsDto, SaveProjectDataDto, UpdateProjectDto } from '../dtos/projects/index.js';
+import type { CreateProjectDto, ListProjectsDto, ListPublicProjectsDto, SaveProjectDataDto, UpdateProjectDto } from '../dtos/projects/index.js';
 
 /**
  * Ownership is checked in exactly one place. Every operation on a single project routes
@@ -26,7 +26,20 @@ async function readable(projectId: string, userId: string | null): Promise<Proje
   throw HttpError.notFound('That project does not exist');
 }
 
+/** Anyone who may save to it: the owner, or any signed-in user while it is public with edit access. */
+const canWrite = (project: Project, userId: string | null) =>
+  !!userId && (project.userId === userId || (project.visibility === 'public' && project.access === 'edit'));
+
+async function writable(projectId: string, userId: string): Promise<Project> {
+  const project = await readable(projectId, userId);
+  // readable-but-not-writable is a 403: they can already see it exists
+  if (!canWrite(project, userId)) throw HttpError.forbidden('This project is view-only. Duplicate it to make your own copy.');
+  return project;
+}
+
 export const projectsService = {
+  listPublic: (opts: ListPublicProjectsDto) => projectsRepository.listPublic(opts),
+
   list: (userId: string, opts: ListProjectsDto) => projectsRepository.listByUser(userId, opts),
 
   async get(projectId: string, userId: string | null) {
@@ -83,15 +96,21 @@ export const projectsService = {
     await storage.deleteProjectObjects(userId, projectId);
   },
 
+  /** Anything you can read, you can copy — your own, or anyone's public project. */
   async duplicate(projectId: string, userId: string, name?: string) {
-    const source = await ownedBy(projectId, userId);
+    const source = await readable(projectId, userId);
     const data = await storage.getProjectJson(source.s3Key);
-    return projectsService.create(userId, { name: name ?? `${source.name} copy`, project: data as Record<string, unknown> });
+    const copy = await projectsService.create(userId, { name: name ?? `${source.name} copy`, project: data as Record<string, unknown> });
+    if (source.userId !== userId) await projectsRepository.countDuplicate(projectId).catch(() => {});
+    return copy;
   },
 
   async getData(projectId: string, userId: string | null) {
     const project = await readable(projectId, userId);
-    return { project, data: await storage.getProjectJson(project.s3Key) };
+    const data = await storage.getProjectJson(project.s3Key);
+    // a stranger opening it is what trending counts; a failed count never fails the open
+    if (project.userId !== userId) await projectsRepository.countView(projectId).catch(() => {});
+    return { project, data, canEdit: canWrite(project, userId), isOwner: project.userId === userId };
   },
 
   /**
@@ -102,7 +121,7 @@ export const projectsService = {
    * instead of silently winning. It just no longer names a key.
    */
   async save(projectId: string, userId: string, dto: SaveProjectDataDto) {
-    const project = await ownedBy(projectId, userId);
+    const project = await writable(projectId, userId);
 
     if (dto.expectedVersion !== undefined && dto.expectedVersion !== project.currentVersion) {
       throw HttpError.conflict(
@@ -111,7 +130,8 @@ export const projectsService = {
     }
 
     const nextVersion = project.currentVersion + 1;
-    const stored = await storage.putProjectJson(userId, projectId, dto.project);
+    // under the OWNER's key, whoever is editing: one object per project
+    const stored = await storage.putProjectJson(project.userId, projectId, dto.project);
 
     const updated = await projectsRepository.bumpVersionIfCurrent(projectId, project.currentVersion, {
       currentVersion: nextVersion,

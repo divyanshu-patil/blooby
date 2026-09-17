@@ -1,6 +1,7 @@
 import { EFFECTS } from './effects';
 import type { ColorStop, Emitter, KeyValue, Modifier, Rig, RigNode, Timeline, Vec2 } from './types';
 import { CAMERA_ID } from './types';
+import { limbPoints } from './limb';
 
 /** What a stroke is drawn in before anyone picks a colour — the eyes' own ink. */
 export const STROKE_DEFAULT: ColorStop = { r: 20, g: 19, b: 24, a: 1 };
@@ -62,12 +63,23 @@ export function getProp(node: RigNode, path: string): KeyValue | undefined {
   }
 }
 
+/** `limb.pin.<a|b|c>.<x|y>` — where a pinned point is held, in world px */
+const PIN_PATH = /^limb\.pin\.([abc])\.([xy])$/;
+/** the pin on one point: the end point's is `limb.pin`, the others' are `limb.pins[k]` */
+function pinOf(node: RigNode, which: string): Vec2 | undefined {
+  const l = node.limb;
+  if (!l) return undefined;
+  return which === limbPoints(l).at(-1) ? l.pin : l.pins?.[which as 'a' | 'b' | 'c'];
+}
+
 function getLimbProp(node: RigNode, path: string): number | undefined {
   const l = node.limb;
   if (!l) return undefined;
   // limb.a.x / limb.b.y / limb.c.x — a point's coordinate
   const pt = /^limb\.([abc])\.([xy])$/.exec(path);
   if (pt) return limbPoint(node, pt[1])?.[pt[2] as 'x' | 'y'];
+  const pin = PIN_PATH.exec(path);
+  if (pin) return pinOf(node, pin[1])?.[pin[2] as 'x' | 'y'];
   switch (path) {
     case 'limb.hose': return l.hose;
     case 'limb.thickness': return l.thickness;
@@ -89,6 +101,13 @@ function setLimbProp(node: RigNode, path: string, n: number): void {
   if (pt) {
     const p = limbPoint(node, pt[1]);
     if (p) p[pt[2] as 'x' | 'y'] = n;
+    return;
+  }
+  const pin = PIN_PATH.exec(path);
+  if (pin) {
+    // moves a pin, never makes one: pinning stays a choice made with the pin toggle
+    const p = pinOf(node, pin[1]);
+    if (p) p[pin[2] as 'x' | 'y'] = n;
     return;
   }
   switch (path) {
@@ -556,6 +575,12 @@ for (const [kind, spec] of Object.entries(EFFECTS)) {
   for (const [param, [min, max, step, unit]] of Object.entries(spec.params)) {
     PROPS[`effect.${kind}.${param}`] = { on: 'node', label: `${spec.label} ${param}`, range: [min, max, step, unit], group: 'effect',
       help: `${spec.label} effect: ${param}. ${spec.blurb}` };
+  }
+}
+for (const k of ['a', 'b', 'c']) {
+  for (const axis of ['x', 'y']) {
+    PROPS[`limb.pin.${k}.${axis}`] = { on: 'node', label: `Pin ${axis.toUpperCase()}`, range: [-2000, 2000, 1, 'px'], group: 'pin',
+      help: `Limbs only, once point ${k} is pinned: where it is held, world px ${axis === 'x' ? 'right of' : 'down from'} the composition centre. Keyframe it to move the pin.` };
   }
 }
 const CHAR_RANGE: Record<string, [number, number, number, string]> = {

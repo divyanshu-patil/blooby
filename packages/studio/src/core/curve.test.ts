@@ -147,3 +147,22 @@ const c: Curve = { points: wave, closed: false };
   it('a text layer lands where the Text tool was clicked', check(Math.abs(t.cx - 200) < 1 && Math.abs(t.cy - 150) < 1));
   ed().loadProject(defaultProject());
 }
+
+// --- a curve made a rubber hose keeps its ends and its length ------------------------
+{
+  const p = defaultProject();
+  const n = makeCurveLayer([{ x: -100, y: 0 }, { x: 0, y: -60 }, { x: 100, y: 0 }], { width: 10 })!;
+  p.rig.nodes[n.id] = n;
+  const ed = () => useEditor.getState();
+  ed().loadProject(p);
+  const before = sceneAt(ed().project, 0, compOf(p)).find((s) => s.id === n.id)!;
+  ed().curveToHose(n.id);
+  const l = ed().project.rig.nodes[n.id].limb;
+  it('a curve made a hose is a limb from its start to its end', check(!!l && Math.abs(l.a.x + 100) < 1 && Math.abs(l.c!.x - 100) < 1 && Math.abs(l.a.y) < 1, JSON.stringify(l)));
+  it('through its middle, at its own length and stroke width', check(!!l && Math.abs(l.b.y + 60) < 8 && l.length > 200 && l.thickness === 10, JSON.stringify(l)));
+  const after = sceneAt(ed().project, 0, compOf(p)).find((s) => s.id === n.id)!;
+  it('and it still draws about where the curve was', check(!!after?.limb && Math.abs(after.cx - before.cx) < 12, `${after?.cx} vs ${before.cx}`));
+  ed().undo();
+  it('undo gives the curve back', check(!!ed().project.rig.nodes[n.id].curve));
+  ed().loadProject(defaultProject());
+}

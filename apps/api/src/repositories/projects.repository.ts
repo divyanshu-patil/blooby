@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
+import { rankTrending, TRENDING_POOL } from '../utils/trending.js';
 
 /**
  * Data access for projects. Deliberately thin: it knows how to read and write rows and
@@ -24,6 +25,39 @@ export const projectsRepository = {
     });
     return page(rows, opts.limit);
   },
+
+  /**
+   * Public projects for the community page, with their owner's username. Newest is keyset
+   * paged like everything else; trending is one ranked page (a score has no stable cursor).
+   */
+  async listPublic(opts: { limit: number; cursor?: string; q?: string; sort: 'trending' | 'newest' }) {
+    const where: Prisma.ProjectWhereInput = {
+      visibility: 'public',
+      ...(opts.q ? { name: { contains: opts.q, mode: 'insensitive' } } : {}),
+    };
+    const select = {
+      id: true, userId: true, name: true, thumbnailUrl: true, access: true, viewCount: true, duplicateCount: true,
+      createdAt: true, updatedAt: true,
+    } satisfies Prisma.ProjectSelect;
+    let items;
+    let nextCursor: string | null = null;
+    if (opts.sort === 'trending') {
+      const pool = await prisma.project.findMany({ where, select, orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }], take: TRENDING_POOL });
+      items = rankTrending(pool, (p) => p.viewCount + p.duplicateCount * 3, (p) => p.updatedAt, opts.limit);
+    } else {
+      const rows = await prisma.project.findMany({
+        where, select, orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }], take: opts.limit + 1,
+        ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+      });
+      ({ items, nextCursor } = page(rows, opts.limit));
+    }
+    const owners = await prisma.profile.findMany({ where: { id: { in: [...new Set(items.map((p) => p.userId))] } }, select: { id: true, username: true } });
+    const name = new Map(owners.map((o) => [o.id, o.username]));
+    return { items: items.map((p) => ({ ...p, owner: name.get(p.userId) ?? null })), nextCursor };
+  },
+
+  countView: (id: string) => prisma.project.update({ where: { id }, data: { viewCount: { increment: 1 } } }),
+  countDuplicate: (id: string) => prisma.project.update({ where: { id }, data: { duplicateCount: { increment: 1 } } }),
 
   create: (data: Prisma.ProjectUncheckedCreateInput) => prisma.project.create({ data }),
 

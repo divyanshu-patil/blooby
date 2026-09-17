@@ -16,6 +16,9 @@ import { EFFECT_KINDS, makeEffect } from './effects';
   const rig = defaultProject().rig;
   // a leg has every limb property there is — the foot and the ankle included
   rig.nodes.legProbe = makeLimb('leg', 1, rig.rootId, { id: 'legProbe' });
+  // …with every point pinned, so each pin's position has somewhere to live
+  rig.nodes.legProbe.limb!.pin = { x: 0, y: 0 };
+  rig.nodes.legProbe.limb!.pins = { a: { x: 0, y: 0 }, b: { x: 0, y: 0 }, c: { x: 0, y: 0 } };
   // and a text layer has every typography property
   rig.nodes.textProbe = makeTextLayer('probe', { id: 'textProbe' });
   // and the body wears every effect and a gradient, so their params have somewhere to live

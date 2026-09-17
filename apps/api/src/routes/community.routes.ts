@@ -5,6 +5,9 @@ import { assetsController } from '../controllers/assets.controller.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { uuidParam } from '../dtos/common.js';
 import { listAssetsDto } from '../dtos/assets/index.js';
+import { listPublicProjectsDto } from '../dtos/projects/index.js';
+import { projectsController } from '../controllers/projects.controller.js';
+import { analyticsService } from '../services/analytics.service.js';
 
 /**
  * The community surface is the same asset browse with `source` pinned — one service, one
@@ -22,4 +25,7 @@ communityRoutes.get('/', optionalAuth, pin('community'), validate(listAssetsDto,
 communityRoutes.get('/presets', optionalAuth, pin('community'), validate(listAssetsDto.extend({}), 'query'), asyncHandler(assetsController.browse));
 communityRoutes.get('/expressions', optionalAuth, pin('community'), validate(listAssetsDto, 'query'), asyncHandler(assetsController.browse));
 communityRoutes.get('/official', optionalAuth, pin('official'), validate(listAssetsDto, 'query'), asyncHandler(assetsController.browse));
+// public projects (trending or newest) and the public insights — before '/:id', which would take them
+communityRoutes.get('/projects', validate(listPublicProjectsDto, 'query'), asyncHandler(projectsController.listPublic));
+communityRoutes.get('/insights', asyncHandler((_req, res) => analyticsService.insights(8, true).then((r) => res.json(r))));
 communityRoutes.get('/:id', optionalAuth, validate(uuidParam('id'), 'params'), asyncHandler(assetsController.get));

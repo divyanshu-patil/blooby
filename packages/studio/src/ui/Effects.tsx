@@ -111,7 +111,10 @@ export function Effects() {
   // the block can vanish out from under a stale id for one render (removed elsewhere) —
   // fall back to global rather than silently offering to add effects to a dead clip.
   const clipScoped = !!selectedBlockId && !!block;
-  const list = tl.modifiers.filter((m) => (clipScoped ? m.blockId === selectedBlockId : !m.blockId));
+  // with a layer selected, only that layer's own effects — a busy rig otherwise buries them
+  const mine = (nodeId: string | undefined) => !selection.length || selection.includes(nodeId ?? project.rig.rootId);
+  const inScope = tl.modifiers.filter((m) => (clipScoped ? m.blockId === selectedBlockId : !m.blockId));
+  const list = inScope.filter((m) => mine(m.nodeId));
   const scope = clipScoped ? selectedBlockId! : undefined;
 
   // The layers a new effect can land on. Body, both eyes together, then each eye — the
@@ -128,7 +131,9 @@ export function Effects() {
   const target = known(targetId) ? targetId! : (selection[0] ?? project.rig.rootId);
   // BOTH_EYES is not a node, so anything that needs real ids expands it
   const targetIds = target === BOTH_EYES ? eyes.map((n) => n.id) : [target];
-  const emitters = (tl.emitters ?? []).filter((e) => (clipScoped ? e.blockId === selectedBlockId : !e.blockId));
+  const scopedEmitters = (tl.emitters ?? []).filter((e) => (clipScoped ? e.blockId === selectedBlockId : !e.blockId));
+  const emitters = scopedEmitters.filter((e) => mine(e.from.nodeId));
+  const hidden = inScope.length - list.length + scopedEmitters.length - emitters.length;
   const span = scopeSpan(tl, scope)[1];
   /** One per targeted layer, so "both eyes" is one click rather than two identical ones. */
   const addToTargets = (make: (nodeId: string) => void) => targetIds.forEach(make);
@@ -177,6 +182,9 @@ export function Effects() {
           </select>
         )}
       </div>
+      {hidden > 0 && (
+        <p className="hint">{hidden} more on other layers — deselect to see every effect.</p>
+      )}
 
       <Collapsible title="Modifiers" storageKey="modifiers" badge={list.length || undefined} actions={
         <button className="btn sm" onClick={() => setPicking('modifier')}>+ Add…</button>

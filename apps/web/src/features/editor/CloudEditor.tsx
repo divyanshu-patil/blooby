@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
   Dialog, Editor, ErrorState, SaveIndicator, projectsApi, useAutosave, useEditor,
-  type Project,
+  type Project, type ProjectRow,
 } from '@blooby/studio';
 
 /**
@@ -19,8 +20,24 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const loadedFor = useRef<string | null>(null);
+  const [meta, setMeta] = useState<ProjectRow | null>(null);
+  const [canEdit, setCanEdit] = useState(true);
+  const [isOwner, setIsOwner] = useState(true);
+  const [sharing, setSharing] = useState(false);
+  const navigate = useNavigate();
 
-  const { state, savedAt, conflict, saveNow, setBaseVersion } = useAutosave(projectId, project, !loading && !error);
+  // someone else's view-only project never autosaves: there is nowhere it may write
+  const { state, savedAt, conflict, saveNow, setBaseVersion } = useAutosave(projectId, project, !loading && !error && canEdit);
+
+  /** visibility and access are the owner's; the row that comes back is the truth */
+  const share = (body: { visibility?: 'private' | 'public'; access?: 'view' | 'edit' }) => {
+    setSharing(true);
+    projectsApi.update(projectId, body).then(setMeta).catch(() => {}).finally(() => setSharing(false));
+  };
+  const duplicate = async () => {
+    setSharing(true);
+    try { navigate(`/projects/${(await projectsApi.duplicate(projectId)).id}`); } finally { setSharing(false); }
+  };
 
   useEffect(() => {
     let live = true;
@@ -29,15 +46,20 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
 
     projectsApi
       .getData(projectId)
-      .then(({ project: meta, data }) => {
+      .then(({ project: meta, data, canEdit: may, isOwner: mine }) => {
         if (!live) return;
-        loadProject(data as Project);
+        setMeta(meta);
+        setCanEdit(may ?? true);
+        setIsOwner(mine ?? true);
+        // the JSON has no say in the name — the project row does (a new project's JSON is `{}`,
+        // which loaded as "Untitled" and then autosaved that over the name just typed)
+        loadProject({ ...(data as Project), name: meta.name });
         setBaseVersion(meta.currentVersion, meta.name);
         setName(meta.name);
         loadedFor.current = projectId;
         setLoading(false);
-        // "recently opened" only means something if opening records itself
-        void projectsApi.markOpened(projectId).catch(() => {});
+        // "recently opened" only means something if opening records itself — your own list only
+        if (mine ?? true) void projectsApi.markOpened(projectId).catch(() => {});
       })
       .catch((e: unknown) => {
         if (!live) return;
@@ -62,11 +84,37 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
             is the editor's own name field — there is nothing left for a second bar. */}
         <Editor cloudBar={
           <span className="cloudsave">
-            <SaveIndicator state={state} savedAt={savedAt} onRetry={() => void saveNow()} />
-            <button className="btn sm" onClick={() => void saveNow()} disabled={state === 'saving'}
-              title="Save to the cloud now instead of waiting for autosave">
-              <CloudIcon /> Save now
-            </button>
+            {canEdit ? (
+              <>
+                <SaveIndicator state={state} savedAt={savedAt} onRetry={() => void saveNow()} />
+                <button className="btn sm" onClick={() => void saveNow()} disabled={state === 'saving'}
+                  title="Save to the cloud now instead of waiting for autosave">
+                  <CloudIcon /> Save now
+                </button>
+              </>
+            ) : (
+              <span className="tag" title="Changes here are not saved. Duplicate it to keep your own copy.">View only</span>
+            )}
+            {isOwner && meta && (
+              <>
+                <select className="sel" aria-label="Who can see it" value={meta.visibility} disabled={sharing}
+                  title="Public projects are listed in the Community tab"
+                  onChange={(e) => share({ visibility: e.target.value as 'private' | 'public' })}>
+                  <option value="private">Private</option>
+                  <option value="public">Public</option>
+                </select>
+                {meta.visibility === 'public' && (
+                  <select className="sel" aria-label="What others can do" value={meta.access ?? 'view'} disabled={sharing}
+                    title="View: anyone can open and duplicate it. Edit: anyone signed in can also change it."
+                    onChange={(e) => share({ access: e.target.value as 'view' | 'edit' })}>
+                    <option value="view">Can view</option>
+                    <option value="edit">Can edit</option>
+                  </select>
+                )}
+              </>
+            )}
+            <button className="btn sm" onClick={() => void duplicate()} disabled={sharing}
+              title="Make a copy in your own projects">Duplicate</button>
           </span>
         } />
       </div>

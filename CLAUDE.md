@@ -65,8 +65,8 @@ Everything else reads a `Project`.
 | `core/defaults.ts` | the default mascot, builtin presets, `makeTimeline` |
 | `core/showcase.ts` | the showcase presets, several-mascot ones included (they bring their own layers + ranges) |
 | `core/textPresets.ts` | curved-text and letters-arriving presets; `textPresetOnto` plays one on the selected text |
-| `core/layers.ts` | **every layer operation** — order, attach, group, duplicate, appearance, SVG/shape/limb/text/curve makers, `addMascot`. Store and copilot both call it |
-| `core/squish.ts` | squish presets — keyframe actions written at the playhead (`applySquish`) |
+| `core/layers.ts` | **every layer operation** — order, attach, group, duplicate, appearance, SVG/shape/limb/text/curve makers, curve → rubber hose, `addMascot`. Store and copilot both call it |
+| `core/squish.ts` | squish presets and eye actions (blink, squint, close) — keyframe actions written at the playhead (`applySquish`, `applyEyeAction`) |
 | `core/appPresets.ts` | the ten app-screen presets (refresh, search, empty states, tap to start…) |
 | `core/mascotKit.ts` | the app mascot kit: generating/failed/completed, cards, hero, cloud, empty and error states, celebrations, reactions — Lottie-safe, `KIT_ASSETS` maps presets to `.lottie` states. Also builds five of the app presets |
 | `core/cinematicPresets.ts` | the ten cinematic presets (portal, morph, walk + parallax, particles, liquid, glitch, doodle, title, card flip, showreel) and `sequence()` |
@@ -117,6 +117,11 @@ See `COPILOT.md`.
 Standard layering, one file per resource at each level:
 `routes/ → controllers/ → services/ → repositories/ → prisma`.
 DTOs in `dtos/`, cross-cutting concerns in `middlewares/`.
+
+Sharing: a project is `private` or `public`, and while public its `access` is `view` (open and
+duplicate) or `edit` (any signed-in user saves to it, under the owner's storage key). Both are
+checked once, in `services/projects.service.ts`. Public projects, the trending sort and the public
+insights are under `/community`; trending is `utils/trending.ts`.
 
 ## Conventions that will trip you up
 

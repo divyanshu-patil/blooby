@@ -34,7 +34,7 @@ export const listAssetsDto = paginationDto.extend({
   source: assetSource.optional(),
   category: z.string().trim().max(60).optional(),
   tag: z.string().trim().max(30).optional(),
-  sort: z.enum(['newest', 'popular', 'name']).default('newest'),
+  sort: z.enum(['newest', 'popular', 'name', 'trending']).default('newest'),
 });
 export type ListAssetsDto = z.infer<typeof listAssetsDto>;
 

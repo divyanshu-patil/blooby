@@ -7,7 +7,7 @@ import { applyPose } from './poses';
 import { limbPoints as limbPointsOf } from './limb';
 import { absentHere, applyScaleAsBase, moveInto, setRole, makeCurveLayer, makeLimb, makeLimbPair, makeShapeLayer, ownLayer, pinLimb, removeLayer, setFaceRole } from './layers';
 import { faceOf, mascotOf } from './mascot';
-import { applySquish, SQUISH_PRESETS } from './squish';
+import { applyEyeAction, applySquish, SQUISH_PRESETS } from './squish';
 import { migrateProject } from './migrate';
 import { useEditor } from './store';
 import { applyEasing } from './easing';
@@ -347,4 +347,13 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
   it('saved mascots get one too', check(project.mascotTemplates![0].nodes.some((n) => n.role === 'face') && project.mascotTemplates![0].nodes.find((n) => n.id === 'b2e')!.parentId === 'b2.face'));
   it('and running it again changes nothing', check(migrateProject(project).applied.length === 0));
   it('an empty document survives it', check((() => { try { migrateProject({ schemaVersion: 6 } as unknown as Project); return true; } catch { return false; } })()));
+}
+
+// --- eye actions: a blink at the playhead is openness keys on both eyes -------------------
+{
+  const p = defaultProject();
+  applyEyeAction(p, ['eyeL', 'eyeR'], 'blink', 2000);
+  const keys = (id: string) => activeTimeline(p).tracks.filter((t) => t.nodeId === id && t.property === 'eye.openness').flatMap((t) => t.keyframes).filter((k) => k.time >= 2000 && k.time <= 2220);
+  it('a blink writes closed-then-open keys on each eye from the playhead', check(['eyeL', 'eyeR'].every((id) => keys(id).some((k) => k.value === 0.05) && keys(id).some((k) => k.time === 2220 && k.value === 1)), JSON.stringify(keys('eyeL'))));
+  it('an unknown action writes nothing', check(!applyEyeAction(p, ['eyeL'], 'wink', 0) && !applyEyeAction(p, ['body'], 'blink', 0)));
 }
