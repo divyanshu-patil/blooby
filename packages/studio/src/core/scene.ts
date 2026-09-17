@@ -114,12 +114,14 @@ const smoothstep = (u: number) => { const v = Math.min(1, Math.max(0, u)); retur
  * A procedural walk, evaluated at any instant — no simulation, so scrubbing is exact.
  *
  * `gain` is the stride in px per step (its sign is the direction), `frequency` steps per
- * second. The body travels `stride` per step and bobs: lowest at each contact, highest at
- * passing. Each foot is PLANTED for half a cycle — sliding back in the body's frame at
- * exactly the speed the body moves forward, so in the world it stays put — then swings
- * forward, lifted. Its knee bends forward. Arms swing opposite their legs, and the face
- * lags the bob a touch. Legs and arms are found by role; everything reads their evaluated
- * pose as rest, so a walk plays over whatever pose the clip keyed.
+ * second. The body travels `stride` per step, turns a little toward where it is going, leans
+ * into it and bobs smoothly: lowest at each contact, highest at passing. Each foot is PLANTED
+ * for half a cycle — sliding back in the body's frame at exactly the speed the body moves
+ * forward, so in the world it stays put — then swings forward, lifted, rolling heel to toe.
+ * Knees are solved from the leg's own thigh and shin lengths and bend forward; feet point the
+ * way it walks. Arms swing from the shoulder opposite their legs, and the face lags the bob.
+ * A mascot without legs waddles: it rocks side to side on each step instead.
+ * Everything reads the evaluated pose as rest, so a walk plays over whatever the clip keyed.
  */
 function walkCycle(rig: Rig, body: RigNode, m: Modifier, tSec: number, stride: number) {
   // it speeds up from a standstill and slows into one: steps are the integral of a speed that
@@ -138,45 +140,97 @@ function walkCycle(rig: Rig, body: RigNode, m: Modifier, tSec: number, stride: n
     body.surface.flatOffset = { x: off.x + stride * steps, y: off.y };
     return;
   }
-  const bob = -Math.abs(Math.sin(Math.PI * steps)) * len * 0.1;
+  const going = speedAt(Math.min(tSec, span));
+  const limbs = Object.values(rig.nodes).filter((x) => x.limb && mascotOfRig(rig, x.id)?.id === body.id);
+  const legged = limbs.some((x) => x.limb!.type === 'leg');
+
+  // smooth bob — no cusp at contact; a waddle bobs more, having no knees to soak it up
+  const bob = -((1 - Math.cos(2 * Math.PI * steps)) / 2) * len * (legged ? 0.1 : 0.16);
   const off = body.surface.flatOffset ?? { x: 0, y: 0 };
   body.surface.flatOffset = { x: off.x + stride * steps, y: off.y + bob };
-  body.transform.rotation += dir * 2.5;
+  // lean into the walk and — waddling — rock side to side per step
+  // (no rock on legs: a changing roll would drag a planted foot across the ground)
+  body.transform.rotation += dir * 3 * going + (legged ? 0 : Math.sin(Math.PI * steps) * 7 * going);
   // a little squash on every contact
   const ph = frac(steps), near = Math.min(ph, 1 - ph);
   const c = Math.exp(-((near / 0.09) ** 2));
   const sqx = 1 + 0.05 * c, sqy = 1 - 0.05 * c;
   body.squish = { x: (body.squish?.x ?? 1) * sqx, y: (body.squish?.y ?? 1) * sqy };
 
-  for (const n of Object.values(rig.nodes)) {
-    if (!n.limb || mascotOfRig(rig, n.id)?.id !== body.id) continue;
-    const l = n.limb;
-    const right = n.role ? n.role.endsWith('R') : l.a.x > 0;
+  for (const node of limbs) {
+    const l = node.limb!;
+    const right = node.role ? node.role.endsWith('R') : l.a.x > 0;
     if (l.type === 'leg') {
       const end = l.c ?? l.b;
       const s = frac(steps / 2 + (right ? 0.5 : 0));
-      let x: number, lift = 0;
-      if (s < 0.5) x = end.x + dir * len * (0.5 - s * 2);            // planted: slides back as the body goes on
-      else { const u = (s - 0.5) * 2; x = end.x + dir * len * (-0.5 + smoothstep(u)); lift = Math.sin(Math.PI * u) * len * 0.3; }
+      let x: number, lift = 0, toe = 0;
+      if (s < 0.5) {
+        // planted: slides back as the body goes on; the heel peels up just before it leaves
+        x = end.x + dir * len * (0.5 - s * 2);
+        toe = -26 * smoothstep((s - 0.38) / 0.12);
+      } else {
+        const u = (s - 0.5) * 2;
+        x = end.x + dir * len * (-0.5 + smoothstep(u));
+        lift = Math.sin(Math.PI * u) * len * 0.3;
+        // toe down as it pushes off, toe up as it reaches for the heel strike
+        toe = -26 * (1 - smoothstep(u / 0.35)) + 14 * Math.sin(Math.PI * smoothstep((u - 0.45) / 0.55));
+      }
       // divided by the squash the body frame now carries, so a planted foot stays planted through it
       const foot = { x: x / sqx, y: (end.y - lift - bob) / sqy };
       if (l.c) {
-        l.b = { x: (l.a.x + foot.x) / 2 + dir * len * 0.16, y: (l.a.y + foot.y) / 2 - lift * 0.3 };
+        l.b = knee(l.a, foot, Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y), Math.hypot(l.c.x - l.b.x, l.c.y - l.b.y), dir);
         l.c = foot;
       } else l.b = foot;
+      if (l.foot) l.foot = { ...l.foot, angle: footFacing(Math.sign(l.a.x) || 1, dir, toe) };
     } else {
-      const swing = Math.sin(2 * Math.PI * (steps / 2 + (right ? 0 : 0.5)));
-      const end = l.c ?? l.b;
-      const hand = { x: end.x + dir * swing * len * 0.35, y: end.y - Math.abs(swing) * len * 0.06 };
-      if (l.c) { l.b = { x: l.b.x + dir * swing * len * 0.15, y: l.b.y }; l.c = hand; } else l.b = hand;
+      // from the shoulder, opposite the leg on its side; the elbow follows most of the way
+      const swing = Math.sin(2 * Math.PI * (steps / 2 + (right ? 0 : 0.5))) * going;
+      const turn = (p: Vec2, deg: number): Vec2 => {
+        const r = (deg * Math.PI) / 180, dx = p.x - l.a.x, dy = p.y - l.a.y;
+        return { x: l.a.x + dx * Math.cos(r) - dy * Math.sin(r), y: l.a.y + dx * Math.sin(r) + dy * Math.cos(r) };
+      };
+      // rotating toward the direction of travel means turning against the screen's y-down sense
+      const deg = -dir * swing * 24;
+      if (l.c) { l.b = turn(l.b, deg * 0.7); l.c = turn(l.c, deg); } else l.b = turn(l.b, deg);
     }
   }
-  // the face trails the bob
-  const face = Object.values(rig.nodes).find((n) => n.parentId === body.id && n.role === 'face');
+  // the face looks where it is going and trails the bob. The face turns, not the body: a body's
+  // turn narrows its frame, which would slide a planted foot
+  const face = Object.values(rig.nodes).find((x) => x.parentId === body.id && x.role === 'face');
   if (face) {
     const fo = face.surface.flatOffset ?? { x: 0, y: 0 };
-    face.surface.flatOffset = { x: fo.x, y: fo.y - Math.abs(Math.sin(Math.PI * (steps - 0.12))) * len * 0.035 };
+    face.surface.flatOffset = { x: fo.x, y: fo.y + ((1 - Math.cos(2 * Math.PI * (steps - 0.12))) / 2) * len * -0.035 };
+    face.surface.yaw += dir * 14 * going;
+  } else {
+    for (const x of Object.values(rig.nodes)) if (x.parentId === body.id && x.surface.mapped) x.surface.yaw += dir * 14 * going;
   }
+}
+
+/** Two-bone IK: where the knee goes for a hip, a foot and the thigh/shin lengths, bent toward `dir`. */
+function knee(hip: Vec2, foot: Vec2, thigh: number, shin: number, dir: number): Vec2 {
+  const dx = foot.x - hip.x, dy = foot.y - hip.y;
+  const d = Math.max(1e-6, Math.hypot(dx, dy));
+  // out of reach: straight (the hose stretches to meet the foot, as a pin does)
+  if (d >= thigh + shin - 1e-6 || thigh < 1 || shin < 1) return { x: hip.x + (dx / d) * Math.min(thigh, d * 0.5), y: hip.y + (dy / d) * Math.min(thigh, d * 0.5) };
+  const along = (thigh * thigh - shin * shin + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, thigh * thigh - along * along));
+  // the perpendicular that points in the walking direction — knees bend forward
+  let px = -dy / d, py = dx / d;
+  if (Math.sign(px) !== dir) { px = -px; py = -py; }
+  return { x: hip.x + (dx / d) * along + px * h, y: hip.y + (dy / d) * along + py * h };
+}
+
+/**
+ * The `foot.angle` that points a foot the way the mascot walks with its toe tipped `toe`°
+ * (positive up). A foot is drawn pointing outward from its side (limb.ts), so the foot on the
+ * trailing side is turned round.
+ */
+function footFacing(side: number, dir: number, toe: number): number {
+  const r = (toe * Math.PI) / 180;
+  const want = { x: dir * Math.cos(r), y: -Math.sin(r) };
+  // limb.ts: dir = (cos(a)·side, sin(a)) with a = -angle·side (radians)
+  const a = Math.atan2(want.y, want.x * side);
+  return (-a * 180) / Math.PI / side;
 }
 
 /** the mascot a node belongs to, on an evaluated rig (mascot.ts works on the same shape) */
@@ -254,6 +308,34 @@ function jellyBody(node: RigNode, m: Modifier, tSec: number, past: Past) {
     x = (x / Math.max(0.3, sy)) * (1 + 0.35 * splat * (low - 0.5));
     return { x, y: yy };
   });
+}
+
+/** The modifiers that move a layer bodily — what a motion-driven driver can feel. Never follow or jelly themselves. */
+const MOVERS = new Set<Modifier['kind']>(['float', 'shake', 'pendulum', 'walk']);
+const MOTION_PATHS = new Set(['flatOffset.x', 'flatOffset.y', 'transform.rotation']);
+
+/**
+ * How far `nodeId`'s moving modifiers have pushed `path` at `ms`: each one applied to a bare copy
+ * of the node (zeroed offset and roll), so what comes back is exactly its displacement.
+ */
+function modifierMotion(rig: Rig, tl: Timeline, nodeId: string, path: string, ms: number): number {
+  const src = rig.nodes[nodeId];
+  if (!src || !MOTION_PATHS.has(path)) return 0;
+  let d = 0;
+  for (const m of tl.modifiers) {
+    if (m.nodeId !== nodeId || !MOVERS.has(m.kind)) continue;
+    const local = scopeTime(tl, m, ms);
+    if (local === null) continue;
+    const node: RigNode = {
+      ...src, surface: { ...src.surface, flatOffset: { x: 0, y: 0 } },
+      transform: { ...src.transform, rotation: 0, scale: { ...src.transform.scale } },
+    };
+    const ease = settleOf(tl, m, local);
+    applyModifier({ ...rig, nodes: { [nodeId]: node } }, ease < 1 ? { ...m, amount: m.amount * ease } : m, local / 1000);
+    const got = getProp(node, path);
+    d += typeof got === 'number' ? got : 0;
+  }
+  return d;
 }
 
 const PENDULUM_AXIS: Record<ModifierAxis, string> = {
@@ -461,6 +543,8 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
   const resolvedTl = { ...tl, tracks: resolved };
   // keyframed values back through time, for drivers that react to motion (follow, jelly, letters facing their way)
   const pastCache = new Map<string, number>();
+  // a mascot floating, shaking, swaying or walking moves as surely as a keyframed one — follow-through and jelly react to both
+  const movers = new Set(tl.modifiers.filter((m) => MOVERS.has(m.kind)).map((m) => m.nodeId));
   const past: Past = (nodeId, path, tSec) => {
     const ms = Math.max(0, Math.round(tSec * 1000));
     const key = `${nodeId}|${path}|${ms}`;
@@ -469,7 +553,7 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
       // through the tracks this evaluation already resolved, not valueAt: that would resolve the loop again per sample
       const tr = activeTrackFor(resolvedTl, nodeId, path, ms, project.rig);
       const got = tr ? sampleTrack(tr, tr.blockId ? blockSampleTime(project, tl, tr.blockId, ms) : ms) : readProp(project.rig, nodeId, path);
-      v = typeof got === 'number' ? got : 0;
+      v = (typeof got === 'number' ? got : 0) + (movers.has(nodeId) ? modifierMotion(project.rig, tl, nodeId, path, ms) : 0);
       pastCache.set(key, v);
     }
     return v;
