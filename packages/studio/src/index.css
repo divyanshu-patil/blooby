@@ -1357,3 +1357,27 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 .limb-pin[data-on] circle { fill: var(--ink); stroke: var(--ink); }
 .limb-pin[data-on] path { stroke: var(--paper); }
 .limb-pt.pinned { stroke-dasharray: 2 2; }
+
+/*
+ * Hit slop. Small controls also take a click a few px beyond their edges.
+ *
+ * The slop is a transparent ::before BEHIND the control's own content: `isolation` gives each
+ * control its own stacking context, and z-index -1 puts the pseudo-element under the control's
+ * children but over its background. So a click on the icon, the label or the swatch still
+ * reaches that child and bubbles up to the button as it always did. A slop drawn on top would
+ * swallow those clicks, and one without the stacking context could hide under a panel's
+ * background and catch nothing. :where() keeps specificity at 0, so a control positioned
+ * absolutely by its own class stays that way.
+ */
+:where(.btn.sm, .btn.icon, .layer-btn, .chip-pub, .stage-meta-size, .cp-swatch, .sw, .stopwatch, .keychev, .expand) {
+  position: relative;
+  isolation: isolate;
+}
+:where(.btn.sm, .btn.icon, .layer-btn, .chip-pub, .stage-meta-size)::before {
+  content: ''; position: absolute; inset: -4px; z-index: -1;
+}
+/* the smallest (12–15px) get more */
+:where(.cp-swatch, .sw, .stopwatch, .keychev, .expand)::before {
+  content: ''; position: absolute; inset: -6px; z-index: -1;
+}
+:where(.btn.sm, .btn.icon, .layer-btn, .chip-pub, .stage-meta-size, .cp-swatch, .sw, .stopwatch, .keychev, .expand):disabled::before { content: none; }

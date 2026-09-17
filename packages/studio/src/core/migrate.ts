@@ -3,6 +3,7 @@ import { showcasePresets } from './showcase';
 import { textPresets } from './textPresets';
 import { appPresets } from './appPresets';
 import { cinematicPresets } from './cinematicPresets';
+import { mascotKitPresets } from './mascotKit';
 import { slug } from './stateMachine';
 import { ensureFaces } from './mascot';
 import type { Block, Modifier, Project, Track } from './types';
@@ -28,7 +29,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 interface Migration {
   /** the version this step produces */
@@ -242,6 +243,26 @@ const MIGRATIONS: Migration[] = [
       const have = new Set(p.presets.map((x) => x?.id));
       const lastApp = Math.max(-1, ...appPresets().map((t) => p.presets.findIndex((x) => x?.id === t.id)));
       p.presets.splice(lastApp + 1 || p.presets.length, 0, ...cinematicPresets().filter((x) => !have.has(x.id)));
+    },
+  },
+  {
+    to: 10,
+    label: 'app mascot kit',
+    /**
+     * The app mascot kit (core/mascotKit.ts) after the app screen presets, and the five app
+     * presets it rebuilt (refresh, search, no results, no saved, no decks) swapped for their new
+     * versions — only where the file still holds the builtin, never a user's own preset.
+     */
+    run(p) {
+      if (!Array.isArray(p.presets)) return;
+      const fresh = new Map(appPresets().map((x) => [x.id, x]));
+      for (const id of ['p_app_refresh', 'p_app_search', 'p_app_noresults', 'p_app_nosaved', 'p_app_nodecks']) {
+        const i = p.presets.findIndex((x) => x?.id === id && x.source === 'builtin');
+        if (i >= 0) p.presets[i] = fresh.get(id)!;
+      }
+      const have = new Set(p.presets.map((x) => x?.id));
+      const lastApp = Math.max(-1, ...appPresets().map((t) => p.presets.findIndex((x) => x?.id === t.id)));
+      p.presets.splice(lastApp + 1 || p.presets.length, 0, ...mascotKitPresets().filter((x) => !have.has(x.id)));
     },
   },
 ];

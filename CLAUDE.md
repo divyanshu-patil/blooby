@@ -68,6 +68,7 @@ Everything else reads a `Project`.
 | `core/layers.ts` | **every layer operation** — order, attach, group, duplicate, appearance, SVG/shape/limb/text/curve makers, `addMascot`. Store and copilot both call it |
 | `core/squish.ts` | squish presets — keyframe actions written at the playhead (`applySquish`) |
 | `core/appPresets.ts` | the ten app-screen presets (refresh, search, empty states, tap to start…) |
+| `core/mascotKit.ts` | the app mascot kit: generating/failed/completed, cards, hero, cloud, empty and error states, celebrations, reactions — Lottie-safe, `KIT_ASSETS` maps presets to `.lottie` states. Also builds five of the app presets |
 | `core/cinematicPresets.ts` | the ten cinematic presets (portal, morph, walk + parallax, particles, liquid, glitch, doodle, title, card flip, showreel) and `sequence()` |
 | `core/effects.ts` | the layer effect stack (`EFFECTS`): glow, blur, shadow, RGB split, slices, scanlines, flicker, jitter, echo, goo |
 | `core/mascot.ts` | what a mascot is: `makeMascot`, roles, `mascotOf`, lanes, `retargetId` (a preset onto another mascot) |

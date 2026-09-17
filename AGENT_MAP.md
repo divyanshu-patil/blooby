@@ -46,6 +46,13 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
 - Presets: `core/cinematicPresets.ts` (`settled` = open on rest + looped; `sequence()` joins
   presets). Negative preset-layer zIndex → behind the rig (`addPresetLayers`). Migration 9.
 
+## App mascot kit
+- `core/mascotKit.ts mascotKitPresets()` + `KIT_ASSETS` (file → input → state → preset id). Lottie-safe only
+  (no filter effects; `mascotKit.test.ts` bakes each). Loops authored closed with `sine()` (no seam snap, tested).
+  Hands in front of the body = `mitten{L,R}` art riding the arm point (`mittenHand`). Builds 5 app presets
+  (refresh = scrubbed, search, noresults, nosaved, nodecks); migration 10 swaps builtin copies.
+- Hit slop: `:where(...)::before` behind children in index.css (end of file).
+
 ## Values & keyframes
 - `core/props.ts PROPS` table + `getProp/setProp` switch = every animatable property.
   Inspector `PropRow`, timeline lanes, copilot validation all read it.

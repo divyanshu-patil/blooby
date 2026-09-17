@@ -1,6 +1,7 @@
 import { art, both, k, limb, looped, onMascot, point, tr, uniform, words, flat, type E } from './showcase';
-import { makeCurveLayer, makeShapeLayer } from './layers';
+import { makeShapeLayer } from './layers';
 import type { Appearance, Preset, RigNode, Track } from './types';
+import { INK, noDecksHere, noSavedDecks, noSearchResults, pullToRefresh, startSearch } from './mascotKit';
 
 /**
  * Ten presets for the screens an app actually has: refresh, a profile, search and its empty
@@ -17,18 +18,7 @@ import type { Appearance, Preset, RigNode, Track } from './types';
  * people search for ("empty state"), so the copilot finds them.
  */
 
-const INK = '#141318';
 
-const MAGNIFIER = `<svg viewBox="0 0 100 100">
-  <circle cx="40" cy="40" r="26" fill="#dff2ff" fill-opacity="0.55" stroke="${INK}" stroke-width="9"/>
-  <path d="M59 59 L86 86" stroke="${INK}" stroke-width="14" stroke-linecap="round"/>
-  <path d="M28 30 A14 14 0 0 1 40 22" stroke="#ffffff" stroke-width="5" stroke-linecap="round" fill="none"/>
-</svg>`;
-const EMPTY_DECK = `<svg viewBox="0 0 120 150">
-  <rect x="22" y="6" width="90" height="124" rx="12" fill="#e9e3d7" stroke="${INK}" stroke-width="5"/>
-  <rect x="8" y="18" width="90" height="124" rx="12" fill="#ffffff" stroke="${INK}" stroke-width="5"/>
-  <path d="M30 60 H76 M30 78 H62" stroke="#c9c1b1" stroke-width="7" stroke-linecap="round" stroke-dasharray="1 13"/>
-</svg>`;
 const DECK_SLOT = `<svg viewBox="0 0 120 150">
   <rect x="8" y="8" width="104" height="134" rx="14" fill="none" stroke="#9c9486" stroke-width="5" stroke-dasharray="14 10"/>
   <path d="M60 52 V98 M37 75 H83" stroke="#9c9486" stroke-width="7" stroke-linecap="round"/>
@@ -37,9 +27,6 @@ const NEW_DECK = `<svg viewBox="0 0 120 150">
   <rect x="20" y="4" width="92" height="126" rx="12" fill="#f7c948" stroke="${INK}" stroke-width="5"/>
   <rect x="8" y="16" width="92" height="126" rx="12" fill="#f29bb8" stroke="${INK}" stroke-width="5"/>
   <path d="M54 50 L60 66 L77 67 L64 78 L68 95 L54 86 L40 95 L44 78 L31 67 L48 66 Z" fill="#ffffff"/>
-</svg>`;
-const BOOKMARK = `<svg viewBox="0 0 80 110">
-  <path d="M10 10 A8 8 0 0 1 18 2 H62 A8 8 0 0 1 70 10 V104 L40 80 L10 104 Z" fill="#8ec5ff" stroke="${INK}" stroke-width="6" stroke-linejoin="round"/>
 </svg>`;
 const BADGE = `<svg viewBox="0 0 64 64">
   <circle cx="32" cy="32" r="28" fill="#e8584a" stroke="#ffffff" stroke-width="5"/>
@@ -50,10 +37,6 @@ const POINTER = `<svg viewBox="0 0 70 90">
     fill="#ffffff" stroke="${INK}" stroke-width="5" stroke-linejoin="round"/>
 </svg>`;
 const RIPPLE = `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="#2233e0" stroke-width="6"/></svg>`;
-const QUESTION = `<svg viewBox="0 0 60 90">
-  <path d="M12 24 A18 18 0 1 1 38 40 C31 45 30 49 30 58" stroke="${INK}" stroke-width="10" stroke-linecap="round" fill="none"/>
-  <circle cx="30" cy="78" r="6.5" fill="${INK}"/>
-</svg>`;
 
 /** a layer on screen for this span of the clip, fading in and out */
 const on = (nodeId: string, startMs: number, endMs: number, fadeInMs = 160, fadeOutMs = 220): Omit<Appearance, 'id' | 'blockId'> =>
@@ -72,40 +55,10 @@ const inWorld = (x: number, y: number): Partial<RigNode> => ({ parentId: null, s
 const arms = (): RigNode[] => [limb('arm', -1), limb('arm', 1)];
 const REST_L: [number, number] = [-196, 96], REST_R: [number, number] = [196, 96];
 
-/** The pull arc: three quarters of a circle over the head, drawn on as the pull grows. */
-function pullArc(): RigNode {
-  const pts = [-90, -10, 70, 150].map((deg) => ({ x: 30 * Math.cos((deg * Math.PI) / 180), y: -250 + 30 * Math.sin((deg * Math.PI) / 180) }));
-  const c = makeCurveLayer(pts, { name: 'Refresh arc', type: 'smooth', color: { r: 20, g: 19, b: 24, a: 1 }, width: 7 })!;
-  return { ...c, id: 'pullArc', ranged: true, trim: { start: 0, end: 0 } };
-}
 
 export function appPresets(): Preset[] {
   const all: Preset[] = [
-    {
-      // pull → stretch → release → pop → settle
-      id: 'p_app_refresh', name: 'Pull to Refresh', source: 'builtin', durationMs: 2800,
-      tagline: 'Pull-down gesture · stretch, pop, squash · arc drawn on',
-      layers: [...arms(), pullArc()],
-      appearances: [on('armL', 0, 2800, 120, 160), on('armR', 0, 2800, 120, 160), on('pullArc', 80, 1900, 120, 260)],
-      tracks: [
-        // tucked up and a little squashed, pulled down and stretched, flung up, landed
-        tr('body', 'flatOffset.y', [k(0, 0, 'easeOut'), k(200, -26, 'easeInOut'), k(950, 34, 'easeIn'), k(1020, 36, 'easeOut'), k(1260, -58, 'easeIn'), k(1500, 0, 'easeOut'), k(2800, 0)]),
-        ...squish('body', [[0, 1, 1, 'easeOut'], [200, 1.08, 0.92, 'easeInOut'], [950, 0.9, 1.12, 'easeIn'], [1020, 0.9, 1.12, 'easeOut'], [1260, 0.94, 1.08, 'easeIn'],
-          [1500, 1.16, 0.84, 'easeOut'], [1680, 0.96, 1.05, 'easeInOut'], [1880, 1, 1, 'easeOut'], [2800, 1, 1]]),
-        // the face trails the body by a beat: it sags on the pull and lifts on the fling
-        tr('face', 'flatOffset.y', [k(0, 0), k(1000, 10, 'easeIn'), k(1300, -8, 'easeOut'), k(1600, 2), k(1900, 0, 'easeOut'), k(2800, 0)]),
-        ...both('eye.openness', [k(0, 1), k(300, 1, 'linear'), k(950, 0.5, 'easeIn'), k(1060, 1, 'easeOut'), k(1900, 1), k(2150, 0.45, 'easeOut'), k(2800, 0.45)]),
-        ...both('transform.scale.x', [k(0, 1), k(1060, 1, 'linear'), k(1260, 1.22, 'overshoot'), k(1700, 1.1), k(2800, 1.1)]),
-        // hands brace outward as it is pulled, fly up on release
-        ...point('armL', 'b', [[0, ...REST_L], [950, -236, 40, 'easeIn'], [1260, -214, -46, 'easeOut'], [1720, ...REST_L, 'easeInOut'], [2800, ...REST_L]]),
-        ...point('armR', 'b', [[0, ...REST_R], [990, 236, 40, 'easeIn'], [1300, 214, -46, 'easeOut'], [1760, ...REST_R, 'easeInOut'], [2800, ...REST_R]]),
-        // the arc draws itself with the pull, spins once on release, then goes
-        tr('pullArc', 'trim.end', [k(100, 0, 'easeOut'), k(950, 1, 'linear'), k(2800, 1)]),
-        // two half-turns: rotation takes the short way round, so one 0 → 360 key would not spin at all
-        tr('pullArc', 'transform.rotation', [k(0, 0), k(1000, 0, 'easeIn'), k(1350, 170, 'linear'), k(1700, 340, 'easeOut'), k(2800, 340)]),
-        ...uniform('pullArc', [[1000, 1, 'overshoot'], [1150, 1.2], [1700, 0.7, 'easeIn'], [2800, 0.7]]),
-      ],
-    },
+    pullToRefresh(),
     {
       // calm, then happy eyes, a hand up, a little wave, a tiny bounce, happy idle
       id: 'p_app_profile', name: 'Profile Hello', source: 'builtin', durationMs: 3000,
@@ -123,70 +76,9 @@ export function appPresets(): Preset[] {
         ...squish('body', [[0, 1, 1], [860, 1.05, 0.95, 'easeOut'], [1000, 0.96, 1.05, 'easeIn'], [1180, 1.07, 0.93, 'easeOut'], [1400, 1, 1, 'easeOut'], [3000, 1, 1]]),
       ],
     },
-    {
-      // a magnifier drifts in, the face turns to it, it searches in little loops, settle
-      id: 'p_app_search', name: 'Start Search', source: 'builtin', durationMs: 3200,
-      tagline: 'Magnifying glass search · look toward it · bounce',
-      layers: [art('magnifier', 'Magnifier', MAGNIFIER, { ...inWorld(420, -40), size: { x: 104, y: 104 }, zIndex: 30 })],
-      appearances: [on('magnifier', 0, 3200, 200, 260)],
-      tracks: [
-        ...xy('magnifier', [[0, 420, -40, 'easeOut'], [800, 230, -70, 'easeInOut'], [1100, 250, -30], [1400, 206, -10], [1700, 238, -84], [2000, 214, -50, 'easeInOut'], [2600, 226, -60, 'easeOut'], [3200, 226, -60]]),
-        ...uniform('magnifier', [[0, 0.6, 'easeOut'], [800, 1.08], [1000, 1, 'easeInOut'], [3200, 1]]),
-        tr('magnifier', 'transform.rotation', [k(0, 30), k(800, -6, 'easeOut'), k(1100, 8), k(1400, -10), k(1700, 6), k(2000, 0, 'easeInOut'), k(3200, 0)]),
-        // the face looks where the glass is, 60ms behind it
-        tr('face', 'surface.yaw', [k(0, 0), k(420, 0, 'easeInOut'), k(860, 24, 'easeOut'), k(1160, 28), k(1460, 20), k(1760, 30), k(2060, 24, 'easeInOut'), k(3200, 24)]),
-        tr('face', 'surface.pitch', [k(0, 0), k(860, -8, 'easeOut'), k(1760, -14), k(2060, -8), k(3200, -8)]),
-        ...both('transform.scale.x', [k(0, 1), k(700, 1, 'linear'), k(900, 1.2, 'overshoot'), k(3200, 1.2)]),
-        tr('body', 'transform.rotation', [k(0, 0), k(900, 4, 'easeOut'), k(2300, 3), k(3200, 3)]),
-        tr('body', 'flatOffset.y', [k(0, 0), k(2240, 0, 'easeIn'), k(2400, -18, 'easeOut'), k(2580, 0, 'easeIn'), k(3200, 0)]),
-        ...squish('body', [[0, 1, 1], [2240, 1.06, 0.94, 'easeOut'], [2400, 0.95, 1.06, 'easeIn'], [2580, 1.08, 0.92, 'easeOut'], [2800, 1, 1, 'easeOut'], [3200, 1, 1]]),
-      ],
-    },
-    {
-      // "oops, nothing found": looks one way, the other, a tiny shrug, the glass leaves
-      id: 'p_app_noresults', name: 'No Search Results', source: 'builtin', durationMs: 3300,
-      tagline: 'Empty state · nothing found · look around, confused',
-      layers: [
-        art('magnifier', 'Magnifier', MAGNIFIER, { ...onMascot(170, -150), size: { x: 78, y: 78 }, zIndex: 30 }),
-        art('questionMark', 'Question mark', QUESTION, { ...onMascot(-120, -200), size: { x: 40, y: 60 }, zIndex: 31 }),
-      ],
-      appearances: [on('magnifier', 250, 2800, 140, 360), on('questionMark', 1900, 2900, 100, 240)],
-      tracks: [
-        ...uniform('magnifier', [[250, 0, 'easeOut'], [460, 1.15], [600, 1, 'easeInOut'], [3300, 1]]),
-        // it goes where the eyes go
-        ...xy('magnifier', [[600, 170, -150, 'easeInOut'], [900, -170, -150], [1300, -170, -150, 'easeInOut'], [1600, 170, -140], [2200, 170, -140, 'easeIn'], [2800, 250, -110]]),
-        tr('face', 'surface.yaw', [k(0, 0), k(500, 0, 'easeInOut'), k(900, -30), k(1300, -30, 'easeInOut'), k(1700, 30), k(2000, 30, 'easeInOut'), k(2400, 0, 'easeOut'), k(3300, 0)]),
-        tr('face', 'transform.rotation', [k(0, 0), k(2000, 0), k(2200, -8, 'easeOut'), k(2800, -5), k(3300, 0)]),
-        ...both('eye.openness', [k(0, 1), k(2000, 1, 'linear'), k(2160, 0.72, 'easeOut'), k(3000, 0.8), k(3300, 1)]),
-        ...both('transform.scale.y', [k(0, 1), k(2000, 1), k(2160, 0.86, 'easeOut'), k(3000, 0.9), k(3300, 1)]),
-        tr('body', 'transform.rotation', [k(0, 0), k(2000, 0), k(2200, -5, 'easeOut'), k(2800, -3), k(3300, 0)]),
-        ...uniform('questionMark', [[1900, 0, 'easeOut'], [2060, 1.2], [2200, 1, 'easeInOut'], [2900, 1]]),
-        tr('questionMark', 'transform.rotation', [k(1900, -20, 'easeOut'), k(2200, 6), k(2500, -4), k(2900, 0)]),
-        // a small sigh: down and wider
-        ...squish('body', [[0, 1, 1], [2200, 1, 1, 'easeInOut'], [2450, 1.05, 0.95, 'easeOut'], [2900, 1.02, 0.98, 'easeInOut'], [3300, 1, 1]]),
-      ],
-    },
-    {
-      // an empty deck appears beside it, it looks, the card tilts empty, a shrug, a smile
-      id: 'p_app_nodecks', name: 'No Decks Here', source: 'builtin', durationMs: 3300,
-      tagline: 'Empty state · empty card list · shrug',
-      layers: [...arms(), art('emptyDeck', 'Empty deck', EMPTY_DECK, { ...inWorld(240, 40), size: { x: 104, y: 130 }, zIndex: 30 })],
-      appearances: [on('armL', 0, 3300, 120, 160), on('armR', 0, 3300, 120, 160), on('emptyDeck', 200, 3300, 120, 240)],
-      tracks: [
-        ...uniform('emptyDeck', [[200, 0, 'easeOut'], [420, 1.12], [560, 1, 'easeInOut'], [3300, 1]]),
-        tr('emptyDeck', 'transform.rotation', [k(200, 0), k(1000, 0, 'easeInOut'), k(1250, -14, 'easeOut'), k(1500, 6), k(1700, 0, 'easeInOut'), k(3300, 0)]),
-        tr('emptyDeck', 'flatOffset.y', [k(200, 40), k(1000, 40, 'easeOut'), k(1250, 24), k(1700, 40, 'easeInOut'), k(3300, 40)]),
-        tr('face', 'surface.yaw', [k(0, 0), k(500, 0, 'easeInOut'), k(800, 22), k(1800, 22, 'easeInOut'), k(2200, 0), k(3300, 0)]),
-        tr('face', 'surface.pitch', [k(0, 0), k(800, 6, 'easeOut'), k(1800, 6), k(2200, 0), k(3300, 0)]),
-        // the shrug: hands up and out, body a little up, head tilted
-        ...point('armL', 'b', [[0, ...REST_L], [1800, ...REST_L, 'easeOut'], [2000, -182, 16, 'easeInOut'], [2350, -182, 16, 'easeInOut'], [2600, ...REST_L]]),
-        ...point('armR', 'b', [[0, ...REST_R], [1840, ...REST_R, 'easeOut'], [2040, 182, 16, 'easeInOut'], [2390, 182, 16, 'easeInOut'], [2640, ...REST_R]]),
-        tr('body', 'flatOffset.y', [k(0, 0), k(1800, 0, 'easeOut'), k(2000, -10, 'easeInOut'), k(2350, -10, 'easeInOut'), k(2600, 0), k(3300, 0)]),
-        tr('face', 'transform.rotation', [k(0, 0), k(1850, 0, 'easeOut'), k(2050, -9), k(2400, -9, 'easeInOut'), k(2650, 0)]),
-        ...both('eye.openness', [k(0, 1), k(1800, 1, 'linear'), k(1950, 0.74, 'easeOut'), k(2400, 0.74), k(2650, 0.45, 'easeInOut'), k(3150, 0.45)]),
-        ...both('transform.scale.x', [k(0, 1), k(2400, 1), k(2650, 1.14, 'easeInOut'), k(3150, 1.14)]),
-      ],
-    },
+    startSearch(),
+    noSearchResults(),
+    noDecksHere(),
     {
       // a dashed slot, then a deck pops into it: overshoot, settle, a little cheer
       id: 'p_app_createdeck', name: 'Create a Deck', source: 'builtin', durationMs: 2600,
@@ -210,24 +102,7 @@ export function appPresets(): Preset[] {
         ...both('transform.scale.x', [k(0, 1), k(700, 1, 'linear'), k(880, 1.18, 'easeOut'), k(2600, 1.18)]),
       ],
     },
-    {
-      // looks around, a bookmark appears overhead, it checks it — nothing — the bookmark goes
-      id: 'p_app_nosaved', name: 'No Saved Decks', source: 'builtin', durationMs: 3300,
-      tagline: 'Empty state · no saved items · bookmark · gently disappointed',
-      layers: [art('bookmark', 'Bookmark', BOOKMARK, { ...onMascot(0, -250), size: { x: 60, y: 82 }, zIndex: 30 })],
-      appearances: [on('bookmark', 1000, 2700, 100, 320)],
-      tracks: [
-        tr('face', 'surface.yaw', [k(0, 0), k(250, 0, 'easeInOut'), k(600, -22), k(850, -22, 'easeInOut'), k(1150, 20), k(1350, 0, 'easeInOut'), k(3300, 0)]),
-        tr('face', 'surface.pitch', [k(0, 0), k(1200, 0, 'easeOut'), k(1450, -18), k(2300, -18, 'easeInOut'), k(2600, 10), k(3000, 4), k(3300, 0)]),
-        ...uniform('bookmark', [[1000, 0, 'easeOut'], [1180, 1.16], [1320, 1, 'easeInOut'], [2300, 1, 'easeIn'], [2700, 0.5]]),
-        // a little wobble — "nothing in here"
-        tr('bookmark', 'transform.rotation', [k(1000, 0), k(1600, 0, 'easeInOut'), k(1720, -12), k(1840, 10), k(1960, -6), k(2080, 0, 'easeOut'), k(2700, 0)]),
-        tr('bookmark', 'flatOffset.y', [k(1000, -250), k(2300, -250, 'easeIn'), k(2700, -210)]),
-        ...both('eye.openness', [k(0, 1), k(2150, 1, 'linear'), k(2350, 0.55, 'easeOut'), k(2900, 0.6), k(3200, 1, 'easeInOut')]),
-        tr('body', 'flatOffset.y', [k(0, 0), k(2200, 0, 'easeInOut'), k(2450, 6), k(2900, 4, 'easeInOut'), k(3300, 0)]),
-        ...squish('body', [[0, 1, 1], [2200, 1, 1, 'easeInOut'], [2450, 1.05, 0.95, 'easeOut'], [2900, 1.03, 0.97, 'easeInOut'], [3300, 1, 1]]),
-      ],
-    },
+    noSavedDecks(),
     {
       // listening to music: sway, head bob against it, hands and weight shifting — loops
       id: 'p_app_vibe', name: 'Little Vibe', source: 'builtin', durationMs: 3600,
