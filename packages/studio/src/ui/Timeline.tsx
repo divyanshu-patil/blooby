@@ -95,6 +95,14 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const setSel = (s: { trackId: string; kfId: string } | null) => setSelKeys(s ? new Set([kfKey(s.trackId, s.kfId)]) : new Set());
   const [curveOpen, setCurveOpen] = useState(false);
   const curveRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** whether the last click landed in the timeline — Delete means "these keys" only then */
+  const inTimeline = useRef(false);
+  useEffect(() => {
+    const down = (e: PointerEvent) => { inTimeline.current = !!rootRef.current?.contains(e.target as Node); };
+    window.addEventListener('pointerdown', down, true);
+    return () => window.removeEventListener('pointerdown', down, true);
+  }, []);
   useDismiss(curveOpen, () => setCurveOpen(false), [curveRef]);
   useEffect(() => { if (!sel) setCurveOpen(false); }, [sel]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -349,6 +357,16 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   // SVG copied earlier stayed there, Editor.tsx took the paste as a new layer, and the keys never came.
   useEffect(() => {
     const typing = (el: HTMLElement | null) => !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    // Delete / Backspace with keys selected in the timeline removes the KEYS — caught first, so
+    // the editor's own Delete never takes the whole layer with them
+    const onDelete = (e: KeyboardEvent) => {
+      if ((e.key !== 'Delete' && e.key !== 'Backspace') || typing(e.target as HTMLElement | null)) return;
+      if (!inTimeline.current || !selKeys.size) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      deleteKeyframes([...selKeys].map(parseKfKey));
+      setSelKeys(new Set());
+    };
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target as HTMLElement | null)) return;
       const mod = e.metaKey || e.ctrlKey;
@@ -373,10 +391,14 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
       e.preventDefault();
       pasteKeys();
     };
+    window.addEventListener('keydown', onDelete, true);
     window.addEventListener('keydown', onKey);
     window.addEventListener('copy', onCopy);
     window.addEventListener('paste', onPaste);
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste); };
+    return () => {
+      window.removeEventListener('keydown', onDelete, true); window.removeEventListener('keydown', onKey);
+      window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste);
+    };
   });
 
   const selKf = sel && tl.tracks.find((t) => t.id === sel.trackId)?.keyframes.find((k) => k.id === sel.kfId);
@@ -425,7 +447,7 @@ export function Timeline({ onOpenEffects }: { onOpenEffects?: () => void } = {})
   const activeBlock = starts.findIndex((s, i) => playhead >= s && playhead < s + tl.blocks[i].durationMs);
 
   return (
-    <div className="timeline">
+    <div className="timeline" ref={rootRef}>
       <div className="transport">
         <button className="btn icon" title="Previous keyframe (,)" onClick={() => goto(-1)}>‹</button>
         <button className="btn icon" title={playing ? 'Pause (space)' : 'Play (space)'} onClick={() => setPlaying(!playing)}>

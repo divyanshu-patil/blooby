@@ -33,6 +33,13 @@ enum Visibility {
   @@map("visibility")
 }
 
+enum ProjectAccess {
+  view
+  edit
+
+  @@map("project_access")
+}
+
 enum AssetKind {
   preset
   expression
@@ -85,19 +92,23 @@ model Profile {
 /// `s3Key`; this row is the pointer plus everything the dashboard needs to render a card
 /// without fetching the payload.
 model Project {
-  id             String     @id @default(uuid()) @db.Uuid
-  userId         String     @map("user_id") @db.Uuid
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
   name           String
-  thumbnailUrl   String?    @map("thumbnail_url")
-  s3Key          String     @map("s3_key")
-  s3Bucket       String     @map("s3_bucket")
-  currentVersion Int        @default(1) @map("current_version")
-  sizeBytes      BigInt     @default(0) @map("size_bytes")
+  thumbnailUrl   String?       @map("thumbnail_url")
+  s3Key          String        @map("s3_key")
+  s3Bucket       String        @map("s3_bucket")
+  currentVersion Int           @default(1) @map("current_version")
+  sizeBytes      BigInt        @default(0) @map("size_bytes")
   checksum       String?
-  visibility     Visibility @default(private)
-  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
-  lastOpenedAt   DateTime?  @map("last_opened_at") @db.Timestamptz(6)
+  visibility     Visibility    @default(private)
+  /// only meaningful while public: 'edit' lets any signed-in user save to it
+  access         ProjectAccess @default(view)
+  viewCount      Int           @default(0) @map("view_count")
+  duplicateCount Int           @default(0) @map("duplicate_count")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
+  lastOpenedAt   DateTime?     @map("last_opened_at") @db.Timestamptz(6)
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([createdAt])

@@ -426,8 +426,9 @@ export function Stage() {
       if (l && frames.get(WORLD) && (isEnd ? l.pin : l.pins?.[d.key])) {
         const w = fromFrame(frames.get(WORLD)!, p);
         const at = { x: round2(w.x), y: round2(w.y) };
-        const key = d.key;
-        updateNode(d.id, (n) => { if (!n.limb) return; if (isEnd) n.limb.pin = at; else n.limb.pins = { ...n.limb.pins, [key]: at }; }, `pin.${d.id}`);
+        // through setValue, so a keyed pin gets a keyframe here like any other drag
+        setValue(d.id, `limb.pin.${d.key}.x`, at.x, `pin.${d.id}`);
+        setValue(d.id, `limb.pin.${d.key}.y`, at.y, `pin.${d.id}`);
         return;
       }
       const local = fromFrame(d.frame, p);

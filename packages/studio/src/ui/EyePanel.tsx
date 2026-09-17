@@ -1,10 +1,11 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useEditor } from '../core/store';
 import { activeTrackFor, valueAt } from '../core/scene';
 import { mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
 import { activeTimeline } from '../core/types';
 import { KeyNav, NumberField, Panel, PropRow } from './bits';
 import type { RigNode } from '../core/types';
+import { EyeActions } from './MascotSections';
 
 const PAD_RANGE = 42; // degrees at the pad's edge
 
@@ -21,6 +22,7 @@ export function EyePanel() {
   const select = useEditor((s) => s.select);
   const selection = useEditor((s) => s.selection);
   const pad = useRef<HTMLDivElement>(null);
+  const [justThis, setJustThis] = useState(false);
 
   // one mascot's eyes: the one being worked on. Every mascot has a gaze of its own.
   const rig = project.rig;
@@ -77,7 +79,7 @@ export function EyePanel() {
 
   const separation = Math.abs(left.eye.distanceFromCenter);
 
-  return (
+  const expression = (
     <Panel title="Eye expression" actions={
       <button className="btn sm" aria-pressed={linked} title="Mirror the right eye from the left"
         onClick={() => {
@@ -162,6 +164,20 @@ export function EyePanel() {
       )}
     </Panel>
   );
+  // blink, squint, close, squish — on both eyes, or only the selected one when asked
+  const one = selection[0] && eyes.some((e) => e.id === selection[0]) ? selection[0] : null;
+  const actions = (
+    <Panel title="Blink & squish">
+      {one && eyes.length > 1 && (
+        <div className="seg" style={{ display: 'flex' }}>
+          <button style={{ flex: 1 }} aria-pressed={!justThis} onClick={() => setJustThis(false)}>Both eyes</button>
+          <button style={{ flex: 1 }} aria-pressed={justThis} onClick={() => setJustThis(true)}>{rig.nodes[one]?.name}</button>
+        </div>
+      )}
+      <EyeActions eyeIds={one && justThis ? [one] : eyes.map((e) => e.id)} />
+    </Panel>
+  );
+  return <>{expression}{actions}</>;
 }
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));

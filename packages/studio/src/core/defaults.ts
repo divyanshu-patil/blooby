@@ -10,6 +10,7 @@ import { showcasePresets } from './showcase';
 import { textPresets } from './textPresets';
 import { appPresets } from './appPresets';
 import { cinematicPresets } from './cinematicPresets';
+import { mascotKitPresets } from './mascotKit';
 import { BONE, faceOf, INK, makeBody, makeEye, makeFace, retargetId, roleOf } from './mascot';
 
 export { uid } from './id';
@@ -102,6 +103,8 @@ export function builtinPresets(): Preset[] {
     ...textPresets(),
     // then the app screens: refresh, profile, search, empty states — see core/appPresets.ts
     ...appPresets(),
+    // then the app mascot kit: generating, empty, error, celebrate, reactions — core/mascotKit.ts
+    ...mascotKitPresets(),
     // then the cinematic ones: portal, morph, walk + parallax … the 20s showreel — core/cinematicPresets.ts
     ...cinematicPresets(),
     {

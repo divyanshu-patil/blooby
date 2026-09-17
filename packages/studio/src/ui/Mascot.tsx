@@ -127,12 +127,21 @@ function drawItem(s: SceneItem, fill: string, guides: boolean): ReactNode {
     const taper = s.stroke && s.stroke.width > 0 ? (s.taper ?? 0) : 0;
     // a trimmed or tapered stroke is drawn in real px, beside the fill
     const own = !s.guide && s.stroke && (s.trim || taper > 0);
+    // a guide is dashed and keeps a screen-px line: it is there to work with, and will not be
+    // exported. Everything else is mapped into real px rather than scaled, so its stroke is
+    // composition px like the export's — it zooms with the drawing instead of staying 2px on
+    // screen, and a non-uniform w/h cannot stretch it either.
+    if (s.guide) {
+      return (
+        <g transform={`${spin ?? ''} translate(${s.cx} ${s.cy}) scale(${w} ${h})`}>
+          <path d={s.path} fill={fill} vectorEffect="non-scaling-stroke" {...strokeOf(s.stroke)} strokeDasharray="7 6" opacity={0.8} />
+        </g>
+      );
+    }
     return (
       <>
-        <g transform={`${spin ?? ''} translate(${s.cx} ${s.cy}) scale(${w} ${h})`}>
-          {/* a guide is dashed: it is there to work with, and will not be exported */}
-          <path d={s.path} fill={fill} vectorEffect="non-scaling-stroke" {...strokeOf(own ? undefined : s.stroke)}
-            {...(s.guide ? { strokeDasharray: '7 6', opacity: 0.8 } : {})} />
+        <g transform={`${spin ?? ''} translate(${s.cx} ${s.cy})`}>
+          <path d={mapPath(s.path, (u) => ({ x: u.x * w, y: u.y * h }))} fill={fill} {...strokeOf(own ? undefined : s.stroke)} />
         </g>
         {own && trimStroke(s, taper)}
       </>

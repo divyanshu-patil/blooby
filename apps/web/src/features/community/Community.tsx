@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
-  AssetCard, ChipBar, Dialog, EmptyState, ErrorState, LoadingGrid, PageHeader, SearchBar,
-  assetsApi, useAsync, useEditor, type AssetKind, type AssetRow, type AssetSource, type Preset,
+  AssetCard, ChipBar, Dialog, EmptyState, ErrorState, LoadingGrid, PageHeader, ProjectCard, SearchBar,
+  assetsApi, communityApi, projectsApi, useAsync, useEditor,
+  type AssetKind, type AssetRow, type AssetSource, type Page, type Preset, type ProjectRow,
 } from '@blooby/studio';
+import { Leaderboard } from './Leaderboard';
 
 const SOURCES = [
   { id: 'community' as const, label: 'Community' },
@@ -15,8 +18,12 @@ const KINDS = [
   { id: 'preset' as const, label: 'Presets' },
   { id: 'expression' as const, label: 'Expressions' },
 ];
+/** public projects are community work too — only offered there */
+const COMMUNITY_KINDS = [{ id: 'project' as const, label: 'Projects' }, ...KINDS];
 
+type Sort = 'trending' | 'newest' | 'popular' | 'name';
 const SORTS = [
+  { id: 'trending' as const, label: 'Trending' },
   { id: 'newest' as const, label: 'Newest' },
   { id: 'popular' as const, label: 'Popular' },
   { id: 'name' as const, label: 'A–Z' },
@@ -31,17 +38,33 @@ const SORTS = [
  */
 export function Community({ onAdded }: { onAdded?: (asset: AssetRow) => void }) {
   const [source, setSource] = useState<AssetSource>('community');
-  const [kind, setKind] = useState<AssetKind>('preset');
-  const [sort, setSort] = useState<'newest' | 'popular' | 'name'>('newest');
+  const [pickedKind, setKind] = useState<AssetKind | 'project'>('preset');
+  const [pickedSort, setSort] = useState<Sort>('trending');
   const [q, setQ] = useState('');
   const [preview, setPreview] = useState<AssetRow | null>(null);
+  const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
 
-  const { data, error, loading, reload } = useAsync(
-    () => (source === 'user'
-      ? assetsApi.mine({ kind, q: q || undefined, limit: 48 })
-      : assetsApi.browse({ kind, source, q: q || undefined, sort, limit: 48 })),
-    [source, kind, sort, q],
+  const projects = source === 'community' && pickedKind === 'project';
+  const kind: AssetKind = pickedKind === 'project' ? 'preset' : pickedKind;
+  // a project has no download count or A–Z here: trending or newest
+  const sort: Sort = projects && (pickedSort === 'popular' || pickedSort === 'name') ? 'trending' : pickedSort;
+
+  const { data, error, loading, reload } = useAsync<Page<AssetRow> | Page<ProjectRow>>(
+    () => (projects
+      ? communityApi.projects({ q: q || undefined, sort: sort as 'trending' | 'newest', limit: 48 })
+      : source === 'user'
+        ? assetsApi.mine({ kind, q: q || undefined, limit: 48 })
+        : assetsApi.browse({ kind, source, q: q || undefined, sort, limit: 48 })),
+    [source, kind, sort, q, projects],
   );
+  const insights = useAsync(() => communityApi.insights(), []);
+
+  /** Anyone can copy a public project into their own — then it opens, theirs to change. */
+  const duplicate = async (p: ProjectRow) => {
+    setBusy(true);
+    try { navigate(`/projects/${(await projectsApi.duplicate(p.id)).id}`); } finally { setBusy(false); }
+  };
 
   return (
     <>
@@ -52,14 +75,32 @@ export function Community({ onAdded }: { onAdded?: (asset: AssetRow) => void }) 
       <div className="page-body">
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
           <ChipBar options={SOURCES} value={source} onChange={setSource} />
-          <ChipBar options={KINDS} value={kind} onChange={setKind} />
-          {source !== 'user' && <ChipBar options={SORTS} value={sort} onChange={setSort} />}
+          <ChipBar options={source === 'community' ? COMMUNITY_KINDS : KINDS} value={projects ? 'project' : kind} onChange={setKind} />
+          {source !== 'user' && <ChipBar options={projects ? SORTS.slice(0, 2) : SORTS} value={sort} onChange={setSort} />}
         </div>
+
+        {source === 'community' && insights.data && <Leaderboard insights={insights.data} />}
 
         {loading && <LoadingGrid />}
         {error && <ErrorState message={error} onRetry={reload} />}
 
-        {data && !loading && (data.items.length === 0 ? (
+        {projects && data && !loading && (data.items.length === 0 ? (
+          <EmptyState title="No public projects yet" note="Make one of yours public from the editor and it shows up here." />
+        ) : (
+          <div className="card-grid">
+            {(data.items as ProjectRow[]).map((p) => (
+              <ProjectCard key={p.id} project={p}
+                footer={`${p.owner ? `by ${p.owner} · ` : ''}${p.viewCount ?? 0} views · ${p.duplicateCount ?? 0} copies${p.access === 'edit' ? ' · open to edit' : ''}`}
+                onOpen={() => navigate(`/projects/${p.id}`)}
+                menu={[
+                  { label: p.access === 'edit' ? 'Open and edit' : 'Open', onSelect: () => navigate(`/projects/${p.id}`) },
+                  { label: busy ? 'Duplicating…' : 'Duplicate to my projects', onSelect: () => void duplicate(p) },
+                ]} />
+            ))}
+          </div>
+        ))}
+
+        {!projects && data && !loading && (data.items.length === 0 ? (
           <EmptyState
             title={source === 'user' ? 'Nothing saved yet' : 'Nothing here yet'}
             note={source === 'user'
@@ -68,7 +109,7 @@ export function Community({ onAdded }: { onAdded?: (asset: AssetRow) => void }) 
           />
         ) : (
           <div className="card-grid">
-            {data.items.map((a) => (
+            {(data.items as AssetRow[]).map((a) => (
               <AssetCard key={a.id} asset={a} showStatus={source === 'user'}
                 onOpen={() => setPreview(a)}
                 menu={[{ label: 'Add to project', onSelect: () => void add(a, onAdded) }]} />

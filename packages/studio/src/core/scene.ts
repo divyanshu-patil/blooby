@@ -526,7 +526,9 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
       }
       continue;
     }
-    applyModifier(rig, effectAt(project, tl, m, timeMs), local / 1000, past, timeMs / 1000);
+    const live = effectAt(project, tl, m, timeMs);
+    const ease = settleOf(tl, m, local);
+    applyModifier(rig, ease < 1 ? { ...live, amount: live.amount * ease } : live, local / 1000, past, timeMs / 1000);
   }
   // Appearance last, as a multiplier on the evaluated opacity: a range decides whether
   // the layer exists, and its keyframed opacity decides how it looks while it does.
@@ -576,6 +578,27 @@ export function appearanceSpans(tl: Timeline, nodeId: string): { entry: Appearan
     const limit = w ? w[1] - w[0] : tl.timelineDurationMs;
     return { entry: a, origin, from: origin + Math.max(0, a.startMs ?? 0), to: origin + Math.min(limit, a.endMs ?? limit) };
   });
+}
+
+/**
+ * A shake, float, stretch or pendulum eases in where its range begins and out where it ends,
+ * instead of switching on and off: the offset it adds glides to nothing, so the layer arrives
+ * at whatever its keyframes say rather than snapping there. Only at real edges — a start or
+ * end set on the effect, or its clip's — never at the timeline's own ends, where a loop meets
+ * itself or a lone clip loops. Walk, follow and jelly carry their own motion in and out.
+ */
+const SETTLE_MS = 350;
+function settleOf(tl: Timeline, m: Modifier, local: number): number {
+  if (m.kind !== 'shake' && m.kind !== 'float' && m.kind !== 'stretch' && m.kind !== 'pendulum') return 1;
+  // a clip alone on its timeline loops into itself, so its edges are not edges
+  const clip = m.blockId && tl.blocks.length > 1 ? blockWindow(tl, m.blockId) : null;
+  const scopeEnd = m.endMs ?? (clip ? clip[1] - clip[0] : undefined);
+  const span = scopeEnd === undefined ? Infinity : scopeEnd - (m.startMs ?? 0);
+  const fade = Math.min(SETTLE_MS, span / 3);
+  const smooth = (x: number) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c); };
+  const inn = m.startMs || clip ? smooth(local / fade) : 1;
+  const out = span !== Infinity ? smooth((span - local) / fade) : 1;
+  return inn * out;
 }
 
 /**

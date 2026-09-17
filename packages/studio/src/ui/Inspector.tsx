@@ -669,8 +669,14 @@ function LimbSection({ node }: { node: RigNode }) {
               <button className="btn ghost sm icon" aria-pressed={on} title={on ? `Unpin the ${name.toLowerCase()}` : `Pin the ${name.toLowerCase()} in the world — it stays while the body moves; the limb stretches to reach it`}
                 onClick={() => pinLimbPoint(node.id, k, !on)}><Icon name="pin" size={13} /></button>
             </div>,
-            <PropRow key={`${k}x`} nodeId={node.id} property={`limb.${k}.x`} label={labels[k][0]} />,
-            <PropRow key={`${k}y`} nodeId={node.id} property={`limb.${k}.y`} label={labels[k][1]} />,
+            // pinned, the point is where its pin is — so the pin is what gets keyed
+            ...(on ? [
+              <PropRow key={`${k}px`} nodeId={node.id} property={`limb.pin.${k}.x`} label="Pin X" />,
+              <PropRow key={`${k}py`} nodeId={node.id} property={`limb.pin.${k}.y`} label="Pin Y" />,
+            ] : [
+              <PropRow key={`${k}x`} nodeId={node.id} property={`limb.${k}.x`} label={labels[k][0]} />,
+              <PropRow key={`${k}y`} nodeId={node.id} property={`limb.${k}.y`} label={labels[k][1]} />,
+            ]),
           ];
         })}
       </Collapsible>
@@ -725,6 +731,7 @@ export function ClipInspector() {
   const removeBlock = useEditor((s) => s.removeBlock);
   const duplicateBlock = useEditor((s) => s.duplicateBlock);
   const updatePresetFromBlock = useEditor((s) => s.updatePresetFromBlock);
+  const adoptKeysIntoBlock = useEditor((s) => s.adoptKeysIntoBlock);
   const selectBlock = useEditor((s) => s.selectBlock);
   const setClipGalleryTimeline = useEditor((s) => s.setClipGalleryTimeline);
 
@@ -746,6 +753,8 @@ export function ClipInspector() {
   const preset = project.presets.find((p) => p.id === block.presetId);
   const startMs = blockStarts(tl)[index];
   const effectCount = tl.modifiers.filter((m) => m.blockId === block.id).length;
+  // keys made straight on the timeline that sit inside this clip — not part of it until adopted
+  const looseKeys = tl.tracks.filter((t) => !t.blockId).reduce((n, t) => n + t.keyframes.filter((k) => k.time >= startMs && k.time <= startMs + block.durationMs).length, 0);
   const transitionIn = tl.transitions?.find((x) => x.afterBlockId === tl.blocks[index - 1]?.id);
   const transitionOut = tl.transitions?.find((x) => x.afterBlockId === block.id);
 
@@ -812,6 +821,15 @@ export function ClipInspector() {
         <span className="hint">{transitionOut ? `${easingLabel(transitionOut.easing)} · ${(transitionOut.durationMs / 1000).toFixed(2)}s` : 'none'}</span>
       </div>
       <p className="hint">Edit transitions from the ◆ / › connector between clips on the strip.</p>
+
+      {looseKeys > 0 && (
+        <>
+          <div className="divider" />
+          <p className="hint">{looseKeys} keyframe{looseKeys === 1 ? '' : 's'} on the timeline fall inside this clip but are not part of it{preset ? `, so "Save to preset" would leave ${looseKeys === 1 ? 'it' : 'them'} out` : ''}.</p>
+          <button className="btn sm" style={{ alignSelf: 'flex-start' }} title="Make those keyframes this clip's own: they move and loop with it, and save into its preset"
+            onClick={() => adoptKeysIntoBlock(block.id)}>Move {looseKeys === 1 ? 'it' : 'them'} into this clip</button>
+        </>
+      )}
 
       <div className="divider" />
       <div className="row">

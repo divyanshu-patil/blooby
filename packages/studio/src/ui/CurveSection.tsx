@@ -22,6 +22,7 @@ export function CurveSection({ node }: { node: RigNode }) {
   const editCurve = useEditor((s) => s.editCurve);
   const setCurveType = useEditor((s) => s.setCurveType);
   const updateNode = useEditor((s) => s.updateNode);
+  const curveToHose = useEditor((s) => s.curveToHose);
   const shown = valueAt(project, node.id, 'shape.path', playhead);
   const d = typeof shown === 'string' ? shown : node.shapePath;
   const c = curveFromPath(d);
@@ -50,6 +51,8 @@ export function CurveSection({ node }: { node: RigNode }) {
           onClick={() => editCurve(node.id, (cv) => ({ ...cv, closed: !cv.closed }), `close.${node.id}`)}>{c?.closed ? 'Closed' : 'Close'}</button>
         <button className="btn sm" title="Run it the other way — text on it starts from the other end"
           onClick={() => editCurve(node.id, (cv) => reverseCurve(cv), `rev.${node.id}`)}>Reverse</button>
+        <button className="btn sm" disabled={!!c?.closed} title="Make it a rubber hose through its start, middle and end: it keeps its length, bows when the ends come together, and can be pinned"
+          onClick={() => curveToHose(node.id)}>Rubber hose</button>
       </div>
       <div className="divider" />
       <PropRow nodeId={node.id} property="trim.start" label="Start offset" />

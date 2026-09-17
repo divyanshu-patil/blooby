@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { AdminUser, Analytics, AssetKind, AssetRow, AssetSource, Page, ProjectRow, SplashscreenRow } from './types';
+import type { AdminUser, Analytics, AssetKind, AssetRow, AssetSource, Page, ProjectRow, PublicInsights, SplashscreenRow } from './types';
 
 /** Feature-level API modules. UI components call these, never fetch directly. */
 
@@ -9,18 +9,19 @@ export const projectsApi = {
   create: (body: { name: string; templateAssetId?: string; project?: unknown }) =>
     api.post<ProjectRow>('/api/projects', body),
   get: (id: string) => api.get<ProjectRow>(`/api/projects/${id}`),
-  update: (id: string, body: { name?: string; visibility?: 'private' | 'public'; thumbnailUrl?: string | null }) =>
+  update: (id: string, body: { name?: string; visibility?: 'private' | 'public'; access?: 'view' | 'edit'; thumbnailUrl?: string | null }) =>
     api.patch<ProjectRow>(`/api/projects/${id}`, body),
   remove: (id: string) => api.del<void>(`/api/projects/${id}`),
   duplicate: (id: string, name?: string) => api.post<ProjectRow>(`/api/projects/${id}/duplicate`, { name }),
   markOpened: (id: string) => api.post<ProjectRow>(`/api/projects/${id}/opened`),
-  getData: (id: string) => api.get<{ project: ProjectRow; data: unknown }>(`/api/projects/${id}/data`),
+  /** `canEdit`: whether this caller may save to it — the owner, or anyone while it is public with edit access */
+  getData: (id: string) => api.get<{ project: ProjectRow; data: unknown; canEdit?: boolean; isOwner?: boolean }>(`/api/projects/${id}/data`),
   save: (id: string, body: { project: unknown; thumbnailUrl?: string | null; expectedVersion?: number }) =>
     api.put<{ version: number; sizeBytes: number; checksum: string; savedAt: string }>(`/api/projects/${id}/data`, body),
 };
 
 export const assetsApi = {
-  browse: (params: { kind?: AssetKind; source?: AssetSource; q?: string; tag?: string; category?: string; sort?: 'newest' | 'popular' | 'name'; limit?: number; cursor?: string }) =>
+  browse: (params: { kind?: AssetKind; source?: AssetSource; q?: string; tag?: string; category?: string; sort?: 'newest' | 'popular' | 'name' | 'trending'; limit?: number; cursor?: string }) =>
     api.get<Page<AssetRow>>('/api/assets', params),
   mine: (params: { kind?: AssetKind; q?: string; limit?: number; cursor?: string }) =>
     api.get<Page<AssetRow>>('/api/assets/mine', params),
@@ -38,6 +39,10 @@ export const assetsApi = {
 export const communityApi = {
   browse: (params: { kind?: AssetKind; q?: string; sort?: 'newest' | 'popular' | 'name'; limit?: number; cursor?: string }) =>
     api.get<Page<AssetRow>>('/api/community', params),
+  /** everyone's public projects, trending (one ranked page) or newest */
+  projects: (params: { q?: string; sort?: 'trending' | 'newest'; limit?: number; cursor?: string }) =>
+    api.get<Page<ProjectRow>>('/api/community/projects', params),
+  insights: () => api.get<PublicInsights>('/api/community/insights', undefined, { auth: false }),
   official: (params: { kind?: AssetKind; q?: string; limit?: number; cursor?: string }) =>
     api.get<Page<AssetRow>>('/api/community/official', params),
 };

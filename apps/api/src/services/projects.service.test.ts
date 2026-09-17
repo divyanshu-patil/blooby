@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('../repositories/projects.repository.js', () => ({
   projectsRepository: {
     findById: vi.fn(), listByUser: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(),
+    bumpVersionIfCurrent: vi.fn(), countView: vi.fn(), countDuplicate: vi.fn(),
   },
 }));
 vi.mock('../repositories/assets.repository.js', () => ({ assetsRepository: { findById: vi.fn() } }));
@@ -85,4 +86,54 @@ it('seeds a new project from a published template’s data', async () => {
   repo.update.mockResolvedValue(project());
   await projectsService.create('u1', { name: 'n', templateAssetId: 'a1' } as never);
   expect(store.putProjectJson.mock.calls[0][2]).toEqual({ from: 'template' });
+});
+
+const saved = () => {
+  store.putProjectJson.mockResolvedValue({ key: 'k', bucket: 'b', sizeBytes: 1, checksum: 'c' });
+  repo.bumpVersionIfCurrent.mockResolvedValue(1);
+};
+
+/** Public + edit lets anyone signed in save; view-only, private and signed-out do not. */
+it('lets a stranger save only to a public project with edit access', async () => {
+  saved();
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', access: 'edit', currentVersion: 1 }));
+  expect(await status(projectsService.save('p1', 'u1', { project: {} }))).toBe(0);
+  // under the owner's key, so the project stays one object
+  expect(store.putProjectJson.mock.calls[0][0]).toBe('owner');
+
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', access: 'view', currentVersion: 1 }));
+  expect(await status(projectsService.save('p1', 'u1', { project: {} }))).toBe(403);
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'private', access: 'edit', currentVersion: 1 }));
+  expect(await status(projectsService.save('p1', 'u1', { project: {} }))).toBe(404);
+});
+
+it('only the owner changes name, visibility or access', async () => {
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', access: 'edit' }));
+  expect(await status(projectsService.update('p1', 'u1', { access: 'view' }))).toBe(404);
+});
+
+it('duplicates anyone’s public project and counts it, but not a private one', async () => {
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', name: 'Theirs', s3Key: 's' }));
+  store.getProjectJson.mockResolvedValue({ a: 1 });
+  repo.create.mockResolvedValue(project({ id: 'p2' }));
+  store.putProjectJson.mockResolvedValue({ key: 'k', bucket: 'b', sizeBytes: 1, checksum: 'c' });
+  repo.update.mockResolvedValue(project({ id: 'p2' }));
+  repo.countDuplicate.mockResolvedValue(undefined);
+  expect(await status(projectsService.duplicate('p1', 'u1'))).toBe(0);
+  expect(repo.create.mock.calls[0][0]).toMatchObject({ userId: 'u1', name: 'Theirs copy' });
+  expect(repo.countDuplicate).toHaveBeenCalledWith('p1');
+
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'private' }));
+  expect(await status(projectsService.duplicate('p1', 'u1'))).toBe(404);
+});
+
+it('tells the editor whether the opener may save, and counts a stranger’s view', async () => {
+  store.getProjectJson.mockResolvedValue({});
+  repo.countView.mockResolvedValue(undefined);
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', access: 'view' }));
+  expect(await projectsService.getData('p1', null)).toMatchObject({ canEdit: false, isOwner: false });
+  expect(repo.countView).toHaveBeenCalledTimes(1);
+  repo.findById.mockResolvedValue(project({ userId: 'u1' }));
+  expect(await projectsService.getData('p1', 'u1')).toMatchObject({ canEdit: true, isOwner: true });
+  expect(repo.countView).toHaveBeenCalledTimes(1);
 });

@@ -1,18 +1,18 @@
 import { create } from 'zustand';
 import { attachPresetEffects, defaultProject, makeTimeline, uid } from './defaults';
 import { isEffectProp, readEffectProp, readProp, writeEffectProp, writeProp } from './props';
-import { activeTrackFor, evaluateRig, fromFrame, lerpAngle, lerpValue, sampleTrack, sceneFrames, valueAt, WORLD } from './scene';
+import { activeTrackFor, appearanceAt, evaluateRig, fromFrame, lerpAngle, lerpValue, sampleTrack, sceneFrames, valueAt, WORLD } from './scene';
 import { makeCurveLayer, makeTextLayer, nextName, writeValue } from './layers';
 import { bakeHandles, curveFromPath, curveToPath, type Curve, type CurvePoint } from './curve';
 import { onFonts } from './fonts';
 import {
   addMascot as addMascotIn, duplicateLayer as duplicateLayerIn, groupLayers as groupLayersIn, removeLayer, reorderLayer as reorderLayerIn,
-  saveMascotTemplate as saveMascotTemplateIn, applyScaleAsBase as applyScaleAsBaseIn, setRole as setRoleIn, moveInto as moveIntoIn, showLayerIn as showLayerInIn, ownLayer, pinLimb as pinLimbIn, pinLimbPoint as pinLimbPointIn, setFaceRole as setFaceRoleIn,
+  saveMascotTemplate as saveMascotTemplateIn, applyScaleAsBase as applyScaleAsBaseIn, setRole as setRoleIn, moveInto as moveIntoIn, showLayerIn as showLayerInIn, ownLayer, pinLimb as pinLimbIn, curveToHose as curveToHoseIn, pinLimbPoint as pinLimbPointIn, setFaceRole as setFaceRoleIn,
   setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
   type AppearanceRange, type AttachMode, type ReorderTo,
 } from './layers';
 import { faceOf, laneOf, laneOfMascot, makeFace, mascotOf, type MascotKind } from './mascot';
-import { applySquish as applySquishIn } from './squish';
+import { applyEyeAction as applyEyeActionIn, applySquish as applySquishIn } from './squish';
 import { applyPose as applyPoseIn } from './poses';
 import { presetTargets } from './defaults';
 import { textPresetOnto } from './textPresets';
@@ -159,10 +159,16 @@ export interface Editor {
   addFace: (mascotId: string) => void;
   /** plant a limb's end on the ground where it is now, or lift it without a jump */
   pinLimb: (nodeId: string, on: boolean) => void;
+  /** a drawn curve becomes a rubber-hose limb through its start, middle and end — see core/layers.ts */
+  curveToHose: (nodeId: string) => void;
   /** pin (or lift) ONE point of a limb — 'a' hip/shoulder, 'b' knee/elbow (or the end of a two-point limb), 'c' ankle/hand — in the world */
   pinLimbPoint: (nodeId: string, key: 'a' | 'b' | 'c', on: boolean) => void;
   /** drop a squish preset onto a layer, starting at the playhead — see core/squish.ts */
   applySquishPreset: (nodeId: string, presetId: string) => void;
+  /** a blink, squint or close on these eyes, as openness keyframes from the playhead — see core/squish.ts */
+  applyEyeAction: (eyeIds: string[], actionId: string) => void;
+  /** a squish preset on several layers at once, in one undo step */
+  applySquishTo: (nodeIds: string[], presetId: string) => void;
   saveMascotTemplate: (bodyId: string, name?: string) => void;
 
   /** A text layer, selected. `at` is a composition point (where the Text tool was clicked). */
@@ -294,6 +300,8 @@ export interface Editor {
   deletePreset: (id: string) => void;
   /** Overwrite the preset a clip came from with that clip's current keyframes. */
   updatePresetFromBlock: (blockId: string) => void;
+  /** keys made on the timeline (not in any clip) that fall inside this clip's span become the clip's own — so "Save to preset" takes them */
+  adoptKeysIntoBlock: (blockId: string) => void;
   setPresetColor: (id: string, color: string | undefined) => void;
 
   /** `galleryId` ties this load to an existing gallery entry — omit it for a project
@@ -410,6 +418,41 @@ function effectsFor<T extends { blockId?: string; startMs?: number; endMs?: numb
     });
   }
   return out;
+}
+
+/**
+ * The layers a stretch of the timeline uses, as a preset carries them — and when each is on screen.
+ *
+ * A preset that copied only tracks came out as "the face and the eyes": the arm it waved, the
+ * sticker it showed, the curve it drew were all left behind, and publishing sent that as-is.
+ * Everything that is not part of every mascot (a body, its face group, its eyes) and that the
+ * span animates or shows goes with it, parents included, each ranged to where it was on screen.
+ */
+function layersFor(p: Project, tl: Timeline, trackNodeIds: string[], blockIds: Set<string>, start: number, durationMs: number) {
+  const core = (n: RigNode) => n.kind === 'body' || n.kind === 'eye' || n.role === 'face';
+  const wanted = new Set<string>(trackNodeIds);
+  for (const m of effectsFor(tl.modifiers, blockIds, start, durationMs)) wanted.add(m.nodeId);
+  for (const e of effectsFor(tl.emitters ?? [], blockIds, start, durationMs)) for (const id of [e.from.nodeId, e.to.nodeId, e.attract?.nodeId]) if (id) wanted.add(id);
+  // shown during the span, animated or not
+  const samples = [0, 0.25, 0.5, 0.75, 1].map((f) => start + f * durationMs);
+  for (const n of Object.values(p.rig.nodes)) if (!core(n) && samples.some((t) => appearanceAt(tl, n, t) > 0)) wanted.add(n.id);
+  const nodes = new Map<string, RigNode>();
+  const add = (id: string | null | undefined) => {
+    const n = id ? p.rig.nodes[id] : undefined;
+    if (!n || core(n) || nodes.has(n.id)) return;
+    nodes.set(n.id, n);
+    add(n.parentId);
+    add(n.mask?.nodeId);
+    add(n.text?.path?.nodeId);
+  };
+  for (const id of wanted) if (id !== CAMERA_ID) add(id);
+  const layers = [...nodes.values()].map((n) => ({ ...structuredClone(n), ranged: true }));
+  const appearances = layers.flatMap((n) => {
+    const own = effectsFor((tl.appearances ?? []).filter((a) => a.nodeId === n.id), blockIds, start, durationMs);
+    // a layer that was simply always there is there for the whole clip
+    return own.length ? own : [{ nodeId: n.id, startMs: 0, endMs: durationMs }];
+  });
+  return { layers, appearances };
 }
 
 export const useEditor = create<Editor>((set, get) => ({
@@ -801,9 +844,23 @@ export const useEditor = create<Editor>((set, get) => ({
     get().commit((p) => { pinLimbPointIn(p, nodeId, key, on, playhead); }, `pinpt.${nodeId}.${key}`);
   },
 
+  curveToHose(nodeId) {
+    get().commit((p) => { curveToHoseIn(p, nodeId); });
+  },
+
   pinLimb(nodeId, on) {
     const { playhead } = get();
     get().commit((p) => { pinLimbIn(p, nodeId, on, playhead); });
+  },
+
+  applyEyeAction(eyeIds, actionId) {
+    const { playhead } = get();
+    get().commit((p) => { applyEyeActionIn(p, eyeIds, actionId, playhead); });
+  },
+
+  applySquishTo(nodeIds, presetId) {
+    const { playhead } = get();
+    get().commit((p) => { for (const id of nodeIds) applySquishIn(p, id, presetId, playhead); });
   },
 
   applySquishPreset(nodeId, presetId) {
@@ -1455,6 +1512,7 @@ export const useEditor = create<Editor>((set, get) => ({
         tracks: picked.map((t) => ({ id: uid('t'), nodeId: t.nodeId, property: t.property, keyframes: t.keyframes.map((k) => ({ ...k, id: uid('k'), time: k.time - start })) })),
         modifiers: effectsFor(tl.modifiers, blockIds, start, durationMs),
         emitters: effectsFor(tl.emitters ?? [], blockIds, start, durationMs),
+        ...layersFor(p, tl, picked.map((t) => t.nodeId), blockIds, start, durationMs),
       };
       p.presets.push(preset);
     });
@@ -1483,7 +1541,27 @@ export const useEditor = create<Editor>((set, get) => ({
       const only = new Set([blockId]);
       preset.modifiers = effectsFor(tl.modifiers, only, start, block.durationMs);
       preset.emitters = effectsFor(tl.emitters ?? [], only, start, block.durationMs);
+      Object.assign(preset, layersFor(p, tl, preset.tracks.map((t) => t.nodeId), only, start, block.durationMs));
     });
+  },
+
+  adoptKeysIntoBlock(blockId) {
+    get().commit((p) => {
+      const tl = at(p);
+      const i = tl.blocks.findIndex((b) => b.id === blockId);
+      if (i < 0) return;
+      const start = blockStarts(tl)[i], end = start + tl.blocks[i].durationMs;
+      for (const loose of tl.tracks.filter((t) => !t.blockId)) {
+        const inside = loose.keyframes.filter((k) => k.time >= start && k.time <= end);
+        if (!inside.length) continue;
+        let own = tl.tracks.find((t) => t.blockId === blockId && t.nodeId === loose.nodeId && t.property === loose.property);
+        if (!own) { own = { id: uid('t'), nodeId: loose.nodeId, property: loose.property, blockId, keyframes: [] }; tl.tracks.push(own); }
+        const times = new Set(inside.map((k) => k.time));
+        own.keyframes = [...own.keyframes.filter((k) => !times.has(k.time)), ...inside].sort((a, b) => a.time - b.time);
+        loose.keyframes = loose.keyframes.filter((k) => !inside.includes(k));
+      }
+      tl.tracks = tl.tracks.filter((t) => t.blockId || t.keyframes.length);
+    }, 'move keys into clip');
   },
 
   renamePreset(id, name) {

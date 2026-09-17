@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma.js';
+import { usersService } from './users.service.js';
 
 /**
  * Analytics derived from the timestamps the app already writes — no event pipeline.
@@ -82,27 +83,44 @@ export const analyticsService = {
     };
   },
 
-  /** Secondary insights: what people actually use, and who is most active. */
-  async insights(limit = 8) {
+  /**
+   * Secondary insights: what people actually use, and who is most active. `publicOnly` is
+   * the community leaderboard: only published community/official assets, and creators
+   * ranked by their PUBLIC projects (then the views and copies those earned), named by
+   * username or provider name — never an email or an account id.
+   */
+  async insights(limit = 8, publicOnly = false) {
     const [topAssets, topCreators] = await Promise.all([
       prisma.asset.findMany({
-        where: { status: 'published' },
-        orderBy: { downloadCount: 'desc' },
+        where: { status: 'published', ...(publicOnly ? { source: { in: ['community', 'official'] } } : {}) },
+        orderBy: [{ downloadCount: 'desc' }, { publishedAt: 'desc' }],
         take: limit,
-        select: { id: true, name: true, kind: true, source: true, downloadCount: true },
+        select: { id: true, name: true, kind: true, source: true, downloadCount: true, ownerId: true },
       }),
-      prisma.$queryRaw<{ user_id: string; username: string | null; projects: bigint }[]>`
-        select p.user_id, pr.username, count(*)::bigint as projects
+      prisma.$queryRaw<{ user_id: string; username: string | null; projects: bigint; views: bigint; copies: bigint }[]>`
+        select p.user_id, pr.username, count(*)::bigint as projects,
+          coalesce(sum(p.view_count), 0)::bigint as views, coalesce(sum(p.duplicate_count), 0)::bigint as copies
         from public.projects p
         join public.profiles pr on pr.id = p.user_id
+        where ${publicOnly} = false or p.visibility = 'public'
         group by p.user_id, pr.username
-        order by projects desc
+        order by projects desc, views desc
         limit ${limit}`,
     ]);
 
+    if (!publicOnly) {
+      return {
+        topAssets: topAssets.map(({ ownerId: _o, ...a }) => a),
+        topCreators: topCreators.map((c) => ({ userId: c.user_id, username: c.username, projects: Number(c.projects) })),
+      };
+    }
+    const names = await usersService.publicNames([...new Set([...topCreators.map((c) => c.user_id), ...topAssets.flatMap((a) => (a.ownerId ? [a.ownerId] : []))])]);
     return {
-      topAssets,
-      topCreators: topCreators.map((c) => ({ userId: c.user_id, username: c.username, projects: Number(c.projects) })),
+      topAssets: topAssets.map(({ ownerId, ...a }) => ({ ...a, owner: a.source === 'official' ? 'Official' : (ownerId && names.get(ownerId)?.name) || null })),
+      topCreators: topCreators.map((c) => ({
+        name: names.get(c.user_id)?.name ?? null, avatarUrl: names.get(c.user_id)?.avatarUrl ?? null,
+        projects: Number(c.projects), views: Number(c.views), copies: Number(c.copies),
+      })),
     };
   },
 };

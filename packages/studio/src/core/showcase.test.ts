@@ -1,6 +1,7 @@
 import { it } from 'vitest';
 import { appPresets } from './appPresets';
 import { cinematicPresets } from './cinematicPresets';
+import { mascotKitPresets } from './mascotKit';
 import { check } from './testkit';
 import { useEditor } from './store';
 import { builtinPresets, defaultProject, presetPreviewProject } from './defaults';
@@ -14,7 +15,7 @@ import { bakeLottie } from '../export/lottie';
 import { activeTimeline } from './types';
 import type { Preset, Project } from './types';
 
-const SHOWCASE = [...showcasePresets(), ...textPresets(), ...appPresets(), ...cinematicPresets()];
+const SHOWCASE = [...showcasePresets(), ...textPresets(), ...appPresets(), ...mascotKitPresets(), ...cinematicPresets()];
 
 // --- the seven are real presets, first in the library ------------------------------------
 {

@@ -1,7 +1,7 @@
 import { it } from 'vitest';
 import { check, near, rig } from './testkit';
 import { buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, sceneAt, valueAt } from './scene';
-import { confetti, defaultProject } from './defaults';
+import { confetti, defaultProject, defaultRig } from './defaults';
 import { relayoutBlocks } from './timeline';
 import { useEditor } from './store';
 import { activeTimeline } from './types';
@@ -37,7 +37,7 @@ it('eyes are mirrored', check(near(scene[1].cx + scene[2].cx, 600, 1e-6), `${sce
   for (const fov of [0, 28, 55, 78, 89]) {
     for (let yaw = -80; yaw <= 80; yaw += 2) {
       for (let pitch = -60; pitch <= 60; pitch += 5) {
-        const proj = defaultProject();
+        const proj = { rig: defaultRig() };
         proj.rig.camera.fov = fov;
         proj.rig.nodes.body.surface.yaw = yaw;
         proj.rig.nodes.body.surface.pitch = pitch;
@@ -117,18 +117,19 @@ it('eyes are mirrored', check(near(scene[1].cx + scene[2].cx, 600, 1e-6), `${sce
   it('a clip-scoped effect does not leak into a different clip', check(Math.abs(outsideDuringIdle.w - baseline250.w) < 1e-6, `${outsideDuringIdle.w} vs ${baseline250.w}`));
 
   // the effect's own phase is relative to the clip's start, not absolute timeline time —
-  // its *contribution* 250ms into Blink (starts at 2400ms) must match a global one's
-  // contribution 250ms into t=0, not 2650ms in. Compares deltas against the same
+  // its *contribution* 450ms into Blink (starts at 2400ms) must match a global one's
+  // contribution 450ms into t=0, not 2850ms in. 450 sits past the clip's ease-in and before
+  // its ease-out (Blink is 900ms, so each is 300ms). Compares deltas against the same
   // no-modifier baselines, so the unrelated keyframed motion each preset already does at
-  // that absolute time (which legitimately differs between t=250 and t=2650) cancels out.
+  // that absolute time (which legitimately differs between t=450 and t=2850) cancels out.
+  const body = (p: typeof proj, t: number) => buildScene(evaluateRig(p, t), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
   const globalEquivalent = defaultProject();
   activeTimeline(globalEquivalent).modifiers.push({ id: 'gm', nodeId: globalEquivalent.rig.rootId, kind: 'stretch', amount: 100, frequency: 1, amplitude: 20 });
-  const globalAt250 = buildScene(evaluateRig(globalEquivalent, 250), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
-  const globalAt2650 = buildScene(evaluateRig(globalEquivalent, 2650), { width: 720, height: 720 }).find((s) => s.id === 'body')!;
-  const insideDelta = inside.w - baseline2650.w;
-  const global250Delta = globalAt250.w - baseline250.w;
-  const global2650Delta = globalAt2650.w - baseline2650.w;
-  it('a clip-scoped effect phases from its own clip start, not absolute timeline time', check(Math.abs(insideDelta - global250Delta) < 0.05 && Math.abs(insideDelta - global2650Delta) > 5, `Δinside=${insideDelta} vs Δglobal@250=${global250Delta} vs Δglobal@2650=${global2650Delta}`));
+  const insideDelta = body(proj, 2850).w - body(noModifier, 2850).w;
+  const global450Delta = body(globalEquivalent, 450).w - body(noModifier, 450).w;
+  const global2850Delta = body(globalEquivalent, 2850).w - body(noModifier, 2850).w;
+  it('a clip-scoped effect phases from its own clip start, not absolute timeline time', check(Math.abs(insideDelta - global450Delta) < 0.05 && Math.abs(insideDelta - global2850Delta) > 5, `Δinside=${insideDelta} vs Δglobal@450=${global450Delta} vs Δglobal@2850=${global2850Delta}`));
+  it('a clip-scoped effect eases in at its clip start rather than snapping on', check(Math.abs(inside.w - baseline2650.w) < Math.abs(body(globalEquivalent, 250).w - baseline250.w) - 1));
 
   // removing the block it belongs to must drop the effect too, not leave it orphaned
   useEditor.getState().loadProject(proj);

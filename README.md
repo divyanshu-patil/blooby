@@ -204,7 +204,14 @@ moods and idles, showcase presets (hands, legs, morphs, several mascots), text p
 and app-screen presets, and cinematic presets (`core/cinematicPresets.ts`) built only from
 the editor's own systems: effects, masks, depth, the camera, bursts, walk/follow/jelly and
 per-letter keys — open one and every part of it is an ordinary layer, key or effect.
-`sequence()` joins presets end to end, which is how the showreel is made. Users can save
+`sequence()` joins presets end to end, which is how the showreel is made.
+
+The **app mascot kit** (`core/mascotKit.ts`) holds shippable states for app screens — Writing,
+Generation Failed/Cancelled/Complete, Shuffling Cards, Cards Fan Out, Hello Wave, Happy Idle,
+Cloud Float (+ Pro), Refresh Release, No Scripts Yet, Telescope Scan, Disconnected, Clap and Bow,
+Published!, Listening, Wrong Code, Thumbs Up, Head Scratch, Mail Sent, Sad Goodbye, Hello Jump In,
+Sparkle Excited, Cover Eyes. Each is Lottie-safe and its tagline names the `.lottie` and state it
+belongs to (`KIT_ASSETS`): make one timeline per state, place the preset, wire the inputs. Users can save
 their own, and the community catalogue is served by the API.
 
 A preset layer with a negative `zIndex` is placed behind the whole rig (portals, scenery);

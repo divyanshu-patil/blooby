@@ -19,6 +19,19 @@ export interface ProjectRow {
   s3Key: string; s3Bucket: string; currentVersion: number; sizeBytes: number | string;
   checksum: string | null; visibility: Visibility;
   createdAt: string; updatedAt: string; lastOpenedAt: string | null;
+  /** only meaningful while public: 'edit' lets any signed-in user save to it */
+  access?: 'view' | 'edit';
+  viewCount?: number; duplicateCount?: number;
+  /** the owner's username — set on community listings */
+  owner?: string | null;
+}
+
+/** What the community page shows in the open: most-used items and the most active creators. */
+export interface PublicInsights {
+  /** `owner`: the maker's public name, 'Official' for official items, null when unknown */
+  topAssets: { id: string; name: string; kind: AssetKind; source: AssetSource; downloadCount: number; owner: string | null }[];
+  /** ranked by public projects, then the views they earned. Names only — never an email */
+  topCreators: { name: string | null; avatarUrl: string | null; projects: number; views: number; copies: number }[];
 }
 
 export interface AssetRow {
