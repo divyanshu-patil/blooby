@@ -226,3 +226,9 @@
 @media (prefers-reduced-motion: reduce) {
   .card, .side, .skeleton, .savestate .dot { transition: none; animation: none; }
 }
+
+/* a project card's picture: three frames of its timeline, crossfading */
+.thumb-frames { position: relative; width: 100%; height: 100%; display: grid; place-items: center; }
+.thumb-frame { position: absolute; inset: 0; opacity: 0; transition: opacity .45s ease; }
+.thumb-frame[data-on] { opacity: 1; }
+.thumb-frame svg { width: 100%; height: 100%; }

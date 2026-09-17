@@ -114,8 +114,7 @@ export const projectsService = {
   async getData(projectId: string, userId: string | null) {
     const project = await readable(projectId, userId);
     const data = await storage.getProjectJson(project.s3Key);
-    // a stranger opening it is what trending counts; a failed count never fails the open
-    if (project.userId !== userId) await projectsRepository.countView(projectId).catch(() => {});
+    // not counted as a view: card thumbnails read this too — opening in the editor counts (touchOpened)
     return { project, data, canEdit: canWrite(project, userId), isOwner: project.userId === userId };
   },
 
@@ -155,8 +154,15 @@ export const projectsService = {
     return { version: nextVersion, sizeBytes: stored.sizeBytes, checksum: stored.checksum, savedAt: new Date().toISOString() };
   },
 
+  /**
+   * Opened in the editor. Your own project records when (the dashboard's "recent"); anyone
+   * else's public one counts a view, which is what trending ranks by. A failed count never
+   * fails the open.
+   */
   async touchOpened(projectId: string, userId: string) {
-    await ownedBy(projectId, userId);
-    return projectsRepository.update(projectId, { lastOpenedAt: new Date() });
+    const project = await readable(projectId, userId);
+    if (project.userId === userId) return projectsRepository.update(projectId, { lastOpenedAt: new Date() });
+    await projectsRepository.countView(projectId).catch(() => {});
+    return project;
   },
 };

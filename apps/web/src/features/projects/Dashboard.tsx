@@ -69,6 +69,7 @@ export function Dashboard({ onOpen }: { onOpen: (id: string) => void }) {
           <div className="card-grid">
             {data.items.map((p) => (
               <ProjectCard key={p.id} project={p} onOpen={() => onOpen(p.id)}
+                load={() => projectsApi.getData(p.id).then((r) => r.data)}
                 menu={[
                   { label: 'Rename', onSelect: () => setRenaming(p) },
                   { label: 'Duplicate', onSelect: () => void act(() => projectsApi.duplicate(p.id)) },

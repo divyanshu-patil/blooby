@@ -127,13 +127,25 @@ it('duplicates anyone’s public project and counts it, but not a private one', 
   expect(await status(projectsService.duplicate('p1', 'u1'))).toBe(404);
 });
 
-it('tells the editor whether the opener may save, and counts a stranger’s view', async () => {
+it('tells the editor whether the opener may save', async () => {
   store.getProjectJson.mockResolvedValue({});
-  repo.countView.mockResolvedValue(undefined);
   repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', access: 'view' }));
   expect(await projectsService.getData('p1', null)).toMatchObject({ canEdit: false, isOwner: false });
-  expect(repo.countView).toHaveBeenCalledTimes(1);
   repo.findById.mockResolvedValue(project({ userId: 'u1' }));
   expect(await projectsService.getData('p1', 'u1')).toMatchObject({ canEdit: true, isOwner: true });
+  // reading the data is what a card thumbnail does too — never a view
+  expect(repo.countView).not.toHaveBeenCalled();
+});
+
+it('opening someone else’s public project counts a view; your own records when', async () => {
+  repo.countView.mockResolvedValue(undefined);
+  repo.update.mockResolvedValue(project());
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public' }));
+  await projectsService.touchOpened('p1', 'u1');
+  expect(repo.countView).toHaveBeenCalledWith('p1');
+  expect(repo.update).not.toHaveBeenCalled();
+  repo.findById.mockResolvedValue(project({ userId: 'u1' }));
+  await projectsService.touchOpened('p1', 'u1');
+  expect(repo.update).toHaveBeenCalledWith('p1', expect.objectContaining({ lastOpenedAt: expect.any(Date) }));
   expect(repo.countView).toHaveBeenCalledTimes(1);
 });
