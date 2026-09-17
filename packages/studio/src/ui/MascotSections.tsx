@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useEditor } from '../core/store';
 import { faceOf, mascotLabel, mascotOf, mascotsOf } from '../core/mascot';
 import { isInside, makeLimbPair } from '../core/layers';
-import { applySquish, EYE_ACTIONS, SQUISH_PRESETS, squishPreset } from '../core/squish';
+import { applyEyeAction as writeEyeAction, applySquish, EYE_ACTIONS, SQUISH_PRESETS, squishPreset } from '../core/squish';
 import { applyPose, POSES } from '../core/poses';
 import { makeTimeline } from '../core/defaults';
 import { sceneAt } from '../core/scene';
@@ -127,43 +127,41 @@ export function SquishSection({ node }: { node: RigNode }) {
 }
 
 /**
- * Eye actions at the playhead: blink, squint, close — and the squish presets, onto the eyes.
- * On a mascot they go to all its eyes; on one eye, to both by default or just that one.
- * Like squish presets they are keyframes the moment they land, nothing opaque.
+ * Eye actions at the playhead: blink, squint, close — and the squish presets, onto these eyes.
+ * Pick one to preview it looping on this mascot; Apply writes it. Like squish presets they are
+ * keyframes the moment they land, nothing opaque.
  */
-export function EyesSection({ node }: { node: RigNode }) {
-  const rig = useEditor((s) => s.project.rig);
+export function EyeActions({ eyeIds }: { eyeIds: string[] }) {
   const playhead = useEditor((s) => s.playhead);
   const applyEyeAction = useEditor((s) => s.applyEyeAction);
   const applySquishTo = useEditor((s) => s.applySquishTo);
-  const [justThis, setJustThis] = useState(false);
-  const [pick, setPick] = useState(SQUISH_PRESETS[0].id);
-  const mascot = mascotOf(rig, node.id);
-  const all = Object.values(rig.nodes).filter((n) => n.kind === 'eye' && mascotOf(rig, n.id)?.id === mascot?.id).map((n) => n.id);
-  const eyes = node.kind === 'eye' && justThis ? [node.id] : all;
-  if (!eyes.length) return <p className="empty-note">No eyes on this mascot.</p>;
-  const when = `at ${(playhead / 1000).toFixed(2)}s`;
+  const [pick, setPick] = useState<string>(EYE_ACTIONS[0].id);
+  const action = EYE_ACTIONS.find((a) => a.id === pick);
+  const squish = action ? undefined : squishPreset(pick);
+  const ids = eyeIds.join(' ');
+  if (!eyeIds.length || (!action && !squish)) return null;
+  const spanMs = action ? action.keys[action.keys.length - 1][0] : squish!.keys[squish!.keys.length - 1][0];
+  const apply = () => (action ? applyEyeAction(eyeIds, action.id) : applySquishTo(eyeIds, squish!.id));
   return (
     <>
-      {node.kind === 'eye' && all.length > 1 && (
-        <div className="seg" style={{ display: 'flex' }}>
-          <button style={{ flex: 1 }} aria-pressed={!justThis} onClick={() => setJustThis(false)}>Both eyes</button>
-          <button style={{ flex: 1 }} aria-pressed={justThis} onClick={() => setJustThis(true)}>{node.name}</button>
-        </div>
-      )}
-      <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+      <div className="row" style={{ gap: 4, flexWrap: 'wrap' }} role="radiogroup" aria-label="Eye action">
         {EYE_ACTIONS.map((a) => (
-          <button key={a.id} className="btn sm" title={`${a.blurb} — ${when}`} onClick={() => applyEyeAction(eyes, a.id)}>{a.name}</button>
+          <button key={a.id} className="btn sm" role="radio" aria-checked={pick === a.id} aria-pressed={pick === a.id}
+            title={a.blurb} onClick={() => setPick(a.id)}>{a.name}</button>
         ))}
       </div>
-      <div className="divider" />
-      <div className="row" style={{ gap: 4 }}>
-        <select className="sel" style={{ flex: 1, minWidth: 0 }} aria-label="Eye squish preset" value={pick} onChange={(e) => setPick(e.target.value)}>
-          {SQUISH_PRESETS.map((sp) => <option key={sp.id} value={sp.id} title={sp.blurb}>{sp.name}</option>)}
-        </select>
-        <button className="btn sm" title={`Squish the eyes ${when}`} onClick={() => applySquishTo(eyes, pick)}>Squish</button>
+      <select className="sel" aria-label="Eye squish preset" value={squish ? pick : ''} onChange={(e) => e.target.value && setPick(e.target.value)}>
+        <option value="">Squish the eyes…</option>
+        {SQUISH_PRESETS.map((sp) => <option key={sp.id} value={sp.id} title={sp.blurb}>{sp.name}</option>)}
+      </select>
+      <ActionPreview label={action?.name ?? squish!.name} actionKey={`eyes.${ids}.${pick}`} spanMs={spanMs} focus={eyeIds}
+        apply={(q) => { if (action) writeEyeAction(q, eyeIds, action.id, 0); else for (const id of eyeIds) applySquish(q, id, squish!.id, 0); }} />
+      <div className="row">
+        <span className="hint" style={{ flex: 1 }}>{action?.blurb ?? squish!.blurb}</span>
+        <button className="btn sm primary" title={`Write it as keyframes starting at ${(playhead / 1000).toFixed(2)}s`} onClick={apply}>
+          Apply at {(playhead / 1000).toFixed(2)}s
+        </button>
       </div>
-      <p className="hint">Lands at the playhead as keyframes you can edit.</p>
     </>
   );
 }
@@ -198,37 +196,56 @@ export function RoleSection({ node }: { node: RigNode }) {
  * Apply will do before it writes a single keyframe. Loops with a short rest between.
  */
 function SquishPreview({ nodeId, presetId }: { nodeId: string; presetId: string }) {
-  const project = useEditor((s) => s.project);
   const preset = squishPreset(presetId);
-  const span = preset ? preset.keys[preset.keys.length - 1][0] : 0;
-  const temp = useMemo<Project | null>(() => {
-    if (!preset) return null;
-    const tl = makeTimeline('squish preview');
+  if (!preset) return null;
+  return <ActionPreview label={preset.name} actionKey={`squish.${nodeId}.${presetId}`}
+    spanMs={preset.keys[preset.keys.length - 1][0]} apply={(q) => { applySquish(q, nodeId, presetId, 0); }} />;
+}
+
+/**
+ * A keyframe action played on a copy of this project, looping — what Apply will do, before
+ * it does it. `focus` crops to those layers (a blink is too small to read on the whole mascot).
+ * `actionKey` names the action: the copy is rebuilt only when it or the project changes.
+ */
+export function ActionPreview({ label, actionKey, spanMs, apply, focus }: {
+  label: string; actionKey: string; spanMs: number; apply: (q: Project) => void; focus?: string[];
+}) {
+  const project = useEditor((s) => s.project);
+  const focusKey = focus?.join(' ') ?? '';
+  const temp = useMemo<Project>(() => {
+    const tl = makeTimeline('action preview');
     // the layers this state owns stay drawn; nothing else animates
     tl.appearances = (activeTimeline(project).appearances ?? []).filter((a) => !a.blockId);
-    tl.timelineDurationMs = span + 400;
+    tl.timelineDurationMs = spanMs + 400;
     const q: Project = { ...project, timelines: [tl], activeTimelineId: tl.id };
-    applySquish(q, nodeId, presetId, 0);
+    apply(q);
     return q;
-  }, [project, nodeId, presetId, preset, span]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `apply` is named by actionKey
+  }, [project, actionKey, spanMs]);
   const box = useMemo<Bounds | null>(() => {
-    if (!temp) return null;
     let b: Bounds | null = null;
-    for (let t = 0; t <= span; t += Math.max(20, span / 8)) b = unionBounds(b, sceneBounds(sceneAt(temp, t, compOf(temp))));
+    const only = focusKey ? new Set(focusKey.split(' ')) : null;
+    for (let t = 0; t <= spanMs; t += Math.max(20, spanMs / 8)) {
+      const scene = sceneAt(temp, t, compOf(temp));
+      b = unionBounds(b, sceneBounds(only ? scene.filter((x) => only.has(x.id)) : scene));
+    }
+    if (b && only) {
+      // room around the eyes, so a squint reads against the face rather than filling the frame
+      const w = b.x1 - b.x0, h = b.y1 - b.y0, m = Math.max(w, h) * 0.35;
+      b = { x0: b.x0 - m, y0: b.y0 - m, x1: b.x1 + m, y1: b.y1 + m };
+    }
     return b;
-  }, [temp, span]);
+  }, [temp, spanMs, focusKey]);
   const [t, setT] = useState(0);
   useEffect(() => {
-    if (!temp) return;
     let raf = 0;
     const start = performance.now();
-    const tick = (now: number) => { setT(Math.min(span, (now - start) % (span + 450))); raf = requestAnimationFrame(tick); };
+    const tick = (now: number) => { setT(Math.min(spanMs, (now - start) % (spanMs + 450))); raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [temp, span]);
-  if (!temp) return null;
+  }, [temp, spanMs]);
   return (
-    <div className="squish-preview" aria-label={`Preview of ${preset?.name}`}>
+    <div className="squish-preview" aria-label={`Preview of ${label}`}>
       <MascotThumb scene={sceneAt(temp, t, compOf(temp))} view={compOf(temp)} box={box} pad={10} />
     </div>
   );

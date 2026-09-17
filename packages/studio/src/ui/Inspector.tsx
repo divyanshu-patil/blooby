@@ -15,7 +15,7 @@ import { openComposition } from './CompositionDialog';
 import { TextLayoutSection, TextLettersSection, TextPathSection, TextSection } from './TextSections';
 import { CurveSection } from './CurveSection';
 import { CompositeSection, DepthSection, EffectsSection, GradientSection } from './StyleSections';
-import { MascotFollowSection, MascotRigSection, RoleSection, SquishSection, EyesSection } from './MascotSections';
+import { MascotFollowSection, MascotRigSection, RoleSection, SquishSection } from './MascotSections';
 import { attachmentOf, isInside, layerOrder } from '../core/layers';
 import { limbPoints } from '../core/limb';
 import { blockStarts, fmtSec } from '../core/timeline';
@@ -195,9 +195,6 @@ export function NodeInspector() {
       <Collapsible title="Transform" storageKey="insp-transform">
         <TransformSection node={node} isRoot={mascot} />
       </Collapsible>
-      {(mascot || node.kind === 'eye') && (
-        <Collapsible title="Eyes" storageKey="insp-eyes" defaultOpen={node.kind === 'eye'}><EyesSection node={node} /></Collapsible>
-      )}
       {node.kind !== 'limb' && node.kind !== 'eye' && (
         <Collapsible title="Squish" storageKey="insp-squish" defaultOpen={mascot}><SquishSection node={node} /></Collapsible>
       )}
