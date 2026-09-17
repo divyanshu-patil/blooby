@@ -2,6 +2,7 @@ import type { Project } from '@prisma/client';
 import { projectsRepository } from '../repositories/projects.repository.js';
 import { assetsRepository } from '../repositories/assets.repository.js';
 import { HttpError } from '../utils/httpError.js';
+import { usersService } from './users.service.js';
 import * as storage from './storage.service.js';
 import type { CreateProjectDto, ListProjectsDto, ListPublicProjectsDto, SaveProjectDataDto, UpdateProjectDto } from '../dtos/projects/index.js';
 
@@ -38,7 +39,12 @@ async function writable(projectId: string, userId: string): Promise<Project> {
 }
 
 export const projectsService = {
-  listPublic: (opts: ListPublicProjectsDto) => projectsRepository.listPublic(opts),
+  /** public projects, each with its owner's public name (see usersService.publicNames) */
+  async listPublic(opts: ListPublicProjectsDto) {
+    const { items, nextCursor } = await projectsRepository.listPublic(opts);
+    const names = await usersService.publicNames([...new Set(items.map((p) => p.userId))]);
+    return { items: items.map((p) => ({ ...p, owner: names.get(p.userId)?.name ?? null })), nextCursor };
+  },
 
   list: (userId: string, opts: ListProjectsDto) => projectsRepository.listByUser(userId, opts),
 

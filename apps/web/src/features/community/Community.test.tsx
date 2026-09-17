@@ -114,8 +114,18 @@ it('lists public projects in the community, trending first, with who made them',
 });
 
 it('shows the community insights in the open', async () => {
-  insights.mockResolvedValue({ topAssets: [{ id: 'a2', name: 'Big wave', kind: 'preset', source: 'community', downloadCount: 40 }], topCreators: [{ username: 'ana', projects: 3 }] });
+  insights.mockResolvedValue({
+    topAssets: [{ id: 'a2', name: 'Big wave', kind: 'preset', source: 'community', downloadCount: 1, owner: 'Bo Diaz' }],
+    topCreators: [{ name: 'Ana Real', avatarUrl: null, projects: 3, views: 1, copies: 2 }, { name: null, avatarUrl: null, projects: 1, views: 0, copies: 0 }],
+  });
   render(<Community />, { wrapper: MemoryRouter });
-  expect(await screen.findByText('Big wave')).toBeInTheDocument();
-  expect(screen.getByText('3 public')).toBeInTheDocument();
+  const board = await screen.findByRole('region', { name: 'Community leaderboard' });
+  const creators = within(board).getAllByRole('listitem');
+  expect(creators[0]).toHaveTextContent('Ana Real');
+  expect(creators[0]).toHaveTextContent('3 projects');
+  // singular where it is one, and a person with no name is not called "Someone"
+  expect(creators[0]).toHaveTextContent('1 view · 2 copies');
+  expect(creators[1]).toHaveTextContent('Unnamed creator');
+  expect(within(board).getByText('1 use')).toBeInTheDocument();
+  expect(within(board).getByText('Preset · Bo Diaz')).toBeInTheDocument();
 });

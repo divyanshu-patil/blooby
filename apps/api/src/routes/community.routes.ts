@@ -27,5 +27,5 @@ communityRoutes.get('/expressions', optionalAuth, pin('community'), validate(lis
 communityRoutes.get('/official', optionalAuth, pin('official'), validate(listAssetsDto, 'query'), asyncHandler(assetsController.browse));
 // public projects (trending or newest) and the public insights — before '/:id', which would take them
 communityRoutes.get('/projects', validate(listPublicProjectsDto, 'query'), asyncHandler(projectsController.listPublic));
-communityRoutes.get('/insights', asyncHandler((_req, res) => analyticsService.insights(8, true).then((r) => res.json(r))));
+communityRoutes.get('/insights', asyncHandler((_req, res) => analyticsService.insights(10, true).then((r) => res.json(r))));
 communityRoutes.get('/:id', optionalAuth, validate(uuidParam('id'), 'params'), asyncHandler(assetsController.get));

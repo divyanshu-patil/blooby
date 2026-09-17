@@ -9,3 +9,31 @@
 .who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
 .who img { width: 22px; height: 22px; border-radius: 50%; }
 .who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- community leaderboard ---------------------------------------------- */
+.boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.board { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow); overflow: hidden; }
+.board-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line-soft); }
+.board-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.board-head span { font-size: 12px; color: var(--muted); }
+.board-list { list-style: none; margin: 0; padding: 4px 0; }
+.board-row { display: flex; align-items: center; gap: 10px; padding: 8px 16px; min-height: 48px; }
+.board-row + .board-row { border-top: 1px solid var(--line-soft); }
+.board-rank {
+  flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted);
+}
+/* the podium: first is filled, second and third ringed — monochrome, per DESIGN.md */
+.board-row[data-podium='1'] .board-rank { background: var(--ink-2); color: #fafafa; }
+.board-row[data-podium='2'] .board-rank,
+.board-row[data-podium='3'] .board-rank { box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
+.board-avatar {
+  flex: none; width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+  display: grid; place-items: center; background: var(--field); color: var(--ink-2); font-size: 12px; font-weight: 600;
+}
+.board-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.board-name { font-size: 14px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-meta { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-value { flex: none; width: 96px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; font-weight: 500; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.board-bar { width: 100%; height: 3px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
+.board-bar > span { display: block; height: 100%; background: var(--ink-2); border-radius: 2px; }

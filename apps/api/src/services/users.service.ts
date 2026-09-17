@@ -60,6 +60,31 @@ export const usersService = {
     );
   },
 
+  /**
+   * What the public may know about people: a name and an avatar, never an email. The name is
+   * the username they chose, else the name their sign-in provider gave. Missing accounts are
+   * simply absent from the map.
+   */
+  async publicNames(ids: string[]) {
+    const out = new Map<string, { name: string | null; avatarUrl: string | null }>();
+    if (!ids.length) return out;
+    const [profiles, { data, error }] = await Promise.all([
+      prisma.profile.findMany({ where: { id: { in: ids } }, select: { id: true, username: true, avatarUrl: true } }),
+      supabaseAdmin.auth.admin.listUsers({ perPage: 200 }),
+    ]);
+    // a leaderboard without provider names still renders with usernames — never fail the page on it
+    const meta = new Map((error ? [] : data.users).map((u) => [u.id, u.user_metadata ?? {}]));
+    for (const p of profiles) {
+      const m = meta.get(p.id) as Record<string, unknown> | undefined;
+      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+      out.set(p.id, {
+        name: p.username ?? str(m?.full_name) ?? str(m?.name),
+        avatarUrl: p.avatarUrl ?? str(m?.avatar_url),
+      });
+    }
+    return out;
+  },
+
   async detail(userId: string) {
     const profile = await profilesRepository.findById(userId);
     if (!profile) throw HttpError.notFound('No such user');

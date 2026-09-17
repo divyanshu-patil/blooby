@@ -5,6 +5,7 @@ import {
   assetsApi, communityApi, projectsApi, useAsync, useEditor,
   type AssetKind, type AssetRow, type AssetSource, type Page, type Preset, type ProjectRow,
 } from '@blooby/studio';
+import { Leaderboard } from './Leaderboard';
 
 const SOURCES = [
   { id: 'community' as const, label: 'Community' },
@@ -78,18 +79,7 @@ export function Community({ onAdded }: { onAdded?: (asset: AssetRow) => void }) 
           {source !== 'user' && <ChipBar options={projects ? SORTS.slice(0, 2) : SORTS} value={sort} onChange={setSort} />}
         </div>
 
-        {source === 'community' && insights.data && (insights.data.topCreators.length > 0 || insights.data.topAssets.length > 0) && (
-          <section className="insights" aria-label="Community insights" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
-            {insights.data.topAssets.length > 0 && (
-              <div><div className="state-note">Most used</div>
-                {insights.data.topAssets.slice(0, 5).map((a) => <div key={a.id}>{a.name} <span className="tag">{a.downloadCount} uses</span></div>)}</div>
-            )}
-            {insights.data.topCreators.length > 0 && (
-              <div><div className="state-note">Most active creators</div>
-                {insights.data.topCreators.slice(0, 5).map((c, i) => <div key={i}>{c.username ?? 'Someone'} <span className="tag">{c.projects} public</span></div>)}</div>
-            )}
-          </section>
-        )}
+        {source === 'community' && insights.data && <Leaderboard insights={insights.data} />}
 
         {loading && <LoadingGrid />}
         {error && <ErrorState message={error} onRetry={reload} />}

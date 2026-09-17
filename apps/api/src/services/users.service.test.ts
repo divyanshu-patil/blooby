@@ -6,6 +6,7 @@ vi.mock('../config/prisma.js', () => ({
   prisma: {
     project: { groupBy: vi.fn(), count: vi.fn(), findMany: vi.fn() },
     asset: { count: vi.fn() },
+    profile: { findMany: vi.fn() },
   },
 }));
 vi.mock('../repositories/profiles.repository.js', () => ({
@@ -18,12 +19,12 @@ const { usersService } = await import('./users.service.js');
 const { HttpError } = await import('../utils/httpError.js');
 
 const profiles = profilesRepository as unknown as Record<string, ReturnType<typeof vi.fn>>;
-const db = prisma as unknown as { project: Record<string, ReturnType<typeof vi.fn>>; asset: Record<string, ReturnType<typeof vi.fn>> };
+const db = prisma as unknown as { project: Record<string, ReturnType<typeof vi.fn>>; asset: Record<string, ReturnType<typeof vi.fn>>; profile: Record<string, ReturnType<typeof vi.fn>> };
 
 beforeEach(() => {
   listUsers.mockReset();
   for (const fn of Object.values(profiles)) fn.mockReset();
-  for (const m of [db.project, db.asset]) for (const fn of Object.values(m)) fn.mockReset();
+  for (const m of [db.project, db.asset, db.profile]) for (const fn of Object.values(m)) fn.mockReset();
   listUsers.mockResolvedValue({ data: { users: [] }, error: null });
   db.project.groupBy.mockResolvedValue([]);
 });
@@ -114,4 +115,23 @@ it('returns only project metadata in a user detail, never the payload', async ()
 it('404s a detail for a user that does not exist', async () => {
   profiles.findById.mockResolvedValue(null);
   expect(await status(usersService.detail('ghost'))).toBe(404);
+});
+
+/** The leaderboard names people without ever handing out an email. */
+it('names people by username, else their provider name — never by email', async () => {
+  db.profile.findMany.mockResolvedValue([
+    { id: 'u1', username: 'ana', avatarUrl: null },
+    { id: 'u2', username: null, avatarUrl: null },
+    { id: 'u3', username: null, avatarUrl: null },
+  ]);
+  listUsers.mockResolvedValue({ data: { users: [
+    { id: 'u1', email: 'a@x.io', user_metadata: { full_name: 'Ana Real' } },
+    { id: 'u2', email: 'b@x.io', user_metadata: { full_name: 'Bo Diaz', avatar_url: 'https://img/b' } },
+    { id: 'u3', email: 'c@x.io', user_metadata: {} },
+  ] }, error: null });
+  const names = await usersService.publicNames(['u1', 'u2', 'u3']);
+  expect(names.get('u1')).toEqual({ name: 'ana', avatarUrl: null });
+  expect(names.get('u2')).toEqual({ name: 'Bo Diaz', avatarUrl: 'https://img/b' });
+  expect(names.get('u3')).toEqual({ name: null, avatarUrl: null });
+  expect(JSON.stringify([...names.values()])).not.toContain('@');
 });

@@ -51,9 +51,7 @@ export const projectsRepository = {
       });
       ({ items, nextCursor } = page(rows, opts.limit));
     }
-    const owners = await prisma.profile.findMany({ where: { id: { in: [...new Set(items.map((p) => p.userId))] } }, select: { id: true, username: true } });
-    const name = new Map(owners.map((o) => [o.id, o.username]));
-    return { items: items.map((p) => ({ ...p, owner: name.get(p.userId) ?? null })), nextCursor };
+    return { items, nextCursor };
   },
 
   countView: (id: string) => prisma.project.update({ where: { id }, data: { viewCount: { increment: 1 } } }),

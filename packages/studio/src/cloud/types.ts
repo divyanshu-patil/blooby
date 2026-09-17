@@ -28,8 +28,10 @@ export interface ProjectRow {
 
 /** What the community page shows in the open: most-used items and the most active creators. */
 export interface PublicInsights {
-  topAssets: { id: string; name: string; kind: AssetKind; source: AssetSource; downloadCount: number }[];
-  topCreators: { username: string | null; projects: number }[];
+  /** `owner`: the maker's public name, 'Official' for official items, null when unknown */
+  topAssets: { id: string; name: string; kind: AssetKind; source: AssetSource; downloadCount: number; owner: string | null }[];
+  /** ranked by public projects, then the views they earned. Names only — never an email */
+  topCreators: { name: string | null; avatarUrl: string | null; projects: number; views: number; copies: number }[];
 }
 
 export interface AssetRow {
