@@ -24,7 +24,7 @@ const ANY = { w: 84, h: 34 };
 const NODE = { w: 150, h: 48 };
 const box = (id: string) => (id === ANY_STATE ? ANY : NODE);
 
-export function StateGraph({ selectedId, onSelect }: { selectedId: string | null; onSelect: (t: SmTransition | null) => void }) {
+export function StateGraph({ selectedId, onSelect, disabled = false }: { selectedId: string | null; onSelect: (t: SmTransition | null) => void; disabled?: boolean }) {
   const project = useEditor((s) => s.project);
   const live = useEditor((s) => s.inputs);
   const setActiveTimeline = useEditor((s) => s.setActiveTimeline);
@@ -71,6 +71,8 @@ export function StateGraph({ selectedId, onSelect }: { selectedId: string | null
 
   const startWire = (from: string) => (e: React.PointerEvent) => {
     e.stopPropagation();
+    // a wire tests an input: none yet, nothing to wire
+    if (disabled) return;
     svg.current?.setPointerCapture?.(e.pointerId);
     setWire({ from, ...toSvg(e) });
   };
@@ -101,7 +103,12 @@ export function StateGraph({ selectedId, onSelect }: { selectedId: string | null
     const from = wire.from;
     setWire(null);
     if (!target || target.id === from) return;
-    addStateTransition(from, target.id);
+    // born with a condition on the first input, so it can fire — edited right under the graph
+    const input = m.inputs.find((i) => i.type !== 'Event') ?? m.inputs[0];
+    addStateTransition(from, target.id, input ? [{
+      input: input.name, operator: input.type === 'Event' ? 'Fired' : 'Equal',
+      value: input.type === 'Numeric' ? 1 : input.type === 'Boolean' ? true : input.type === 'String' ? target.name : undefined,
+    }] : undefined);
     const made = machineOf(useEditor.getState().project).transitions.at(-1);
     if (made) onSelect(made);
   };
@@ -169,7 +176,7 @@ export function StateGraph({ selectedId, onSelect }: { selectedId: string | null
                 <title>Rules start here: whatever state is current, when the condition holds, go to the target. Drag to move.</title>
               </g>
               <circle className="sm-port" cx={p.x + ANY.w} cy={p.y + ANY.h / 2} r={5.5} fill="var(--ink)"
-                onPointerDown={startWire(ANY_STATE)} style={{ cursor: 'crosshair' }}>
+                onPointerDown={startWire(ANY_STATE)} style={{ cursor: disabled ? 'not-allowed' : 'crosshair' }} opacity={disabled ? 0.35 : 1}>
                 <title>Drag onto a state to add a rule into it</title>
               </circle>
             </g>
@@ -200,14 +207,14 @@ export function StateGraph({ selectedId, onSelect }: { selectedId: string | null
                 <title>{`${tl.name}${initial ? ' — the machine starts here' : ''}. Click to show it on the stage; drag to move it.`}</title>
               </g>
               <circle className="sm-port" cx={p.x + NODE.w} cy={p.y + NODE.h / 2} r={4.5} fill="var(--muted)"
-                onPointerDown={startWire(tl.id)} style={{ cursor: 'crosshair' }}>
+                onPointerDown={startWire(tl.id)} style={{ cursor: disabled ? 'not-allowed' : 'crosshair' }} opacity={disabled ? 0.35 : 1}>
                 <title>{`Drag onto another state for a transition out of ${tl.name} only`}</title>
               </circle>
             </g>
           );
         })}
       </svg>
-      {!valid.length && (
+      {!valid.length && !disabled && (
         <p className="hint">Drag from <b>Any state</b>'s dot onto a state to add a rule — “when this input is… play that state”. Drag nodes to arrange them.</p>
       )}
     </div>

@@ -54,21 +54,44 @@ export function StateMachine() {
   const issues = validateMachine(project);
   const errors = issues.filter((i) => i.level === 'error');
 
+  const selected = machine.transitions.find((t) => t.id === selectedTransition);
+  const hasInputs = machine.inputs.length > 0;
+
+  // In the order they are needed: an input is what every transition tests, so nothing moves
+  // without one; the node editor wires states together with those inputs, and a wire's
+  // conditions are edited right there under it; the rest is detail.
   return (
     <>
       <MachineHeader errors={errors.length} />
-      <Collapsible title="Rules" storageKey="sm-rules" badge={machine.transitions.filter((t) => t.from === ANY_STATE).length || undefined}>
-        <StateGraph selectedId={selectedTransition} onSelect={(t) => setSelectedTransition(t?.id ?? null)} />
-        <Rules selectedId={selectedTransition} onSelect={setSelectedTransition} />
-      </Collapsible>
-      <Collapsible title="Current → target" storageKey="sm-direct" defaultOpen={false}>
-        <StateDirector />
-      </Collapsible>
-      <Collapsible title="Inputs" storageKey="sm-inputs" badge={machine.inputs.length || undefined}>
+      <Collapsible title="1 · Inputs" storageKey="sm-inputs" badge={machine.inputs.length || 'needed'}>
+        {!hasInputs && (
+          <p className="hint" style={{ margin: 0 }}>
+            <strong>Start here.</strong> An input is the value your app sets — <code>isTyping</code>, <code>mood</code>, a <code>tap</code> event.
+            States only change when one does, so the node editor needs at least one.
+          </p>
+        )}
         <Inputs />
+      </Collapsible>
+      <Collapsible title="2 · Node editor" storageKey="sm-graph" badge={machine.transitions.length || undefined}>
+        {!hasInputs && <p className="hint" style={{ margin: 0 }}>Add an input above, then drag between states to wire them.</p>}
+        <StateGraph selectedId={selectedTransition} disabled={!hasInputs} onSelect={(t) => setSelectedTransition(t?.id ?? null)} />
+        {selected && (
+          <div className="sm-graph-edit" aria-label="Selected transition">
+            <TransitionRow transition={selected} open onToggle={() => setSelectedTransition(null)} />
+          </div>
+        )}
+        {!selected && hasInputs && machine.transitions.length > 0 && (
+          <p className="hint" style={{ margin: 0 }}>Click a wire to change its conditions, blend and easing here.</p>
+        )}
+      </Collapsible>
+      <Collapsible title="Rules" storageKey="sm-rules" defaultOpen={false} badge={machine.transitions.filter((t) => t.from === ANY_STATE).length || undefined}>
+        <Rules selectedId={selectedTransition} onSelect={setSelectedTransition} />
       </Collapsible>
       <Collapsible title="States" storageKey="sm-states" badge={project.timelines.length}>
         <States />
+      </Collapsible>
+      <Collapsible title="Current → target" storageKey="sm-direct" defaultOpen={false}>
+        <StateDirector />
       </Collapsible>
       <Collapsible title="All transitions (advanced)" storageKey="sm-transitions" defaultOpen={false} badge={machine.transitions.length || undefined}>
         <Transitions selectedId={selectedTransition} onSelect={setSelectedTransition} />
@@ -500,13 +523,13 @@ function States() {
  * Numeric input takes the next number, so three clicks read value = 1, 2, 3.
  */
 function useAddRule() {
-  const addInput = useEditor((s) => s.addInput);
   const addStateTransition = useEditor((s) => s.addStateTransition);
   return (to: string) => {
     const p = useEditor.getState().project;
     const m = machineOf(p);
-    let input = m.inputs.find((i) => i.type !== 'Event') ?? m.inputs[0];
-    if (!input) { input = { name: 'value', type: 'Numeric', value: 0 }; addInput(input); }
+    const input = m.inputs.find((i) => i.type !== 'Event') ?? m.inputs[0];
+    // inputs come first: without one there is nothing for a rule to test
+    if (!input) return;
     const n = m.transitions.filter((t) => t.from === ANY_STATE && t.conditions[0]?.input === input!.name).length;
     const target = p.timelines.find((x) => x.id === to);
     const value: InputValue | undefined = input.type === 'Numeric' ? n + 1 : input.type === 'Boolean' ? true
@@ -550,7 +573,9 @@ function Rules({ selectedId, onSelect }: { selectedId: string | null; onSelect: 
           </div>
         );
       })}
-      <button className="btn sm" style={{ alignSelf: 'flex-start' }} disabled={!next} onClick={() => next && addRule(next.id)}>+ Rule</button>
+      <button className="btn sm" style={{ alignSelf: 'flex-start' }} disabled={!next || !machine.inputs.length}
+        title={machine.inputs.length ? 'A rule into the next state' : 'Add an input first — a rule tests one'}
+        onClick={() => next && addRule(next.id)}>+ Rule</button>
       <p className="hint" style={{ margin: 0 }}>
         A rule works from whatever state is current — <code>value = 2 → Dance</code> takes Idle, Happy or Sad straight to Dance.
         Drag between states in the graph for a transition out of one state only.

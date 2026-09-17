@@ -1381,3 +1381,6 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
   content: ''; position: absolute; inset: -6px; z-index: -1;
 }
 :where(.btn.sm, .btn.icon, .layer-btn, .chip-pub, .stage-meta-size, .cp-swatch, .sw, .stopwatch, .keychev, .expand):disabled::before { content: none; }
+
+/* the wire picked in the node editor, edited right under it */
+.sm-graph-edit { margin-top: 8px; }
