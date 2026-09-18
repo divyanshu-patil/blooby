@@ -15,7 +15,7 @@ it('shows what is new since last time, and records it as seen when closed', asyn
   const dialog = screen.getByRole('dialog', { name: /what.s new/i });
   for (const item of RELEASES[0].items) expect(within(dialog).getByText(item.title)).toBeInTheDocument();
   // a dashboard item can be toured from here; an editor one says where to go
-  expect(within(dialog).getAllByRole('button', { name: 'Show me' }).length).toBe(RELEASES[0].items.filter((i) => i.surface === 'dashboard' && i.tour).length);
+  expect(within(dialog).getAllByRole('button', { name: 'Show me' }).length).toBe(RELEASES.flatMap((r) => r.items).filter((i) => i.surface === 'dashboard' && i.tour).length);
   expect(within(dialog).getAllByText('Open a project to see it.').length).toBeGreaterThan(0);
 
   await userEvent.click(within(dialog).getByRole('button', { name: 'Got it' }));

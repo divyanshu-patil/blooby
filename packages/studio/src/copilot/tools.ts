@@ -7,7 +7,7 @@ import { setProp } from '../core/props';
 import { SQUISH_PRESETS, applySquish, squishPreset } from '../core/squish';
 import { applyPose, findPose, POSES } from '../core/poses';
 import { EFFECT_KINDS, EFFECTS, makeEffect } from '../core/effects';
-import { faceOf, makeFace, laneOf, laneOfMascot, makeMascot, MASCOT_KINDS, mascotLabel, mascotOf, nextMascotName, type MascotKind } from '../core/mascot';
+import { baseRig, faceOf, makeFace, laneOf, laneOfMascot, makeMascot, MASCOT_KINDS, mascotLabel, mascotOf, nextMascotName, type MascotKind } from '../core/mascot';
 import { curveFromPath, curveToPath, moveAnchor, nearestOnCurve, removePoint, reverseCurve, type Curve } from '../core/curve';
 import { layoutLines, TEXT_DEFAULTS } from '../core/text';
 import { metricsFor } from '../core/fonts';
@@ -96,7 +96,7 @@ clear_animation       { nodeId?, property? }                   // drop tracks; o
 set_block_duration    { block, durationMs }                    // block = id, name, or 0-based index on the strip
 remove_block          { block }
 move_block            { block, index }
-add_timeline          { name, copyLayers? }                    // a new timeline = a new exported Lottie state. Every state has its OWN layers: copyLayers (default true) starts it with a copy of the current state's layers (not its animation); false = a blank canvas
+add_timeline          { name, copyLayers? }                    // a new timeline = a new exported Lottie state. Every state has its OWN layers: copyLayers (default true) starts it with a copy of the current state's layers (not its animation); false = just the base mascot
 set_camera            { property: "perspective"|"distance", value }  // perspective is the field-of-view angle
 
 remove_keyframe       { nodeId, property, atMs }               // atMs must match a keyframe listed under "Keyframes"
@@ -1794,7 +1794,7 @@ export function applyCalls(calls: ToolCall[]) {
         case 'add_timeline': {
           const tl = makeTimeline(uniqueName(String(a.name).trim(), p.timelines.map((t) => t.name)));
           // a state for the same mascot is what "add a Happy state" means — blank only when asked
-          if (a.copyLayers !== false) tl.rig = structuredClone(p.rig);
+          tl.rig = a.copyLayers !== false ? structuredClone(p.rig) : baseRig(p.rig);
           p.timelines.push(tl);
           // anything the model emits after this belongs to the state it just made
           switchTimeline(p, tl.id);

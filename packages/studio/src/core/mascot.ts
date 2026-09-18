@@ -226,3 +226,17 @@ export function instantiateTemplate(nodes: RigNode[], opts: { name: string; x?: 
     return n;
   });
 }
+
+/** `rig` down to its first mascot — the body and its parts (face, eyes, role limbs), nothing added. What a new timeline starts with. */
+export function baseRig(rig: Rig): Rig {
+  const nodes: Record<string, RigNode> = {};
+  const root = rig.nodes[rig.rootId];
+  if (root?.kind === 'body') {
+    const keep = (n: RigNode) => {
+      nodes[n.id] = structuredClone(n);
+      for (const c of Object.values(rig.nodes)) if (c.parentId === n.id && (c.kind === 'eye' || roleOf(c))) keep(c);
+    };
+    keep(root);
+  }
+  return { ...structuredClone(rig), nodes, rootId: root?.kind === 'body' ? root.id : '' };
+}

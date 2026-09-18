@@ -566,6 +566,19 @@ import type { Preset, Project } from './types';
   ed().loadProject(defaultProject());
 }
 
+// --- a new timeline keeps the base mascot, not the extra layers ------------------
+{
+  const ed = () => useEditor.getState();
+  ed().loadProject(defaultProject());
+  ed().addText();
+  const before = Object.keys(ed().project.rig.nodes);
+  ed().addTimeline('Fresh');
+  const rig = ed().project.rig;
+  it('a new timeline starts with the mascot', check(rig.nodes[rig.rootId]?.kind === 'body' && !!rig.nodes.eyeL && !!rig.nodes.eyeR, Object.keys(rig.nodes).join()));
+  it('and without the layers added on top of it', check(Object.keys(rig.nodes).length < before.length, `${before.length} -> ${Object.keys(rig.nodes).length}`));
+  ed().loadProject(defaultProject());
+}
+
 // --- a feature can be keyframed out of the scene ---------------------------------
 {
   const ed = () => useEditor.getState();

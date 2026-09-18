@@ -38,6 +38,19 @@ const step = (element: string, title: string, description: string): DriveStep =>
 
 export const RELEASES: Release[] = [
   {
+    version: '2026.09.18',
+    date: '18 September 2026',
+    title: 'New timelines keep your mascot',
+    items: [
+      {
+        id: 'timeline-base-mascot', surface: 'editor',
+        title: 'A new timeline starts with your mascot',
+        body: '+ on the timeline tabs now starts with your mascot, without the extra layers. Adding a layer to an empty timeline no longer crashes the editor.',
+        tour: [step('timeline-add', 'Your mascot comes along', '+ starts a timeline with just your mascot. ⧉ on a tab still copies everything.')],
+      },
+    ],
+  },
+  {
     version: '2026.09.17',
     date: '17 September 2026',
     title: 'States of their own, characters with personality',

@@ -66,8 +66,8 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
 - Every timeline has its OWN rig. `p.rig` is the ACTIVE timeline's (every editor action reads/writes it);
   inactive ones keep theirs in `tl.rig`. Change the active timeline only through `switchTimeline(p,id)`
   (types.ts — parks/unparks rigs). Draw/export another state with `asTimeline(p,id)` / `rigOf(p,tl)`, never
-  `{...p, activeTimelineId}` (that would pair its tracks with the wrong layers). New timeline = empty rig
-  (`emptyRig`, rootId '' until `addMascot`); `addTimeline(name,{copyLayers})`, `duplicateTimeline`.
+  `{...p, activeTimelineId}` (that would pair its tracks with the wrong layers). New timeline = the first mascot only
+  (`baseRig`; `emptyRig`, rootId '' until `addMascot`, is the fallback); `addTimeline(name,{copyLayers})`, `duplicateTimeline`.
   Copilot `add_timeline` copies layers unless `copyLayers:false`. Migration 11 gave old timelines copies.
 - Layer ops in layers.ts touch only the active timeline's tracks; `showLayerIn(...,'everywhere')` copies
   the layer into every other timeline's rig.

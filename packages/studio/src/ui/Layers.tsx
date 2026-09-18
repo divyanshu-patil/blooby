@@ -159,12 +159,14 @@ export function Layers() {
               onClick={() => { setTool('pen'); closeTray(); }}><Icon name="pen" />Curve<kbd>P</kbd></button>
             <button role="menuitem" className="add-layer" onClick={() => setTray('shape')}><Icon name="shape" />Shape</button>
             <button role="menuitem" className="add-layer" onClick={() => setTray('svg')}><Icon name="svg" />SVG</button>
+            {current && <>
             <button role="menuitem" className="add-layer" title={`Two rubber-hose arms on ${mascotLabel(rig, current)}`}
               onClick={() => { addLayer(makeLimbPair(rig, current.id, 'arm')); closeTray(); }}><Icon name="hand" />Hands</button>
             <button role="menuitem" className="add-layer" title={`Two legs on ${mascotLabel(rig, current)}`}
               onClick={() => { addLayer(makeLimbPair(rig, current.id, 'leg')); closeTray(); }}><Icon name="leg" />Legs</button>
+            </>}
           </div>
-          {many && <p className="hint" style={{ margin: 0 }}>Hands and legs go on {mascotLabel(rig, current)} — select another mascot to give them to it.</p>}
+          {many && current && <p className="hint" style={{ margin: 0 }}>Hands and legs go on {mascotLabel(rig, current)} — select another mascot to give them to it.</p>}
         </div>
       )}
       {tray === 'shape' && (

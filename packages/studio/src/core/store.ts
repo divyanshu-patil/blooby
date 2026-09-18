@@ -11,7 +11,7 @@ import {
   setAppearance as setAppearanceIn, setAttachment as setAttachmentIn, setMorph, topZ, ungroupLayer as ungroupLayerIn,
   type AppearanceRange, type AttachMode, type ReorderTo,
 } from './layers';
-import { faceOf, laneOf, laneOfMascot, makeFace, mascotOf, type MascotKind } from './mascot';
+import { baseRig, faceOf, laneOf, laneOfMascot, makeFace, mascotOf, type MascotKind } from './mascot';
 import { applyEyeAction as applyEyeActionIn, applySquish as applySquishIn } from './squish';
 import { applyPose as applyPoseIn } from './poses';
 import { presetTargets } from './defaults';
@@ -215,7 +215,7 @@ export interface Editor {
   setTransition: (afterBlockId: string, patch: Partial<Pick<Transition, 'durationMs' | 'easing'>>) => void;
   removeTransition: (afterBlockId: string) => void;
 
-  /** a new timeline — a blank canvas, or with `copyLayers` a copy of this state's layers (not its animation) */
+  /** a new timeline — the base mascot only, or with `copyLayers` a copy of this state's layers (not its animation) */
   addTimeline: (name?: string, opts?: { copyLayers?: boolean }) => void;
   /** a copy of a timeline: its own copy of the layers, and its clips, keys, effects and ranges */
   duplicateTimeline: (id: string) => void;
@@ -1146,8 +1146,8 @@ export const useEditor = create<Editor>((set, get) => ({
     const { project } = get();
     const base = name?.trim() || `Timeline ${project.timelines.length + 1}`;
     const tl = makeTimeline(uniqueName(base, project.timelines.map((t) => t.name)));
-    // a new timeline is a blank canvas: switching parks this state's layers and brings out none
-    if (opts?.copyLayers) tl.rig = structuredClone(project.rig);
+    // a new timeline starts with the base mascot only; copyLayers brings every layer along
+    tl.rig = opts?.copyLayers ? structuredClone(project.rig) : baseRig(project.rig);
     get().commit((p) => { p.timelines.push(tl); switchTimeline(p, tl.id); });
     // the same reset switching to an existing timeline does. Without it a clip and an
     // emitter from the OLD timeline stayed selected, so the clip inspector described

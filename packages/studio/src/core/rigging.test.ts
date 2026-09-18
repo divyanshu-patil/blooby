@@ -269,12 +269,12 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
   const q = useEditor.getState().project;
   it('keyed, a pose is keyframes at the playhead', check(activeTimeline(q).tracks.some((t) => t.nodeId === armR.id && t.property === 'limb.c.y' && t.keyframes.some((k) => k.time === 500))));
 
-  // every state keeps its own layers: a new one is blank, and a layer is copied in on request
+  // every state keeps its own layers: a new one has just the mascot, and a layer is copied in on request
   ed.loadProject(defaultProject());
   ed.addLayer(makeShapeLayer('star', { id: 'starA' }));
   const idleId = useEditor.getState().project.activeTimelineId;
   ed.addTimeline('Happy');
-  it('a new state is a blank canvas', check(Object.keys(useEditor.getState().project.rig.nodes).length === 0));
+  it('a new state has the mascot but not the extra layers', check(!!useEditor.getState().project.rig.nodes.body && !useEditor.getState().project.rig.nodes.starA));
   ed.addTimeline('Sad');
   ed.setActiveTimeline(idleId);
   it('switching back brings that state\'s own layers back', check(!!useEditor.getState().project.rig.nodes.starA && !!useEditor.getState().project.rig.nodes.body));
