@@ -500,6 +500,18 @@ export function validateMachine(p: Project): Issue[] {
       out.push({ level: 'warning', message: `Input "${i.name}" is not used by any transition.`, inputName: i.name });
     }
   }
+  // the engine checks transitions as soon as it starts: one that already holds on the
+  // defaults leaves the starred state before it is ever seen
+  const start = initialState(p);
+  const values = defaultValues(p);
+  let at = start.id;
+  const seen = new Set([at]);
+  for (let t = nextTransition(p, at, values); t && !seen.has(t.to); t = nextTransition(p, at, values)) { seen.add(t.to); at = t.to; }
+  if (at !== start.id) {
+    const used = [...new Set(m.transitions.flatMap((t) => t.conditions.map((c) => c.input)))]
+      .filter((n) => n in values).map((n) => `${n} = ${JSON.stringify(values[n])}`).join(', ');
+    out.push({ level: 'warning', message: `The machine starts in "${start.name}" but moves straight to "${byId.get(at)?.name}", because its inputs start as ${used}. Change a default under Inputs so nothing fires at the start.` });
+  }
   if (p.timelines.length > 1 && !m.transitions.length) {
     out.push({ level: 'warning', message: 'No transitions yet — the machine will stay in its initial state forever.' });
   }

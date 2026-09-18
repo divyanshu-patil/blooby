@@ -4,7 +4,7 @@ import { defaultProject, makeTimeline } from './defaults';
 import {
   animationIds, conditionText, fromDotLottie, nextTransition, OPERATORS, toDotLottie, validateMachine,
 } from './stateMachine';
-import type { Project, SmTransition } from './types';
+import { ANY_STATE, type Project, type SmTransition } from './types';
 
 /** watching ⇄ observing on isTyping, watching → excited on energy > 80, plus a String. */
 function machineProject(): Project {
@@ -171,4 +171,19 @@ function machineProject(): Project {
     conditionText({ input: 'mood', operator: 'Equal', value: 'happy' }, inputs) === 'mood == "happy"'));
   it('a boolean condition reads as words', check(
     conditionText({ input: 'isTyping', operator: 'Equal', value: true }, inputs) === 'isTyping is true'));
+}
+
+// --- a transition that holds on the defaults leaves the starred state at once -----
+{
+  const p = machineProject();
+  const leaves = () => validateMachine(p).filter((i) => i.message.includes('moves straight to'));
+  it('a machine that settles in its starred state is not warned about', check(leaves().length === 0, JSON.stringify(leaves())));
+  // hii ⇄ convo on `change`, starred on hii — but change starts false, so convo fires at once
+  p.stateMachine!.transitions = [
+    { id: 'a', from: ANY_STATE, to: p.timelines[1].id, conditions: [{ input: 'isTyping', operator: 'Equal', value: false }], logic: 'AND', durationMs: 300 },
+    { id: 'b', from: ANY_STATE, to: p.timelines[0].id, conditions: [{ input: 'isTyping', operator: 'Equal', value: true }], logic: 'AND', durationMs: 300 },
+  ];
+  it('one that leaves it on the defaults is', check(leaves().length === 1 && leaves()[0].message.includes('"observing"') && leaves()[0].message.includes('isTyping = false'), JSON.stringify(leaves())));
+  p.stateMachine!.inputs[0].value = true;
+  it('and a default that holds it there clears the warning', check(leaves().length === 0));
 }

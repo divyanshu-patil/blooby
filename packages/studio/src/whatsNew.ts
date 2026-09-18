@@ -38,6 +38,23 @@ const step = (element: string, title: string, description: string): DriveStep =>
 
 export const RELEASES: Release[] = [
   {
+    version: '2026.09.18.2',
+    date: '18 September 2026',
+    title: 'Grouped eyes look around, and a skipped start is flagged',
+    items: [
+      {
+        id: 'grouped-eyes-gaze', surface: 'editor',
+        title: 'Eyes in a group follow the gaze',
+        body: 'Grouping the eyes no longer stops the Eyes panel from aiming them. Eyes grouped before this change are fixed by dragging them back onto the face in Layers.',
+      },
+      {
+        id: 'sm-start-warning', surface: 'editor',
+        title: 'A warning when the starting state is skipped',
+        body: 'If a transition already holds when the machine starts, it leaves the ★ state before it is seen. The States panel now says so, and which input default to change.',
+      },
+    ],
+  },
+  {
     version: '2026.09.18',
     date: '18 September 2026',
     title: 'New timelines keep your mascot',

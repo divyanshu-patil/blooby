@@ -153,3 +153,19 @@ const itemOf = (p: Project, id: string, t = 0) => buildScene(evaluateRig(p, t), 
   const [a3, b3] = pos();
   it('ungrouping moves nothing either, and the group is gone', check(!p.rig.nodes[g] && near(a3.cx, a0.cx, 0.01) && near(b3.cy, b0.cy, 0.01)));
 }
+
+// --- eyes in a group still follow the gaze ----------------------------------------
+{
+  const p = defaultProject();
+  const at = (id: string) => itemOf(p, id)!;
+  const [l0, r0] = [at('eyeL'), at('eyeR')];
+  const g = groupLayers(p, ['eyeL', 'eyeR'], 0)!;
+  const [l1, r1] = [at('eyeL'), at('eyeR')];
+  it('grouping the eyes moves nothing', check(near(l0.cx, l1.cx, 0.01) && near(l0.cy, l1.cy, 0.01) && near(r0.cx, r1.cx, 0.01), `${l0.cx},${l1.cx}`));
+  it('and they stay on the sphere', check(p.rig.nodes.eyeL.surface.mapped && p.rig.nodes.eyeR.surface.mapped));
+  p.rig.nodes.eyeL.surface.yaw += 20;
+  it('so the gaze still moves them', check(at('eyeL').cx > l1.cx + 5, `${l1.cx} -> ${at('eyeL').cx}`));
+  p.rig.nodes.eyeL.surface.yaw -= 20;
+  ungroupLayer(p, g, 0);
+  it('ungrouping keeps them on the sphere, where they were', check(p.rig.nodes.eyeL.surface.mapped && near(at('eyeL').cx, l0.cx, 0.01) && near(at('eyeL').cy, l0.cy, 0.01)));
+}

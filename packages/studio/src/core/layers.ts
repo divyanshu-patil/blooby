@@ -495,7 +495,7 @@ export function placeUnder(p: Project, id: string, parentId: string | null, atMs
   const screen: Vec2 = { x: mine.x, y: mine.y };
   let mapped = false;
   // onto any mascot's sphere — but a mascot following another stays flat beside it
-  if (onSurface && toMascot && node.kind !== 'body' && target.R > 0) {
+  if (onSurface && parentId !== null && onSphere(rig, parentId) && node.kind !== 'body' && target.R > 0) {
     const r = (-target.rot * Math.PI) / 180;
     const dx = screen.x - target.x, dy = screen.y - target.y;
     const lx = dx * Math.cos(r) - dy * Math.sin(r);
@@ -534,6 +534,15 @@ export function setAttachment(p: Project, id: string, mode: AttachMode, anchorId
   return placeUnder(p, id, parent, atMs);
 }
 
+/** Whether `id` hands a mascot's sphere down to what it holds: a body, or groups (the face included) on one. */
+export function onSphere(rig: Rig, id: string): boolean {
+  for (let n = rig.nodes[id], i = 0; n && i < 64; n = rig.nodes[n.parentId ?? ''], i++) {
+    if (n.kind === 'body') return true;
+    if (n.kind !== 'group') return false;
+  }
+  return false;
+}
+
 /** Put several layers in one group, at their centre, none of them moving. */
 export function groupLayers(p: Project, ids: string[], atMs: number): string | null {
   const members = ids.filter((id) => p.rig.nodes[id] && id !== p.rig.rootId);
@@ -550,7 +559,9 @@ export function groupLayers(p: Project, ids: string[], atMs: number): string | n
     zIndex: Math.max(...members.map((id) => p.rig.nodes[id].zIndex)),
   });
   p.rig.nodes[g.id] = g;
-  for (const id of members) placeUnder(p, id, g.id, atMs, false);
+  // grouped on a mascot, the eyes stay on the sphere, so the gaze still moves them
+  if (onSphere(p.rig, g.id)) adopt(p, members, g.id, atMs);
+  else for (const id of members) placeUnder(p, id, g.id, atMs, false);
   denseZ(p.rig);
   return g.id;
 }
@@ -559,7 +570,9 @@ export function groupLayers(p: Project, ids: string[], atMs: number): string | n
 export function ungroupLayer(p: Project, id: string, atMs: number): void {
   const g = p.rig.nodes[id];
   if (!g || g.kind !== 'group') return;
-  for (const c of Object.values(p.rig.nodes).filter((n) => n.parentId === id)) placeUnder(p, c.id, g.parentId, atMs, false);
+  const kids = Object.values(p.rig.nodes).filter((n) => n.parentId === id).map((n) => n.id);
+  if (g.parentId && onSphere(p.rig, g.parentId)) adopt(p, kids, g.parentId, atMs);
+  else for (const c of kids) placeUnder(p, c, g.parentId, atMs, false);
   removeLayer(p, id);
 }
 
@@ -984,9 +997,10 @@ export function moveInto(p: Project, id: string, parentId: string | null, atMs: 
   if (!node || node.parentId === parentId) return !!node;
   if (parentId !== null && (!p.rig.nodes[parentId] || parentId === id || isInside(p.rig, parentId, id))) return false;
   const target = parentId ? p.rig.nodes[parentId] : null;
-  const sphere = target && (target.kind === 'body' || (target.kind === 'group' && target.role === 'face'));
+  const sphere = parentId !== null && onSphere(p.rig, parentId);
   if (node.surface.mapped && sphere) { adopt(p, [id], parentId!, atMs); return true; }
-  return placeUnder(p, id, parentId, atMs, target?.kind === 'body');
+  // an eye that went flat goes back on the sphere when moved onto one
+  return placeUnder(p, id, parentId, atMs, target?.kind === 'body' || (node.kind === 'eye' && sphere));
 }
 
 /**
