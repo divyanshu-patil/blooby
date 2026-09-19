@@ -38,6 +38,18 @@ const step = (element: string, title: string, description: string): DriveStep =>
 
 export const RELEASES: Release[] = [
   {
+    version: '2026.09.20',
+    date: '20 September 2026',
+    title: 'Your picture and name in the sidebar',
+    items: [
+      {
+        id: 'sidebar-avatar', surface: 'dashboard',
+        title: 'You, in the sidebar',
+        body: 'The sidebar now shows your profile picture and name from your sign-in, instead of just an email address.',
+      },
+    ],
+  },
+  {
     version: '2026.09.18.2',
     date: '18 September 2026',
     title: 'Grouped eyes look around, and a skipped start is flagged',

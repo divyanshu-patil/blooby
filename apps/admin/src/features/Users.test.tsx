@@ -109,3 +109,25 @@ it('shows a dash rather than "Invalid Date" for an account that never signed in'
   render(<Users />);
   expect(await screen.findByText('—')).toBeInTheDocument();
 });
+
+it('shows each person by their name with their avatar, email underneath', async () => {
+  users.mockResolvedValue({ items: [row({ name: 'Ann Lee', avatarUrl: 'https://img/ann' })], nextCursor: null });
+  const { container } = render(<Users />);
+  expect(await screen.findByText('Ann Lee')).toBeInTheDocument();
+  expect(screen.getByText('ann@example.com')).toBeInTheDocument();
+  expect(container.querySelector('img.avatar')?.getAttribute('src')).toBe('https://img/ann');
+});
+
+/** The API pages by cursor; Previous walks back through the cursors already seen. */
+it('pages forward by cursor and back again', async () => {
+  users.mockResolvedValueOnce({ items: [row()], nextCursor: 'c1' });
+  render(<Users />);
+  await screen.findByText('ann@example.com');
+  users.mockResolvedValue({ items: [row({ id: 'b', email: 'b@x.c' })], nextCursor: null });
+  await userEvent.click(screen.getByRole('button', { name: /next/i }));
+  expect(await screen.findByText('b@x.c')).toBeInTheDocument();
+  expect(users).toHaveBeenLastCalledWith({ q: undefined, limit: 50, cursor: 'c1' });
+  expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
+  await userEvent.click(screen.getByRole('button', { name: /previous/i }));
+  await waitFor(() => expect(users).toHaveBeenLastCalledWith({ q: undefined, limit: 50 }));
+});

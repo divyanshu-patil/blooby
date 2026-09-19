@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import {
-  EmptyState, Shell, Splashscreen, WhatsNewButton, auth, authApi, configureWhatsNew, startTour, startTourWhenReady, useSession,
+  Avatar, EmptyState, Shell, Splashscreen, WhatsNewButton, auth, authApi, configureWhatsNew, startTour, startTourWhenReady, useSession,
   type DriveStep, type NavGroup, type SessionUser,
 } from '@blooby/studio';
 import { AuthScreen } from './features/auth/AuthScreen';
@@ -102,7 +102,8 @@ function AppShell({ user, tourReady }: { user: SessionUser; tourReady: boolean }
       footer={
         <div className="who">
           <WhatsNewButton surface="dashboard" autoOpen={tourReady} />
-          <span className="who-name">{user.email ?? 'Signed in'}</span>
+          <Avatar name={user.name ?? user.email} url={user.avatarUrl} size={24} />
+          <span className="who-name" title={user.email ?? undefined}>{user.name ?? user.email ?? 'Signed in'}</span>
           <button className="btn ghost sm" title="Replay the tour"
             onClick={() => startTour('web', WEB_TOUR, { force: true })}>?</button>
           <button className="btn ghost sm" onClick={() => void auth.signOut()}>Sign out</button>

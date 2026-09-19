@@ -243,3 +243,15 @@
 .whatsnew-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 .whatsnew-title { font-size: 14px; font-weight: 600; color: var(--ink); }
 .dialog .whatsnew-item p { margin: 0; font-size: 13px; }
+
+/* people and pages */
+.avatar {
+  flex: none; width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+  display: inline-grid; place-items: center; background: var(--field); color: var(--ink-2); font-weight: 600;
+}
+.person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.person-text { display: flex; flex-direction: column; min-width: 0; }
+.person-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 0; }
+.pager-page { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }

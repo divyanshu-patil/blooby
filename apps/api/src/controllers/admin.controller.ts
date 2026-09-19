@@ -40,7 +40,11 @@ export const adminController = {
     });
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
-    res.json({ items, nextCursor: hasMore ? items[items.length - 1]!.id : null });
+    const owners = await usersService.publicNames([...new Set(items.map((p) => p.userId))]);
+    res.json({
+      items: items.map((p) => ({ ...p, owner: owners.get(p.userId)?.name ?? null, ownerAvatarUrl: owners.get(p.userId)?.avatarUrl ?? null })),
+      nextCursor: hasMore ? items[items.length - 1]!.id : null,
+    });
   },
 
   moderationQueue: (req: Request, res: Response) => {

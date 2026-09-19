@@ -7,7 +7,7 @@ export type AssetSource = 'builtin' | 'official' | 'user' | 'community';
 export type AssetStatus = 'draft' | 'pending_review' | 'published' | 'rejected' | 'archived';
 export type SplashStatus = 'draft' | 'published' | 'archived';
 
-export interface SessionUser { id: string; email: string | null; role: UserRole; /** What's New: the newest release version this person has seen */ lastSeenRelease?: string | null }
+export interface SessionUser { id: string; email: string | null; role: UserRole; /** What's New: the newest release version this person has seen */ lastSeenRelease?: string | null; name?: string | null; avatarUrl?: string | null }
 
 export interface Profile {
   id: string; role: UserRole; username: string | null; avatarUrl: string | null;
@@ -22,8 +22,10 @@ export interface ProjectRow {
   /** only meaningful while public: 'edit' lets any signed-in user save to it */
   access?: 'view' | 'edit';
   viewCount?: number; duplicateCount?: number;
-  /** the owner's username — set on community listings */
+  /** the owner's public name — set on community and admin listings */
   owner?: string | null;
+  /** the owner's avatar — set on admin listings */
+  ownerAvatarUrl?: string | null;
 }
 
 /** What the community page shows in the open: most-used items and the most active creators. */
@@ -51,6 +53,8 @@ export interface SplashscreenRow {
 
 export interface AdminUser extends Profile {
   lastSignInAt: string | null; projectCount: number;
+  /** username, else the sign-in provider's name */
+  name?: string | null;
 }
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
