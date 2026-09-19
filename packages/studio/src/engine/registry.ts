@@ -95,8 +95,9 @@ const ENUMS: Record<string, Record<string, readonly string[]>> = {
 function typeFor(tool: string, name: string, hint: string): JsonSchema {
   const e = ENUMS[tool]?.[name] ?? ENUMS['*'][name];
   if (e) return { type: 'string', enum: [...e] };
-  const quoted = [...hint.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-  if (quoted.length > 1 && !/[{[]/.test(hint)) return { type: 'string', enum: quoted };
+  // "a"|"b"|"" — alternatives split on the bar, so an empty string stays one value
+  const alts = hint.split('|').map((x) => x.trim());
+  if (alts.length > 1 && !/[{[]/.test(hint) && alts.every((x) => /^"[^"]*"$/.test(x))) return { type: 'string', enum: alts.map((x) => x.slice(1, -1)) };
   if (/^true\|false$/.test(hint.trim()) || BOOL_ARGS.has(name)) return { type: 'boolean' };
   if (/Ms$/.test(name) || NUMBER_ARGS.has(name)) return { type: 'number' };
   if (COLOR_ARGS.has(name)) return { anyOf: [{ type: 'string', description: '#rrggbb' }, { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 4, description: '[r,g,b] 0-255' }] };
@@ -218,10 +219,32 @@ function editCapabilities(): Capability[] {
  * callback (`updateNode(id, fn)`) have an edit tool doing the same thing with data; the
  * ones below would throw the document or its history away, or only move browser UI.
  */
-const NOT_ACTIONS = new Set([
-  'loadProject', 'resetProject', 'commit', 'restoreProject', 'undo', 'redo', 'loadCatalog', 'setPlaying', 'setTool',
-  'setEditPoints', 'setRailTab', 'toggleAutoKey', 'trackFor', 'setClipGalleryTimeline', 'addClipFrom', 'setPlayhead', 'select',
-]);
+const NOT_ACTIONS: Record<string, string> = {
+  loadProject: 'replaces the whole document — project_open / project_reload do this safely',
+  resetProject: 'throws the document away — project_create makes a fresh one',
+  commit: 'takes a callback; every edit capability commits through it',
+  restoreProject: 'replaces the document — checkpoint_restore / history_undo cover it',
+  undo: 'exposed as history_undo', redo: 'exposed as history_redo',
+  loadCatalog: 'browser-only library fetch — the server loads the library itself',
+  setPlaying: 'real-time playback has no meaning headless — evaluate / render_sequence show motion',
+  setTool: 'which canvas tool the mouse uses — every tool\'s effect is a capability',
+  setEditPoints: 'a canvas handle mode — curve/limb point capabilities edit points directly',
+  setRailTab: 'moves browser UI only',
+  toggleAutoKey: 'a UI preference — set_property with atMs keys explicitly',
+  trackFor: 'returns a live object — timeline_get returns tracks as data',
+  setClipGalleryTimeline: 'links a browser-local gallery entry',
+  addClipFrom: 'takes another in-memory timeline — preset_apply / add_preset_to_timeline place clips',
+  setPlayhead: 'exposed as playhead_set', select: 'exposed as selection_set',
+};
+
+/** Store actions deliberately not exposed, with the reason — the parity audit lists these. */
+export const excludedActions = () => editorFunctions().flatMap((f) => {
+  if (NOT_ACTIONS[f.name]) return [{ action: f.name, reason: NOT_ACTIONS[f.name] }];
+  if (takesCallback(f.signature)) return [{ action: f.name, reason: 'takes a callback — the edit capabilities do the same with data (see capabilities_search)' }];
+  return [];
+});
+const takesCallback = (sig: string) => /=>/.test(sig.slice(sig.indexOf('(') + 1, sig.lastIndexOf(') =>')));
+
 
 /** capability id → the store action and its parameter order, for the session to call */
 const ACTIONS = new Map<string, { action: string; params: { name: string; type: string; optional: boolean }[] }>();
@@ -229,7 +252,7 @@ export const actionOf = (id: string) => { capabilities(); return ACTIONS.get(id)
 
 function actionCapabilities(): Capability[] {
   return editorFunctions().flatMap((f) => {
-    if (NOT_ACTIONS.has(f.name) || /=>/.test(f.signature.slice(f.signature.indexOf('(') + 1, f.signature.lastIndexOf(') =>')))) return [];
+    if (NOT_ACTIONS[f.name] || takesCallback(f.signature)) return [];
     const params = paramsOf(f.signature);
     const properties: Record<string, JsonSchema> = {};
     for (const p of params) properties[p.name] = tsType(p.type);

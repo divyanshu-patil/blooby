@@ -33,3 +33,4 @@
 .board-value { flex: none; width: 96px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; font-weight: 500; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .board-bar { width: 100%; height: 3px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
 .board-bar > span { display: block; height: 100%; background: var(--ink-2); border-radius: 2px; }
+.ai-clients { max-width: 640px; display: flex; flex-direction: column; gap: 12px; }

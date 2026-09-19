@@ -50,6 +50,10 @@ it, the editor still runs offline on the built-in presets.
 | **Export** | Lottie JSON, `.lottie` with state machine, GIF, MP4/WebM, PNG, React Native pack |
 | **Admin** | Overview, moderation, users, projects, official presets and a splashscreen builder that uses the editor's renderer |
 
+## Use it from Claude, ChatGPT or Cursor
+
+Blooby is an MCP server. Copy your MCP link from the editor's **MCP** tab, paste it into your AI app as a connector, approve on the Blooby page it opens — and ask it to animate. See [docs/mcp](docs/mcp/README.md).
+
 ## Getting started
 
 ### Prerequisites

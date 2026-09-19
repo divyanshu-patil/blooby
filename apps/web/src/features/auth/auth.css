@@ -63,3 +63,12 @@
   color: var(--ink); cursor: pointer;
 }
 .auth-switch button:hover { text-decoration: underline; }
+
+/* the MCP consent page (/connect) */
+.consent-group { border: 0; padding: 0; margin: 0 0 16px; display: flex; flex-direction: column; gap: 8px; }
+.consent-group legend { font-size: 12px; font-weight: 500; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.consent-row { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.43; color: var(--ink-2); cursor: pointer; }
+.consent-row input { margin-top: 3px; flex: none; }
+.consent-who { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); margin: 4px 0 16px; }
+.consent-actions { display: flex; gap: 10px; }
+.consent-actions .auth-submit { flex: 1; margin: 0; }

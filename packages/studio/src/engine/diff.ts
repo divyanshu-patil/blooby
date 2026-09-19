@@ -20,7 +20,7 @@ export function entities(p: Project): Map<string, Entry> {
   const out = new Map<string, Entry>();
   const put = (ref: EntityRef, data: unknown) => out.set(`${ref.type}:${ref.state ? `${ref.state}/` : ''}${ref.id}`, { ref, data });
 
-  put({ type: 'composition', id: 'composition' }, { width: p.composition?.width, height: p.composition?.height, fps: p.fps, name: p.name });
+  put({ type: 'composition', id: 'composition' }, { width: p.composition?.width, height: p.composition?.height, fps: p.fps, name: p.name, activeState: p.activeTimelineId });
   for (const tl of p.timelines) {
     const rig = tl.id === p.activeTimelineId ? p.rig : tl.rig;
     const { rig: _r, tracks, blocks, modifiers, emitters, ...rest } = tl as typeof tl & { rig?: unknown };
@@ -38,6 +38,8 @@ export function entities(p: Project): Map<string, Entry> {
   }
   for (const pr of p.presets) put({ type: 'preset', id: pr.id, name: pr.name }, pr);
   for (const e of p.expressions) put({ type: 'expression', id: e.id, name: e.name }, e);
+  if (p.stateMachine) { const { inputs: _i, transitions: _t, ...machine } = p.stateMachine; put({ type: 'machine', id: 'machine' }, machine); }
+  for (const a of p.svgAssets ?? []) put({ type: 'svgAsset', id: a.id, name: a.name }, a);
   for (const i of p.stateMachine?.inputs ?? []) put({ type: 'input', id: i.name, name: i.name }, i);
   for (const t of p.stateMachine?.transitions ?? []) put({ type: 'transition', id: t.id }, t);
   return out;

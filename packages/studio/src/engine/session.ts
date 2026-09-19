@@ -167,6 +167,12 @@ export class EditorSession {
         if (dryRun) useEditor.setState(snapshot, true);
         return { ...r, diff };
       });
+      if (out.missing?.length && isEmptyDiff(out.diff)) {
+        const m = out.missing[0];
+        throw new CapabilityError('ENTITY_NOT_FOUND', `Nothing has the id "${m.value}" (${m.field}), so nothing changed.`, {
+          field: m.field, value: m.value, suggestion: 'timeline_get lists track, keyframe and clip ids; editor_get_state lists layers and states.',
+        });
+      }
       const changedDoc = !isEmptyDiff(out.diff) && !dryRun;
       if (changedDoc) this.revision++;
       if (!dryRun && out.call) this.edits.push(out.call);
@@ -197,7 +203,7 @@ export class EditorSession {
   }
 
   private async execute(cap: Capability, args: Record<string, unknown>, ed: Editor):
-    Promise<{ summary: string; result?: unknown; warnings?: string[]; call?: ToolCall; warnIfNoop?: boolean }> {
+    Promise<{ summary: string; result?: unknown; warnings?: string[]; call?: ToolCall; warnIfNoop?: boolean; missing?: { field: string; value: unknown }[] }> {
     const p = ed.project;
     switch (cap.kind) {
       case 'edit': {
@@ -210,15 +216,16 @@ export class EditorSession {
       }
       case 'action': {
         const a = actionOf(cap.id)!;
-        for (const prm of a.params) {
-          const v = args[prm.name];
-          if (typeof v === 'string' && /Id$|^id$/.test(prm.name) && !idExists(p, v) && !ed.catalog.some((c) => c.id === v)) {
-            throw new CapabilityError('ENTITY_NOT_FOUND', `No ${prm.name.replace(/Id$/, '') || 'entity'} with id "${v}".`, { field: prm.name, value: v, suggestion: 'timeline_get lists track, keyframe and clip ids; editor_get_state lists layers and states.' });
-          }
-        }
+        // ids that name nothing in the document — reported only if the action then changed nothing
+        // (some *Id arguments are not document entities: a squish preset, an eye action, a machine name)
+        const missing = a.params.filter((prm) => typeof args[prm.name] === 'string' && /Id$|^id$/.test(prm.name)
+          && !idExists(p, args[prm.name] as string) && !ed.catalog.some((c) => c.id === args[prm.name]));
         const fn = (ed as unknown as Record<string, (...x: unknown[]) => unknown>)[a.action];
         const out = fn(...a.params.map((prm) => args[prm.name]));
-        return { summary: `${a.action}(${a.params.filter((x) => args[x.name] !== undefined).map((x) => JSON.stringify(args[x.name])).join(', ').slice(0, 120)})`, result: out ?? undefined };
+        return {
+          summary: `${a.action}(${a.params.filter((x) => args[x.name] !== undefined).map((x) => JSON.stringify(args[x.name])).join(', ').slice(0, 120)})`, result: out ?? undefined,
+          missing: missing.map((m) => ({ field: m.name, value: args[m.name] })),
+        };
       }
       case 'read': {
         const out = await runAgentTool({ name: cap.id, args });
@@ -341,8 +348,10 @@ function hintFor(problem: string): string {
   return 'capability_get shows this capability\'s arguments and usage.';
 }
 
+/** an id — or, for the `nameOrId` style arguments, a name — of something in the document */
 function idExists(p: Project, id: string): boolean {
   if (p.rig.nodes[id] || id === 'camera') return true;
+  if (p.timelines.some((t) => t.name === id) || Object.values(p.rig.nodes).some((n) => n.name === id)) return true;
   for (const tl of p.timelines) {
     if (tl.id === id || tl.rig?.nodes[id]) return true;
     if (tl.blocks.some((b) => b.id === id) || tl.modifiers.some((m) => m.id === id) || (tl.emitters ?? []).some((e) => e.id === id)) return true;

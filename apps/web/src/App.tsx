@@ -8,11 +8,14 @@ import { AuthScreen } from './features/auth/AuthScreen';
 import { Dashboard } from './features/projects/Dashboard';
 import { Community } from './features/community/Community';
 import { CloudEditor } from './features/editor/CloudEditor';
+import { Connect, PENDING_CONNECT } from './features/connect/Connect';
+import { AiClients } from './features/connect/AiClients';
 
 const NAV: NavGroup[] = [
   { items: [
     { id: '/projects', label: 'Projects', glyph: '◳' },
     { id: '/library', label: 'Library', glyph: '◈' },
+    { id: '/ai', label: 'AI apps', glyph: '✳' },
   ] },
 ];
 
@@ -24,6 +27,7 @@ const WEB_TOUR: DriveStep[] = [
   { element: '[data-tour="/projects"]', popover: { title: 'Your projects', description: 'Everything you have made, most recently edited first. Rename, duplicate, make public or delete from the ⋯ menu on each card.' } },
   { element: '[data-tour="/library"]', popover: { title: 'The library', description: 'Ready-made presets and expressions — built-in, official, and published by other people. Add one to drop its animation straight into your project.' } },
   { element: '[data-tour="search"]', popover: { title: 'Find things fast', description: 'Search filters projects by name as you type.' } },
+  { element: '[data-tour="/ai"]', popover: { title: 'AI apps', description: 'Connect Claude, ChatGPT or Cursor and ask them to animate for you — they use the same tools as the editor, and you approve what they may do.' } },
 ];
 
 export function App() {
@@ -34,6 +38,15 @@ export function App() {
   useEffect(() => {
     if (user) configureWhatsNew({ seen: user.lastSeenRelease ?? null, save: (v) => authApi.seenRelease(v) });
   }, [user]);
+
+  // Google sign-in returns to the site root; an AI app's connection request waits in sessionStorage
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!user) return;
+    let pending: string | null = null;
+    try { pending = sessionStorage.getItem(PENDING_CONNECT); } catch { /* unavailable */ }
+    if (pending && !window.location.pathname.startsWith('/connect')) navigate(`/connect?request=${encodeURIComponent(pending)}`, { replace: true });
+  }, [user, navigate]);
 
   // The splash sits above everything and removes itself; the app renders underneath the
   // whole time, so a splash that never loads costs nothing but a frame.
@@ -50,6 +63,8 @@ export function App() {
         {/* signing in when you already have a session should not strand you on a form,
             and an email sign-in returns to whatever deep link sent you here */}
         <Route path="/login" element={user ? <BackToWhereYouWere /> : <AuthScreen />} />
+        {/* an AI app's authorize step lands here; it signs you in itself, so the query survives */}
+        <Route path="/connect" element={<Connect user={user} />} />
 
         <Route element={<RequireAuth user={user} />}>
           {/* the editor is full-bleed: it deliberately sits outside the shell layout */}
@@ -59,6 +74,7 @@ export function App() {
             <Route index element={<Navigate to="/projects" replace />} />
             <Route path="/projects" element={<ProjectsRoute />} />
             <Route path="/library" element={<Community />} />
+            <Route path="/ai" element={<AiClients />} />
           </Route>
         </Route>
 
@@ -80,7 +96,7 @@ function BackToWhereYouWere() {
 
 function RequireAuth({ user }: { user: SessionUser | null }) {
   const location = useLocation();
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (!user) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
   return <Outlet />;
 }
 

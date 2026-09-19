@@ -404,3 +404,46 @@ it('personal tokens are shown once and listed without their secret', async () =>
   expect(JSON.stringify(overview)).not.toContain(token);
   expect(overview.serverUrl).toMatch(/\/mcp$/);
 });
+
+it('covers the rest of the project, preset, job and account capabilities', async () => {
+  const { token } = await tokensService.createPat(ANN, { name: 'rest' });
+  const c = await connect(token);
+  const ok = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = await call(c, name, args);
+    expect(r.body.ok, `${name}: ${JSON.stringify(r.body).slice(0, 300)}`).toBe(true);
+    return r.body;
+  };
+  expect((await ok('account_whoami')).result.mode).toBe('full');
+  await ok('run_start', { goal: 'tidy up' });
+  const made = await ok('project_create', { name: 'Scratch' });
+  expect((await ok('project_current')).result.projectId).toBe(made.result.projectId);
+  await ok('project_rename', { name: 'Scratch 2' });
+  expect(db.projects.get(made.result.projectId)!.name).toBe('Scratch 2');
+  const dup = await ok('project_duplicate', { name: 'Scratch copy' });
+  expect(dup.result.projectId).not.toBe(made.result.projectId);
+  await ok('project_close');
+  expect((await call(c, 'project_delete', { projectId: made.result.projectId, confirm: false })).body.error.code).toBe('CONFIRMATION_REQUIRED');
+  await ok('project_delete', { projectId: made.result.projectId, confirm: true });
+  expect(db.projects.has(made.result.projectId)).toBe(false);
+
+  const builtins = await ok('preset_list', { source: 'builtin', limit: 5 });
+  expect(builtins.result.total).toBeGreaterThan(20);
+  const imported = await ok('preset_import', { name: 'Imported', preset: { durationMs: 500, tracks: [{ nodeId: 'body', property: 'opacity', keyframes: [{ time: 0, value: 1 }, { time: 500, value: 0.5 }] }] } });
+  const copied = await ok('preset_duplicate', { preset: builtins.result.presets[0].id, name: 'My copy' });
+  await ok('preset_publish', { assetId: copied.result.assetId, description: 'A copy' });
+  expect(db.assets.get(copied.result.assetId)?.status).toBe('pending_review');
+  await ok('preset_delete', { assetId: imported.result.assetId, confirm: true });
+  expect(db.assets.has(imported.result.assetId)).toBe(false);
+
+  await ok('project_open', { projectId: dup.result.projectId });
+  expect(Object.keys((await ok('export_formats')).result)).toContain('dotlottie');
+  const started = await ok('export_start', { format: 'svg', wait: false });
+  const jobId = started.result.jobId as string;
+  await ok('job_get', { jobId });
+  expect((await ok('job_list')).result.some((j: { jobId: string }) => j.jobId === jobId)).toBe(true);
+  await new Promise((r) => setTimeout(r, 200));
+  const result = await call(c, 'job_result', { jobId });
+  expect(result.resource?.mimeType).toBe('image/svg+xml');
+  await ok('job_cancel', { jobId });
+  await c.close();
+}, 30_000);

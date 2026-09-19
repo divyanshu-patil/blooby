@@ -37,7 +37,6 @@ export const oauthRoutes = mcpAuthRouter({
   resourceServerUrl: MCP_URL,
   scopesSupported: ALL_SCOPES,
   resourceName: 'Blooby Studio',
-  serviceDocumentationUrl: new URL('/docs/mcp', env.APP_URL),
 });
 
 // --- the MCP endpoint -----------------------------------------------------------------------
@@ -49,7 +48,7 @@ setInterval(() => {
 }, 60_000).unref();
 
 const bearer = requireBearerAuth({ verifier: oauthProvider, resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(MCP_URL) });
-const principalOf = (req: Request) => (req.auth?.extra as { principal: Principal }).principal;
+const principalOf = (req: Request) => (req.auth!.extra as { principal: Principal }).principal;
 
 export const mcpRoutes = Router();
 // any origin: browser-based clients (the MCP Inspector) are fine — this is bearer auth, no cookies
@@ -58,7 +57,7 @@ mcpRoutes.use(express.json({ limit: '4mb' }));
 mcpRoutes.use(bearer);
 mcpRoutes.use(rateLimit({
   windowMs: 60_000, limit: 1200, standardHeaders: 'draft-7', legacyHeaders: false,
-  keyGenerator: (req) => principalOf(req)?.tokenId ?? 'anon',
+  keyGenerator: (req) => (req.auth ? principalOf(req).tokenId : 'anon'),
   message: { jsonrpc: '2.0', error: { code: -32000, message: 'Too many requests — slow down.' }, id: null },
 }));
 

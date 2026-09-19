@@ -9,6 +9,7 @@ import { Effects } from './Effects';
 import { Collapsible } from './Collapsible';
 import { Timeline, DurationField } from './Timeline';
 import { Copilot } from './Copilot';
+import { McpPanel } from './McpPanel';
 import { ExportBar } from './ExportBar';
 import { Split } from './Resizable';
 import { TimelineTabs } from './TimelineTabs';
@@ -37,7 +38,11 @@ import type { Project } from '../core/types';
  * `cloudBar` is whatever owns persisting this project — a save state and a save button.
  * It sits inside this header rather than in a strip above it: a second bar carrying one
  * button and a title the editor already shows is a row of chrome for nothing. */
-export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Project) => void; saveLabel?: string; cloudBar?: ReactNode } = {}) {
+export function Editor({ onSave, saveLabel, cloudBar, projectId }: {
+  onSave?: (project: Project) => void; saveLabel?: string; cloudBar?: ReactNode;
+  /** the cloud project open here, so the MCP tab can show what AI apps are doing to it */
+  projectId?: string;
+} = {}) {
   // first visit only; skipping counts as seen, and the ? button replays it
   useEffect(() => { startTourWhenReady('editor', INTRO_TOUR); }, []);
   const project = useEditor((s) => s.project);
@@ -209,9 +214,9 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
               { min: 240, max: 560, content: (
                 <div className="rail rail-right" data-tour="rail-right">
                   <div className="tabs">
-                    {(['node', 'eyes', 'fx', 'states', 'ai'] as RailTab[]).map((t) => (
+                    {(['node', 'eyes', 'fx', 'states', 'ai', 'mcp'] as RailTab[]).map((t) => (
                       <button key={t} data-tour={`tab-${t}`} aria-pressed={tab === t} onClick={() => setTab(t)}>
-                        {t === 'node' ? (selectedBlockId ? 'Clip' : 'Node') : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : t === 'states' ? 'States' : 'Copilot'}
+                        {t === 'node' ? (selectedBlockId ? 'Clip' : 'Node') : t === 'eyes' ? 'Eyes' : t === 'fx' ? 'Effects' : t === 'states' ? 'States' : t === 'ai' ? 'Copilot' : 'MCP'}
                       </button>
                     ))}
                   </div>
@@ -242,6 +247,7 @@ export function Editor({ onSave, saveLabel, cloudBar }: { onSave?: (project: Pro
                     )}
                     {tab === 'states' && <StateMachine />}
                     {tab === 'ai' && <Copilot />}
+                    {tab === 'mcp' && <McpPanel projectId={projectId} />}
                   </div>
                 </div>
               ) },
