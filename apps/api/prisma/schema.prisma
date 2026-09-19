@@ -190,3 +190,62 @@ model CopilotKey {
   @@index([status, lastUsedAt])
   @@map("copilot_keys")
 }
+
+/// Mirrors public.mcp_clients — OAuth clients the AI apps register themselves (RFC 7591).
+model McpClient {
+  clientId         String    @id @map("client_id")
+  clientSecretHash String?   @map("client_secret_hash")
+  clientName       String    @default("AI client") @map("client_name")
+  redirectUris     String[]  @default([]) @map("redirect_uris")
+  metadata         Json      @default("{}")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime? @map("last_used_at") @db.Timestamptz(6)
+
+  @@map("mcp_clients")
+}
+
+/// Mirrors public.mcp_tokens — request / code / access / refresh / pat. `tokenHash` is a
+/// sha256; the secret itself is never stored and never returned after it is minted.
+model McpToken {
+  id            String    @id @default(uuid()) @db.Uuid
+  kind          String
+  tokenHash     String?   @unique @map("token_hash")
+  userId        String?   @map("user_id") @db.Uuid
+  clientId      String?   @map("client_id")
+  grantId       String?   @map("grant_id") @db.Uuid
+  name          String    @default("")
+  scopes        String[]  @default([])
+  mode          String    @default("full")
+  resource      String?
+  redirectUri   String?   @map("redirect_uri")
+  codeChallenge String?   @map("code_challenge")
+  params        Json?
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt    DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, kind, createdAt(sort: Desc)])
+  @@index([grantId])
+  @@map("mcp_tokens")
+}
+
+/// Mirrors public.mcp_audit — operation names and ids, never arguments or content.
+model McpAudit {
+  id         BigInt   @id @default(autoincrement())
+  userId     String?  @map("user_id") @db.Uuid
+  clientId   String?  @map("client_id")
+  tokenId    String?  @map("token_id") @db.Uuid
+  operation  String
+  projectId  String?  @map("project_id") @db.Uuid
+  ok         Boolean
+  errorCode  String?  @map("error_code")
+  requestId  String?  @map("request_id")
+  runId      String?  @map("run_id")
+  durationMs Int?     @map("duration_ms")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([projectId, createdAt(sort: Desc)])
+  @@map("mcp_audit")
+}

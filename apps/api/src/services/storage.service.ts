@@ -119,3 +119,13 @@ export async function deleteProjectObjects(userId: string, projectId: string, ex
  */
 export const presignedReadUrl = (key: string, expiresIn = 300) =>
   getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn });
+
+/**
+ * An export an AI client made (a .lottie, a Lottie JSON, a PNG), under the person's own
+ * prefix, with a one-hour download link — how "give me the Lottie" reaches the person.
+ */
+export async function putExport(userId: string, jobId: string, filename: string, body: Uint8Array | string, contentType: string) {
+  const key = `users/${userId}/exports/${jobId}/${filename.replace(/[^\w.-]+/g, '-')}`;
+  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType, ContentDisposition: `attachment; filename="${filename.replace(/"/g, '')}"` }));
+  return { key, url: await presignedReadUrl(key, 3600) };
+}

@@ -22,7 +22,7 @@ export const supabase: SupabaseClient | null = url && key ? createClient(url, ke
 /** Whether this build talks to a backend at all. False = the bundled builtins are it. */
 export const hasBackend = supabase !== null;
 
-interface AssetRow {
+export interface AssetRow {
   id: string; kind: 'preset' | 'expression'; source: string; name: string;
   data: unknown; published_at: string | null; download_count: number | null;
 }
@@ -53,10 +53,15 @@ export async function fetchCatalog(): Promise<{ presets: Preset[]; expressions: 
     .order('published_at', { ascending: true });
   if (error) throw new Error(error.message);
 
+  return catalogFromRows((data ?? []) as AssetRow[]);
+}
+
+/** Asset rows → catalogue entries. The API's MCP server maps the same rows the same way. */
+export function catalogFromRows(rows: AssetRow[]): { presets: Preset[]; expressions: Expression[] } {
   const presets: Preset[] = [];
   const expressions: Expression[] = [];
 
-  for (const row of (data ?? []) as AssetRow[]) {
+  for (const row of rows) {
     // `data` is the editor's own payload; the row's columns are the catalogue metadata
     // around it. Trust the row for identity and provenance, not the embedded copy.
     const payload = (row.data ?? {}) as Record<string, unknown>;

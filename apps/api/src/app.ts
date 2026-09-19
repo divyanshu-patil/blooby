@@ -5,6 +5,7 @@ import { errorHandler, notFound } from './middlewares/errorHandler.js';
 import { generalLimiter } from './middlewares/rateLimiter.js';
 import { requestLogger } from './middlewares/requestLogger.js';
 import { routes } from './routes/index.js';
+import { mcpRoutes, oauthRoutes } from './routes/mcp.routes.js';
 
 export function createApp() {
   const app = express();
@@ -16,6 +17,11 @@ export function createApp() {
   // that happens to return a project — a route added later cannot forget it.
   app.set('json replacer', (_key: string, value: unknown) =>
     typeof value === 'bigint' ? Number(value) : value);
+  // The MCP endpoint and its OAuth server come first: they answer AI clients from any
+  // origin with their own CORS, body parsing and rate limits, not the app's.
+  app.use(oauthRoutes);
+  app.use('/mcp', mcpRoutes);
+
   app.use(cors({ origin: env.corsOrigins, credentials: true }));
   // the ceiling is enforced again in storage.service against the serialized payload;
   // this one just stops an oversized body being buffered in the first place
