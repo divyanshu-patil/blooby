@@ -31,7 +31,7 @@ export async function smoke() {
   c.getContext('2d')!.drawImage(img, 0, 0, 200, 200);
   const png = c.toDataURL('image/png').length;
   step('png ' + png);
-  const { blob, animations } = buildDotLottie(p, { background: '#17161b' });
+  const { blob, animations } = await buildDotLottie(p, { background: '#17161b' });
   step('dotlottie ' + blob.size + ' anims ' + animations.length);
   const gifWorker = (await import('gif.js.optimized/dist/gif.worker.js?url')).default;
   const workerOk = (await fetch(gifWorker)).ok;

@@ -206,7 +206,7 @@ const v4Hidden = (visible: boolean) => JSON.parse(JSON.stringify({
 // --- the point of all this: an old project exports on the new exporter ----------
 {
   const project = migrateProject(v1Timelines()).project;
-  const { blob, animations } = buildDotLottie(project, { background: null });
+  const { blob, animations } = await buildDotLottie(project, { background: null });
   const files = await unzip(new Uint8Array(await blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
   const machine = JSON.parse(new TextDecoder().decode(files.get('s/two-state-mascot.json')!));
 
@@ -241,7 +241,7 @@ const v4Hidden = (visible: boolean) => JSON.parse(JSON.stringify({
   const survives = (seed: object) => {
     const p = { ...defaultProject(), ...migrateProject(structuredClone(seed) as Project).project };
     validateMachine(p);
-    buildDotLottie(p, { background: null });
+    void buildDotLottie(p, { background: null });
     return p;
   };
 

@@ -218,10 +218,32 @@ paths with their own fills and strokes. The one exception is an SVG with no read
 geometry at all, which is named in `skipped` — never faked as a rounded rectangle — and
 still renders in GIF, MP4 and PNG from its preserved markup.
 
-**`.lottie` is written by a hand-rolled store-only ZIP** (`export/zip.ts`, ~45 lines).
-The payload is already-minified JSON going straight into a player, so deflate would save
-little and cost a dependency. CRCs verified against the standard check vector, and the
-output opens with `unzip`.
+**`.lottie` is written by a hand-rolled ZIP** (`export/zip.ts`, ~60 lines), deflating each
+entry through the platform's own `CompressionStream('deflate-raw')` — still no dependency,
+because zip's method 8 *is* raw deflate. It stored entries uncompressed until 2026-09-20,
+on the assumption that minified JSON was already small; **that was wrong and cost about
+6× on every export.** A baked composition is mostly repeated numeric arrays, which is the
+most compressible thing there is: measured over four projects, entries deflate to 8–16% of
+their size (a three-state cinematic mascot went 3.1MB → 299KB). An entry deflate cannot
+shrink is written stored, decided per entry. CRCs verified against the standard check
+vector; `unzip -t` reads the output and reports the archive comment, `Made with Blooby`.
+
+**Export size is dominated by baked vertices, and they are near the floor.** The other
+things that look wasteful are not, measured on a 141-layer strip: the all-zero `i`/`o`
+tangent arrays are 700KB of the raw JSON but only 51KB deflated, and the per-keyframe
+linear-easing pairs only 14KB — both are pure repetition, which deflate already eats.
+Cutting either would save little and break every player. What is left is vertex
+coordinates, which do not compress.
+
+**A limb outline is ~4.7px from its true curve, and more points will not fix it.** The
+export resamples an outline to a ring of evenly spaced points with zero tangents.
+Measured against a 1024-point reference on 100 real limb outlines, 72 points sit 4.7px
+off at worst and 96 points still sit 3.7px off — the miss is a sharp feature that even
+arc-length spacing cannot land on, not a shortage of points, and giving the ring
+Catmull-Rom tangents does not help either (48 tangented points measured *worse* than 72
+plain ones). So the vertex count stays, and this 4.7px is the noise floor that justifies
+`EPS.v` (0.5px) and `GEOM` (0.1px) in `export/lottie.ts`: together they cost a measured
+0.51px of worst-case drawn-point shift, on limbs only, for a fifth of the file.
 
 **dotLottie: rewritten against v2.0 and verified against a real player** (this was
 reported broken, and it was — the v1 shape assumed above was wrong on two structural
@@ -317,7 +339,7 @@ A document from a *newer* build is detected and left alone rather than run throu
 steps, with a console warning; the parts this build understands still open.
 
 **`unzip` uses `DecompressionStream('deflate-raw')`**, so reading a deflated `.lottie`
-(everything not written by us) still needs no zip dependency. Entries are read from the
+(now including our own) still needs no zip dependency. Entries are read from the
 central directory rather than by scanning local headers, so a streamed archive with data
 descriptors reads correctly.
 

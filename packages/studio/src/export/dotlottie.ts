@@ -1,5 +1,5 @@
 import { bakeLottie, type LottieOptions } from './lottie';
-import { unzip, zipStore } from './zip';
+import { unzip, writeZip } from './zip';
 import { animationIds, fromDotLottie, machineOf, toDotLottie } from '../core/stateMachine';
 import { dotLottieLayout } from './strip';
 import { makeTimeline, uid } from '../core/defaults';
@@ -22,7 +22,7 @@ import { activeTimeline, switchTimeline, type Project, type SmTransition, type T
  * which speaks dotLottie's own vocabulary — see the note there for why the shapes here
  * are almost a straight copy of the editor's own objects.
  */
-export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from' | 'to' | 'name'>) {
+export async function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from' | 'to' | 'name'>) {
   const enc = new TextEncoder();
   const bytes = (v: unknown) => enc.encode(JSON.stringify(v)) as Uint8Array<ArrayBuffer>;
   const anim = animationIds(project);
@@ -68,7 +68,8 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
 
   const manifest: Record<string, unknown> = {
     version: '2',
-    generator: 'blooby',
+    generator: 'Blooby',
+    description: 'Made with Blooby',
     // naming the machine here too means a player can start it without the host page
     // knowing its id — `stateMachineLoad` with the wrong id fails silently
     initial: {
@@ -98,7 +99,7 @@ export function buildDotLottie(project: Project, opts: Omit<LottieOptions, 'from
 
   entries.push({ name: `s/${machine.id}.json`, data: bytes(machine.json) });
   entries.unshift({ name: 'manifest.json', data: bytes(manifest) });
-  return { blob: zipStore(entries), animations: [...new Set(animationOf.values())], machine };
+  return { blob: await writeZip(entries), animations: [...new Set(animationOf.values())], machine };
 }
 
 /**

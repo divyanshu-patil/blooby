@@ -47,7 +47,7 @@ function twoPose(): Project {
 }
 
 const project = twoPose();
-const files = await unzip(new Uint8Array(await buildDotLottie(project, { background: null }).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
+const files = await unzip(new Uint8Array(await (await buildDotLottie(project, { background: null })).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
 const read = (n: string) => JSON.parse(new TextDecoder().decode(files.get(n)!));
 const anim = read('a/mascot.json');
 const sm = read('s/mascot.json');

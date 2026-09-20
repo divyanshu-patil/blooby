@@ -68,6 +68,17 @@ export const RELEASES: Release[] = [
         tour: [step('/ai', 'AI apps', 'Connect and manage the AI apps that work on your projects.')],
       },
       {
+        id: 'smaller-lottie', surface: 'editor',
+        title: 'Exports are a fraction of the size',
+        body: 'A .lottie now comes out around ten times smaller — a three-state mascot that was 3MB is about 300KB, and a simple one lands under 5KB. Nothing about the animation changed: same states, same state machine, same motion. Every file also carries a “Made with Blooby” credit.',
+        tour: [step('export', 'Export', 'Lottie, .lottie and the React Native pack — all much lighter than they were.')],
+      },
+      {
+        id: 'export-layer-order', surface: 'editor',
+        title: 'Exports keep your layer order',
+        body: 'A layer that was off screen in the middle of an export came out on top of everything — most visibly a hand you had sent behind the mascot appearing in front of it. Exports now follow the layer order you set, whatever is on screen at the time.',
+      },
+      {
         id: 'sidebar-avatar', surface: 'dashboard',
         title: 'You, in the sidebar',
         body: 'The sidebar now shows your profile picture and name from your sign-in, instead of just an email address.',

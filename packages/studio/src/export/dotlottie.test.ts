@@ -33,7 +33,7 @@ function twoStateProject(): Project {
 // --- the container: v2.0 layout, read back through a real unzip ----------------
 {
   const proj = twoStateProject();
-  const { animations, blob } = buildDotLottie(proj, { background: null });
+  const { animations, blob } = await buildDotLottie(proj, { background: null });
   // both timelines are ranges of ONE composition — the only shape a Tweened transition
   // can actually morph across (export/strip.ts)
   it('every timeline ships inside one composition', check(animations.length === 1, animations.join()));
@@ -71,7 +71,7 @@ function twoStateProject(): Project {
 // --- import: what goes out comes back (§12/§13) --------------------------------
 {
   const proj = twoStateProject();
-  const { blob } = buildDotLottie(proj, { background: null });
+  const { blob } = await buildDotLottie(proj, { background: null });
 
   // importing into a *fresh* project must rebuild the machine from the file alone
   const fresh = defaultProject();
@@ -102,7 +102,7 @@ function twoStateProject(): Project {
   it('nothing to warn about on a clean round trip', check(warnings.length === 0, warnings.join(' · ')));
 
   // §13: re-exporting an imported machine keeps the ORIGINAL animation bytes
-  const { blob: again } = buildDotLottie(back, { background: null });
+  const { blob: again } = await buildDotLottie(back, { background: null });
   const files = await unzip(new Uint8Array(await again.arrayBuffer()) as Uint8Array<ArrayBuffer>);
   const first = await unzip(new Uint8Array(await blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
   it('an imported animation is written back byte for byte', check(
@@ -121,7 +121,7 @@ function twoStateProject(): Project {
 {
   const solo = defaultProject();
   solo.name = 'Solo';
-  const { blob } = buildDotLottie(solo, { background: null });
+  const { blob } = await buildDotLottie(solo, { background: null });
   const { project, warnings } = await importDotLottie(blob, defaultProject());
   it('a single-state file imports without complaint', check(project.timelines.length >= 1));
   void warnings;

@@ -539,7 +539,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
             return { filename: `${base}.json`, mimeType: 'application/json', bytes: Buffer.from(JSON.stringify(r.json)), url: null, warnings: [...r.warnings, ...r.skipped.map((s) => `skipped: ${s}`)], info: { frames: r.frames, keyframes: r.keyframeCount } };
           }
           case 'dotlottie': {
-            const r = buildDotLottie(project, { background });
+            const r = await buildDotLottie(project, { background });
             return { filename: `${base}.lottie`, mimeType: 'application/zip', bytes: Buffer.from(await r.blob.arrayBuffer()), url: null, warnings: [], info: { animations: r.animations, states: project.timelines.map((t) => t.name) } };
           }
           case 'runtime': {

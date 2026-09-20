@@ -55,7 +55,7 @@ function project() {
 }
 
 const p = project();
-const files = await unzip(new Uint8Array(await buildDotLottie(p, { background: null }).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
+const files = await unzip(new Uint8Array(await (await buildDotLottie(p, { background: null })).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
 const read = (n: string) => JSON.parse(new TextDecoder().decode(files.get(n)!));
 const machine = read('s/mascot.json') as Json;
 const anim = read('a/mascot.json') as Json;
