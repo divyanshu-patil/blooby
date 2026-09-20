@@ -31,6 +31,12 @@ There is no MCP-specific editing code. A tool call becomes one of:
 
 `EditorSession` keeps a snapshot of the entire zustand store (document, undo history, playhead, selection, catalog) and swaps it in for each call under a process-wide lock, so a call literally runs the editor's own action. Undo, coalescing, validation and layer ownership all behave exactly as in the UI.
 
+**Which project is open belongs to the person, not the connection.** Some clients do not keep the
+`Mcp-Session-Id` between calls, so every call arrives on a fresh connection; the workspace remembers
+the last project each person opened, and `current()` falls back to it. Capabilities that need no
+document (`capabilities_search`, `capability_get`, `guide_get`, `search`) answer on a scratch session
+before anything is open.
+
 ## Live collaboration with the editor
 
 The cloud project (S3 JSON + `projects.current_version`) is the shared truth.
