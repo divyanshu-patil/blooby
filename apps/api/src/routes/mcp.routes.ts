@@ -28,12 +28,12 @@ import { workspace } from '../services/mcp/workspace.js';
  *                        connections, consent, live activity, approvals — the editor's MCP tab
  */
 
-export const MCP_URL = new URL('/mcp', env.PUBLIC_API_URL);
+export const MCP_URL = new URL('/mcp', env.publicApiUrl);
 
 // --- OAuth, mounted at the app root because the metadata paths are fixed by the RFCs -------
 export const oauthRoutes = mcpAuthRouter({
   provider: oauthProvider,
-  issuerUrl: new URL(env.PUBLIC_API_URL),
+  issuerUrl: new URL(env.publicApiUrl),
   resourceServerUrl: MCP_URL,
   scopesSupported: ALL_SCOPES,
   resourceName: 'Blooby Studio',

@@ -212,7 +212,7 @@ export const oauthProvider: OAuthServerProvider = {
       codeChallenge: params.codeChallenge, resource: params.resource?.toString() ?? null,
       params: { state: params.state ?? null }, expiresAt: inSeconds(REQUEST_TTL_S),
     });
-    res.redirect(`${env.APP_URL}/connect?request=${row.id}`);
+    res.redirect(`${env.appUrl}/connect?request=${row.id}`);
   },
 
   async challengeForAuthorizationCode(client, code) {
