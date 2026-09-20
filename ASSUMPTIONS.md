@@ -228,6 +228,22 @@ their size (a three-state cinematic mascot went 3.1MB → 299KB). An entry defla
 shrink is written stored, decided per entry. CRCs verified against the standard check
 vector; `unzip -t` reads the output and reports the archive comment, `Made with Blooby`.
 
+**A project stores the built-in preset library by reference, not by value.**
+`defaultProject()` puts all ~108 built-in presets into `Project.presets`, and until
+2026-09-20 every save wrote them out: measured over 48 real projects they were **92.8% of
+all stored bytes** (29.6MB of 31.8MB, ~1.19MB of a 1.26MB document), shipped browser → API
+→ S3 on every autosave to move ~49KB of actual animation. `core/presetRefs.ts` writes an
+unmodified built-in as `{ id, builtin: true }` and `migrateProject` expands it on load —
+83.3% smaller on that same real data, 679KB → 113KB per project.
+
+The comparison ignores `id` fields matching `uid()`'s shape, because `builtinPresets()`
+mints fresh keyframe and track ids on every call and two calls are never equal as JSON. It
+is deliberately fail-safe: anything not certainly identical is written out whole, so the
+206 presets across those projects that no longer match current code — older files holding
+the library as it was the day they were made — are preserved exactly. A round trip renews
+a built-in's internal keyframe ids, which is safe because `appendPreset` mints its own for
+everything it places and a Block only ever references a preset by `presetId`.
+
 **Export size is dominated by baked vertices, and they are near the floor.** The other
 things that look wasteful are not, measured on a 141-layer strip: the all-zero `i`/`o`
 tangent arrays are 700KB of the raw JSON but only 51KB deflated, and the per-keyframe

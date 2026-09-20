@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SaveState } from '../kit';
 import { projectsApi } from './api';
+import { packProject } from '../core/presetRefs';
 import type { Project } from '../core/types';
 
 const DEBOUNCE_MS = 2500;
@@ -54,7 +55,10 @@ export function useAutosave(projectId: string | null, project: Project, enabled:
 
     try {
       const res = await projectsApi.save(projectId, {
-        project: latest.current,
+        // the built-in preset library is not the user's work and is not uploaded — it is
+        // rebuilt from this build's source on load (core/presetRefs.ts). It was 92.8% of
+        // every project, which is what made saving over a slow link so painful.
+        project: packProject(latest.current),
         ...(version.current !== null ? { expectedVersion: version.current } : {}),
       });
       version.current = res.version;

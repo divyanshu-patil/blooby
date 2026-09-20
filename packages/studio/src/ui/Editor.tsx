@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor, type RailTab } from '../core/store';
+import { packProject } from '../core/presetRefs';
 import { Stage } from './Stage';
 import { Layers } from './Layers';
 import { Presets, Expressions, OtherTimelines } from './Presets';
@@ -156,7 +157,7 @@ export function Editor({ onSave, saveLabel, cloudBar, projectId }: {
   };
 
   const saveProject = () => {
-    const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(packProject(project), null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `${project.name.replace(/\s+/g, '-').toLowerCase()}.blooby.json`;

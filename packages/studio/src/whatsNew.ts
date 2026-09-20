@@ -74,6 +74,11 @@ export const RELEASES: Release[] = [
         tour: [step('export', 'Export', 'Lottie, .lottie and the React Native pack — all much lighter than they were.')],
       },
       {
+        id: 'lighter-saves', surface: 'editor',
+        title: 'Saving to the cloud is much faster',
+        body: 'Every project was carrying its own copy of the whole built-in preset library — about 1.2MB of a 1.3MB project, uploaded on every autosave and downloaded every time you opened it. Projects now reference the built-in presets instead of copying them, which makes a typical project around six times smaller and saves noticeably quicker. Presets you have made or changed are still stored in full, exactly as they are.',
+      },
+      {
         id: 'export-layer-order', surface: 'editor',
         title: 'Exports keep your layer order',
         body: 'A layer that was off screen in the middle of an export came out on top of everything — most visibly a hand you had sent behind the mascot appearing in front of it. Exports now follow the layer order you set, whatever is on screen at the time.',

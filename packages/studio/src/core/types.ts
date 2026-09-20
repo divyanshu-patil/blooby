@@ -603,6 +603,18 @@ export interface Expression {
  *  arrive from the shared library and are read-only here. */
 export type PresetSource = 'builtin' | 'custom' | 'official' | 'community';
 
+/**
+ * A built-in preset stored by reference rather than copied into the document.
+ *
+ * Written by `packPresets` when the preset still matches this build's library exactly,
+ * and expanded again by `unpackPresets` on load. It never exists at runtime: the store
+ * only ever sees whole `Preset`s.
+ */
+export interface PresetRef { id: string; builtin: true }
+
+/** A preset as it appears on disk: the whole thing, or a reference to a built-in one. */
+export type StoredPreset = Preset | PresetRef;
+
 export interface Preset {
   id: string;
   name: string;
@@ -841,6 +853,11 @@ export interface Project {
   /** optional, so every project saved before the library existed loads untouched */
   svgAssets?: SvgAsset[];
   expressions: Expression[];
+  /**
+   * The picker's library. At runtime always whole presets; on disk a built-in one that
+   * still matches this build's library is a `PresetRef` instead — see `core/presetRefs.ts`
+   * for why (it was 92.8% of everything stored).
+   */
   presets: Preset[];
   timelines: Timeline[];
   activeTimelineId: string;
