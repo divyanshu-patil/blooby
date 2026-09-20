@@ -7,7 +7,8 @@
  *
  * Dev only: the caller guards on import.meta.env.DEV so this never ships.
  */
-import { sceneToSvg, videoMime } from './export/raster';
+import { videoMime } from './export/raster';
+import { sceneToSvg } from './export/frame';
 import { buildDotLottie } from './export/dotlottie';
 import { sceneAt } from './core/scene';
 import { compOf } from './core/defaults';

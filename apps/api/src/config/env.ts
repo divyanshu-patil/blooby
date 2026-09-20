@@ -25,6 +25,9 @@ const raw = parsed.data;
 export const env = {
   ...raw,
   isProd: raw.NODE_ENV === "production",
+  // trailing slashes come and go in .env files; every URL built from these must not double up
+  appUrl: raw.APP_URL.replace(/\/+$/, ""),
+  publicApiUrl: raw.PUBLIC_API_URL.replace(/\/+$/, ""),
   corsOrigins: [raw.APP_URL, raw.ADMIN_URL].map((u) => u.replace(/\/+$/, "")),
   allowedMediaTypes: raw.ALLOWED_MEDIA_TYPES.split(",")
     .map((s) => s.trim())

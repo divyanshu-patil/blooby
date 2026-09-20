@@ -15,6 +15,12 @@ export const envSchema = z.object({
 
   APP_URL: z.string().url().default("http://localhost:5173"),
   ADMIN_URL: z.string().url().default("http://localhost:5174"),
+  /**
+   * Where THIS server is reachable from the outside — the MCP endpoint is `${PUBLIC_API_URL}/mcp`
+   * and it is the OAuth issuer. Claude.ai and ChatGPT connect from their own servers, so for
+   * them this must be a public https URL (a deployment, or a tunnel in development).
+   */
+  PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
 
   SUPABASE_URL: z.string().url(),
   /** Bypasses RLS. Server only — never reaches a browser bundle. */

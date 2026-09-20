@@ -48,3 +48,11 @@ it('offers a retry when the list fails', async () => {
   render(<Projects />);
   expect(await screen.findByText(/nope/)).toBeInTheDocument();
 });
+
+it('names the owner instead of a raw id', async () => {
+  projects.mockResolvedValue({ items: [row({ owner: 'Ana Real', ownerAvatarUrl: null })], nextCursor: 'c1' });
+  render(<Projects />);
+  expect(await screen.findByText('Ana Real')).toBeInTheDocument();
+  expect(screen.queryByText('u1')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /next/i })).toBeEnabled();
+});

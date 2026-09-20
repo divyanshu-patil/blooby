@@ -8,6 +8,8 @@ const markOpened = vi.fn();
 const saveNow = vi.fn();
 const setBaseVersion = vi.fn();
 let autosave: Record<string, unknown>;
+const adoptRemote = vi.fn();
+let aiLive: { version: number; unsaved: boolean; agents: { client: string }[] } | null = null;
 
 vi.mock('@blooby/studio', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('@blooby/studio');
@@ -16,6 +18,7 @@ vi.mock('@blooby/studio', async () => {
     Editor: ({ actions, cloudBar }: { actions?: React.ReactNode; cloudBar?: React.ReactNode }) => <div data-testid="editor">{actions}{cloudBar}</div>,
     projectsApi: { getData, markOpened },
     useAutosave: () => autosave,
+    useMcpLive: () => ({ project: aiLive, live: null, refresh: () => {} }),
   };
 });
 
@@ -26,7 +29,28 @@ beforeEach(() => {
   for (const fn of [getData, markOpened, saveNow, setBaseVersion]) fn.mockReset();
   getData.mockResolvedValue({ project: { currentVersion: 3, name: 'My mascot' }, data: defaultProject() });
   markOpened.mockResolvedValue(undefined);
-  autosave = { state: 'idle', savedAt: Date.now(), conflict: null, saveNow, setBaseVersion };
+  adoptRemote.mockReset();
+  aiLive = null;
+  autosave = { state: 'idle', savedAt: Date.now(), conflict: null, saveNow, setBaseVersion, adoptRemote, version: () => 3 };
+});
+
+/** An AI app saved a newer version through MCP and nothing is unsaved here: take it in place. */
+it('picks up an AI app\'s newer save, and says an AI is editing', async () => {
+  aiLive = { version: 5, unsaved: false, agents: [{ client: 'Claude' }] };
+  getData.mockResolvedValueOnce({ project: { currentVersion: 3, name: 'My mascot' }, data: defaultProject() })
+    .mockResolvedValue({ project: { currentVersion: 5, name: 'My mascot' }, data: defaultProject() });
+  render(<MemoryRouter><CloudEditor projectId="p1" onExit={() => {}} /></MemoryRouter>);
+  expect(await screen.findByText('Claude editing…')).toBeInTheDocument();
+  await waitFor(() => expect(adoptRemote).toHaveBeenCalledWith(5));
+});
+
+it('never takes an AI version over unsaved edits here', async () => {
+  aiLive = { version: 5, unsaved: false, agents: [] };
+  autosave = { ...autosave, state: 'dirty' };
+  render(<MemoryRouter><CloudEditor projectId="p1" onExit={() => {}} /></MemoryRouter>);
+  await screen.findByTestId('editor');
+  await new Promise((r) => setTimeout(r, 30));
+  expect(adoptRemote).not.toHaveBeenCalled();
 });
 
 it('says what it is opening rather than showing a blank screen', () => {
@@ -68,7 +92,7 @@ it('offers a way out when the project will not open', async () => {
  * refused, and the person must be told rather than silently losing the newer work.
  */
 it('surfaces a save conflict instead of overwriting', async () => {
-  autosave = { state: 'error', savedAt: null, conflict: { serverVersion: 5 }, saveNow, setBaseVersion };
+  autosave = { state: 'error', savedAt: null, conflict: { serverVersion: 5 }, saveNow, setBaseVersion, adoptRemote, version: () => 3 };
   render(<CloudEditor projectId="p1" onExit={() => {}} />, { wrapper: MemoryRouter });
   await screen.findByTestId('editor');
   expect(await screen.findByRole('dialog')).toBeInTheDocument();

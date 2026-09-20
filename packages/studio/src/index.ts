@@ -19,7 +19,10 @@ export type { DriveStep } from 'driver.js';
 
 // cloud
 export { api, ApiError } from './cloud/client';
-export { projectsApi, assetsApi, communityApi, splashApi, adminApi, copilotApi, authApi } from './cloud/api';
+export { projectsApi, assetsApi, communityApi, splashApi, adminApi, copilotApi, authApi, mcpApi } from './cloud/api';
+export type { McpConsent, McpLive, McpMode, McpOverview, McpProposal } from './cloud/api';
+export { useMcpLive } from './cloud/useMcpLive';
+export { McpPanel } from './ui/McpPanel';
 export type { CopilotAdminView, CopilotConfig, CopilotKeyRow } from './cloud/api';
 export { useSession, auth, consumeAuthError } from './cloud/auth';
 export { useAsync } from './cloud/useAsync';

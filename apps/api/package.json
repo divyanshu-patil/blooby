@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -b",
-    "start": "node dist/index.js",
+    "dev": "tsx watch --import ./src/loaders/register.mjs src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx --import ./src/loaders/register.mjs src/index.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -17,14 +17,21 @@
     "check:storage": "tsx scripts/check-project-storage.ts",
     "test": "vitest run",
     "lint": "oxlint src",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -p tsconfig.json",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "mcp:docs": "tsx --import ./src/loaders/register.mjs scripts/mcp-docs.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:migrate:status": "tsx scripts/db-migrate.ts --status",
+    "db:migrate:baseline": "tsx scripts/db-migrate.ts --baseline"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1119.0",
     "@aws-sdk/s3-request-presigner": "^3.1119.0",
+    "@blooby/studio": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@prisma/client": "^6.3.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@supabase/supabase-js": "^2.48.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -32,7 +39,8 @@
     "express-rate-limit": "^8.6.2",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.1.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -40,7 +48,6 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^24.13.3",
     "prisma": "^6.3.0",
-    "tsx": "^4.19.2",
     "typescript": "~6.0.2"
   }
 }

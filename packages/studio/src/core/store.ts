@@ -37,8 +37,8 @@ const DEFAULT_STATE_EASING: EasingCurve = { type: 'preset', name: 'easeInOut' };
 /** What a click on the stage does: select and move, pan the view, place a shape, draw a
  *  curve point by point, place text, or turn a mascot's head. */
 export type Tool = 'select' | 'hand' | 'shape' | 'pen' | 'text' | 'turn';
-/** The right rail's tabs: node (or clip) inspector, eyes, effects, states, copilot. */
-export type RailTab = 'node' | 'eyes' | 'fx' | 'states' | 'ai';
+/** The right rail's tabs: node (or clip) inspector, eyes, effects, states, copilot, AI apps (MCP). */
+export type RailTab = 'node' | 'eyes' | 'fx' | 'states' | 'ai' | 'mcp';
 
 /** The active timeline — every editor action reads/writes through this, never `p.timelines[i]` directly. */
 const at = (p: Project): Timeline => activeTimeline(p);
@@ -93,7 +93,7 @@ export interface Editor {
   setPlayhead: (t: number) => void;
   setPlaying: (v: boolean) => void;
   toggleAutoKey: () => void;
-  setLoop: (v: boolean) => void;
+  setLoop: (loop: boolean) => void;
   selectTrack: (id: string | null) => void;
   selectBlock: (id: string | null) => void;
 
@@ -208,8 +208,8 @@ export interface Editor {
   setBlockLoop: (id: string, loop: boolean) => void;
   setBlockColor: (id: string, color: string | undefined) => void;
   moveBlock: (id: string, index: number) => void;
-  setDurationMode: (m: 'custom' | 'even') => void;
-  setTimelineLoop: (v: boolean) => void;
+  setDurationMode: (mode: 'custom' | 'even') => void;
+  setTimelineLoop: (loop: boolean) => void;
   setTimelineDuration: (ms: number) => void;
 
   setTransition: (afterBlockId: string, patch: Partial<Pick<Transition, 'durationMs' | 'easing'>>) => void;

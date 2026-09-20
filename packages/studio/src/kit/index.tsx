@@ -133,6 +133,41 @@ export function ChipBar<T extends string>({ options, value, onChange }: {
   );
 }
 
+/* --- people and pages --------------------------------------------------- */
+
+/** A person's picture, or their initial when there is none. Monochrome, per DESIGN.md. */
+export function Avatar({ name, url, size = 28 }: { name?: string | null; url?: string | null; size?: number }) {
+  const style = { width: size, height: size, fontSize: Math.round(size * 0.43) };
+  if (url) return <img className="avatar" style={style} src={url} alt="" referrerPolicy="no-referrer" />;
+  return <span className="avatar" style={style} aria-hidden>{(name ?? '?').trim().charAt(0).toUpperCase() || '?'}</span>;
+}
+
+/**
+ * Cursor pages with a way back. The API only knows "next", so the stack remembers the
+ * cursor each visited page started from; `reset` when the query changes.
+ */
+export function usePager() {
+  const [stack, setStack] = useState<(string | undefined)[]>([undefined]);
+  return {
+    cursor: stack[stack.length - 1],
+    page: stack.length,
+    next: (c: string) => setStack((s) => [...s, c]),
+    prev: () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s)),
+    reset: () => setStack([undefined]),
+  };
+}
+
+export function Pager({ pager, nextCursor }: { pager: ReturnType<typeof usePager>; nextCursor: string | null | undefined }) {
+  if (pager.page === 1 && !nextCursor) return null;
+  return (
+    <nav className="pager" aria-label="Pages">
+      <button className="btn ghost sm" disabled={pager.page === 1} onClick={pager.prev}>← Previous</button>
+      <span className="pager-page">Page {pager.page}</span>
+      <button className="btn ghost sm" disabled={!nextCursor} onClick={() => nextCursor && pager.next(nextCursor)}>Next →</button>
+    </nav>
+  );
+}
+
 /* --- states ------------------------------------------------------------- */
 
 export function EmptyState({ title, note, action }: { title: string; note: string; action?: ReactNode }) {

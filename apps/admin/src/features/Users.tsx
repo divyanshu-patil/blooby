@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Dialog, EmptyState, ErrorState, PageHeader, SearchBar, adminApi, relativeTime, useAsync,
+  Avatar, Dialog, EmptyState, ErrorState, PageHeader, Pager, SearchBar, adminApi, relativeTime, useAsync, usePager,
   type AdminUser,
 } from '@blooby/studio';
 
@@ -8,12 +8,16 @@ import {
 export function Users() {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<AdminUser | null>(null);
-  const { data, error, loading, reload } = useAsync(() => adminApi.users({ q: q || undefined, limit: 50 }), [q]);
+  const pager = usePager();
+  const { data, error, loading, reload } = useAsync(
+    () => adminApi.users({ q: q || undefined, limit: 50, ...(pager.cursor ? { cursor: pager.cursor } : {}) }),
+    [q, pager.cursor],
+  );
 
   return (
     <>
       <PageHeader title="Users" subtitle="Accounts, activity and roles.">
-        <SearchBar value={q} onChange={setQ} placeholder="Search by email or name" />
+        <SearchBar value={q} onChange={(v) => { setQ(v); pager.reset(); }} placeholder="Search by email or name" />
       </PageHeader>
 
       <div className="page-body">
@@ -31,7 +35,7 @@ export function Users() {
               {data.items.map((u) => (
                 <tr key={u.id} tabIndex={0} onClick={() => setOpen(u)}
                   onKeyDown={(e) => { if (e.key === 'Enter') setOpen(u); }}>
-                  <td>{u.username ?? u.email ?? u.id.slice(0, 8)}</td>
+                  <td><Person user={u} /></td>
                   <td className="num">{relativeTime(Date.parse(u.createdAt))}</td>
                   <td className="num">{u.lastSignInAt ? relativeTime(Date.parse(u.lastSignInAt)) : '—'}</td>
                   <td className="num">{u.projectCount}</td>
@@ -41,10 +45,25 @@ export function Users() {
             </tbody>
           </table>
         ))}
+        {data && !loading && <Pager pager={pager} nextCursor={data.nextCursor} />}
       </div>
 
       {open && <UserDetail user={open} onClose={() => setOpen(null)} onChanged={() => { setOpen(null); reload(); }} />}
     </>
+  );
+}
+
+/** Avatar, the name they go by, and the email under it when both exist. */
+function Person({ user }: { user: AdminUser }) {
+  const name = user.name ?? user.username ?? user.email ?? user.id.slice(0, 8);
+  return (
+    <span className="person">
+      <Avatar name={name} url={user.avatarUrl} />
+      <span className="person-text">
+        <span className="person-name">{name}</span>
+        {user.email && user.email !== name && <span className="person-sub">{user.email}</span>}
+      </span>
+    </span>
   );
 }
 
@@ -60,7 +79,7 @@ function UserDetail({ user, onClose, onChanged }: { user: AdminUser; onClose: ()
   };
 
   return (
-    <Dialog title={user.username ?? user.email ?? 'User'} onClose={onClose}
+    <Dialog title={user.name ?? user.username ?? user.email ?? 'User'} onClose={onClose}
       actions={<>
         <button className="btn ghost" onClick={onClose}>Close</button>
         <button className="btn" onClick={() => void flip()} disabled={busy}>
@@ -72,6 +91,7 @@ function UserDetail({ user, onClose, onChanged }: { user: AdminUser; onClose: ()
 
       {data && (
         <>
+          <div style={{ marginBottom: 14 }}><Person user={{ ...user, ...data }} /></div>
           <div className="metrics" style={{ marginBottom: 14 }}>
             <div className="stat"><div className="stat-label">Projects</div><div className="stat-value">{data.projectCount}</div></div>
             <div className="stat"><div className="stat-label">Published</div><div className="stat-value">{data.publishedAssets}</div></div>

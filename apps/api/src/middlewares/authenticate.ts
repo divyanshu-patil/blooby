@@ -52,7 +52,15 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     const profile = await prisma.profile.findUnique({ where: { id: claims.sub } });
     if (!profile) throw HttpError.unauthorized('No profile for this account');
 
-    req.user = { id: profile.id, email: (claims.email as string | undefined) ?? null, role: profile.role, lastSeenRelease: profile.lastSeenRelease ?? null };
+    // name and avatar for the shell: the profile's own first, else what the sign-in provider put
+    // in the token — no extra Admin API round-trip per request
+    const meta = (claims.user_metadata ?? {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    req.user = {
+      id: profile.id, email: (claims.email as string | undefined) ?? null, role: profile.role, lastSeenRelease: profile.lastSeenRelease ?? null,
+      name: profile.username ?? str(meta.full_name) ?? str(meta.name),
+      avatarUrl: profile.avatarUrl ?? str(meta.avatar_url) ?? str(meta.picture),
+    };
     next();
   } catch (e) {
     next(e);

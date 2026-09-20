@@ -103,3 +103,37 @@ export interface CopilotAdminView {
 export const copilotApi = {
   config: () => api.get<CopilotConfig>('/api/copilot/config'),
 };
+
+// --- MCP: AI apps (Claude, ChatGPT, Cursor…) acting on your projects -----------------------
+
+export type McpMode = 'read_only' | 'suggest' | 'full';
+export interface McpTokenMeta { id: string; name: string; scopes: string[]; mode: McpMode; expiresAt: string | null; lastUsedAt: string | null; createdAt: string }
+export interface McpConnection { grantId: string; clientId: string; clientName: string; scopes: string[]; mode: McpMode; connectedAt: string; lastUsedAt: string | null }
+export interface McpAuditRow { id: number | string; clientId: string | null; operation: string; projectId: string | null; ok: boolean; errorCode: string | null; durationMs: number | null; createdAt: string }
+export interface McpOverview {
+  serverUrl: string; capabilityVersion: string; capabilityCount: number;
+  scopes: Record<string, string>; modes: Record<McpMode, string>;
+  tokens: McpTokenMeta[]; connections: McpConnection[]; recent: McpAuditRow[];
+}
+export interface McpActivity { at: string; client: string; capability: string; summary: string; ok: boolean; error?: string }
+export interface McpProposal { id: string; projectId: string; client: string; capability: string; summary: string; status: 'pending' | 'applied' | 'rejected' | 'failed'; preview: { created: unknown[]; deleted: unknown[]; changed: string[] } | null; createdAt: string }
+export interface McpLive {
+  projects: { projectId: string; name: string; version: number; unsaved: boolean; saveError: string | null; agents: { client: string; lastActiveAt: string }[]; activity: McpActivity[] }[];
+  proposals: McpProposal[];
+}
+export interface McpConsent { requestId: string; clientName: string; redirectHost: string; scopes: { scope: string; description: string }[]; modes: Record<McpMode, string> }
+
+export const mcpApi = {
+  overview: () => api.get<McpOverview>('/api/mcp/overview'),
+  /** the secret comes back here once and is never retrievable again */
+  createToken: (body: { name: string; scopes?: string[]; mode?: McpMode; expiresInDays?: number }) =>
+    api.post<{ token: string; meta: McpTokenMeta }>('/api/mcp/tokens', body),
+  rotateToken: (id: string) => api.post<{ token: string; meta: McpTokenMeta }>(`/api/mcp/tokens/${id}/rotate`),
+  revokeToken: (id: string) => api.del<void>(`/api/mcp/tokens/${id}`),
+  disconnect: (grantId: string) => api.del<void>(`/api/mcp/connections/${grantId}`),
+  consent: (requestId: string) => api.get<McpConsent>(`/api/mcp/consent/${requestId}`),
+  decide: (requestId: string, body: { approve: boolean; scopes?: string[]; mode?: McpMode }) =>
+    api.post<{ redirectTo: string }>(`/api/mcp/consent/${requestId}`, body),
+  live: (projectId?: string) => api.get<McpLive>('/api/mcp/live', projectId ? { projectId } : undefined),
+  decideProposal: (id: string, approve: boolean) => api.post<McpProposal>(`/api/mcp/proposals/${id}`, { approve }),
+};

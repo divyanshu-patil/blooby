@@ -1,19 +1,32 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "module": "NodeNext",
-    "moduleResolution": "nodenext",
-    "lib": ["ES2023"],
-    "types": ["node"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "rootDir": "./src",
-    "outDir": "./dist"
+    "jsx": "react-jsx",
+    "noEmit": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["scripts/**/*"]
+  "include": [
+    "src/**/*",
+    "../../packages/studio/src/**/*"
+  ],
+  "exclude": [
+    "scripts/**/*",
+    "../../packages/studio/src/**/*.test.ts",
+    "../../packages/studio/src/**/*.test.tsx"
+  ]
 }

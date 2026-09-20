@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Dialog, Editor, ErrorState, SaveIndicator, projectsApi, useAutosave, useEditor,
+  Dialog, Editor, ErrorState, SaveIndicator, projectsApi, useAutosave, useEditor, useMcpLive,
   type Project, type ProjectRow,
 } from '@blooby/studio';
 
@@ -27,7 +27,27 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
   const navigate = useNavigate();
 
   // someone else's view-only project never autosaves: there is nowhere it may write
-  const { state, savedAt, conflict, saveNow, setBaseVersion } = useAutosave(projectId, project, !loading && !error && canEdit);
+  const { state, savedAt, conflict, saveNow, setBaseVersion, adoptRemote, version } = useAutosave(projectId, project, !loading && !error && canEdit);
+
+  // AI apps (MCP) edit the same cloud project. When one has saved a newer version and there is
+  // nothing unsaved here, take it in place; if there is, the next save's 409 raises the
+  // conflict dialog below, exactly as a second tab would.
+  const { project: ai } = useMcpLive(projectId, !loading && !error);
+  const setRailTab = useEditor((s) => s.setRailTab);
+  useEffect(() => {
+    const mine = version();
+    if (loading || !ai || mine === null || ai.unsaved || ai.version <= mine || state === 'dirty' || state === 'saving') return;
+    let live = true;
+    void projectsApi.getData(projectId).then(({ project: meta, data }) => {
+      if (!live || meta.currentVersion <= (version() ?? 0)) return;
+      const { playhead, setPlayhead } = useEditor.getState();
+      adoptRemote(meta.currentVersion);
+      loadProject({ ...(data as Project), name: meta.name });
+      setPlayhead(playhead);
+      setMeta(meta);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [loading, ai, state, projectId, version, adoptRemote, loadProject]);
 
   /** visibility and access are the owner's; the row that comes back is the truth */
   const share = (body: { visibility?: 'private' | 'public'; access?: 'view' | 'edit' }) => {
@@ -82,8 +102,13 @@ export function CloudEditor({ projectId, onExit }: { projectId: string; onExit: 
       <div className="cloud-editor-body">
         {/* no back button: the browser has one, and this is a route. The project's name
             is the editor's own name field — there is nothing left for a second bar. */}
-        <Editor cloudBar={
+        <Editor projectId={projectId} cloudBar={
           <span className="cloudsave">
+            {!!ai?.agents.length && (
+              <button className="tag" role="status" data-tour="mcp-live" title="See what it is doing" onClick={() => setRailTab('mcp')}>
+                {ai.agents[0].client} editing…
+              </button>
+            )}
             {canEdit ? (
               <>
                 <SaveIndicator state={state} savedAt={savedAt} onRetry={() => void saveNow()} />

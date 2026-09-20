@@ -112,6 +112,17 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
   `store.restoreProject`), thread store `copilot/session.ts` (`Turn.run` checkpoint).
 - Right-rail tab is store state (`railTab`) so the agent can switch it.
 
+## MCP (docs/mcp/)
+- Registry `engine/registry.ts capabilities()`: edit tools (TOOL_DOCS parsed to JSON Schema), store actions
+  (`editorFunctions()`, excluded ones in `excludedActions()` with reasons), agent reads, session + host caps via
+  `registerCapabilities`. `EditorSession.invoke(id, args)` swaps the session's store snapshot into `useEditor` under a
+  global lock → validate (schema, then `normaliseCall`/`validateBatch` for edit tools) → apply → `diffProjects` → OpResult.
+  Transactions/checkpoints/idempotency/dryRun/expectedRevision live there.
+- API: `routes/mcp.routes.ts` (`/mcp` Streamable HTTP + SDK `mcpAuthRouter` + `/api/mcp/*`), `services/mcp/server.ts`
+  (tool list per scope/mode/profile, `callTool`, resources, audit, limits), `host.ts` (project/preset/render/export/job
+  caps), `workspace.ts` (session per user+project, autosave 2.5s, `sync` vs stored version, proposals), `auth.service.ts`.
+- Editor: `useMcpLive` polls `/api/mcp/live`; CloudEditor adopts a newer AI save via `useAutosave().adoptRemote`.
+
 ## Admin
 - `apps/admin/src/features/Splashscreens.tsx` builds splash data; `SplashPreview.tsx` renders
   via `sceneAt` + `MascotThumb` (same renderer as the editor).

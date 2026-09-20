@@ -70,18 +70,18 @@ it('keeps only the accounts it asked about', async () => {
   });
   const map = await usersService.identitiesFor(['u1']);
   expect([...map.keys()]).toEqual(['u1']);
-  expect(map.get('u1')).toEqual({ email: 'a@b.c', avatarUrl: 'pic', lastSignInAt: 't' });
+  expect(map.get('u1')).toEqual({ email: 'a@b.c', name: null, avatarUrl: 'pic', lastSignInAt: 't' });
 });
 
 it('fills missing identity fields with null rather than undefined', async () => {
   listUsers.mockResolvedValue({ data: { users: [{ id: 'u1' }] }, error: null });
   expect(await usersService.identitiesFor(['u1']).then((m) => m.get('u1')))
-    .toEqual({ email: null, avatarUrl: null, lastSignInAt: null });
+    .toEqual({ email: null, name: null, avatarUrl: null, lastSignInAt: null });
 });
 
 /** Search matches email, which only the Admin API knows, so it is applied after the join. */
 it('searches across the joined email as well as the profile username', async () => {
-  profiles.list.mockResolvedValue({ items: [{ id: 'u1', username: 'zed' }, { id: 'u2', username: 'ann' }], nextCursor: null });
+  profiles.list.mockResolvedValue({ items: [{ id: 'u1', username: 'zed', avatarUrl: null }, { id: 'u2', username: 'ann', avatarUrl: null }], nextCursor: null });
   listUsers.mockResolvedValue({
     data: { users: [{ id: 'u1', email: 'zed@example.com' }, { id: 'u2', email: 'ann@other.com' }] },
     error: null,
@@ -134,4 +134,25 @@ it('names people by username, else their provider name — never by email', asyn
   expect(names.get('u2')).toEqual({ name: 'Bo Diaz', avatarUrl: 'https://img/b' });
   expect(names.get('u3')).toEqual({ name: null, avatarUrl: null });
   expect(JSON.stringify([...names.values()])).not.toContain('@');
+});
+
+/** listUsers pages; one fixed page of 200 used to drop every later signup from the admin list. */
+it('pages the identity provider until it finds every account it asked about', async () => {
+  const filler = Array.from({ length: 1000 }, (_, i) => ({ id: `f${i}` }));
+  listUsers
+    .mockResolvedValueOnce({ data: { users: filler }, error: null })
+    .mockResolvedValueOnce({ data: { users: [{ id: 'late', email: 'l@x.io', user_metadata: { picture: 'p' } }] }, error: null });
+  const map = await usersService.identitiesFor(['late']);
+  expect(listUsers).toHaveBeenCalledTimes(2);
+  expect(map.get('late')?.avatarUrl).toBe('p');
+});
+
+it('prefers the chosen username and uploaded avatar over the provider’s', async () => {
+  profiles.list.mockResolvedValue({ items: [{ id: 'u1', username: null, avatarUrl: null }, { id: 'u2', username: 'bo', avatarUrl: 'mine' }], nextCursor: null });
+  listUsers.mockResolvedValue({ data: { users: [
+    { id: 'u1', user_metadata: { full_name: 'Ana Real', avatar_url: 'g1' } },
+    { id: 'u2', user_metadata: { full_name: 'Bo Diaz', avatar_url: 'g2' } },
+  ] }, error: null });
+  const { items } = await usersService.list({ limit: 10 } as never);
+  expect(items.map((u) => [u.name, u.avatarUrl])).toEqual([['Ana Real', 'g1'], ['bo', 'mine']]);
 });

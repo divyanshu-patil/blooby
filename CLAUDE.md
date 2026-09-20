@@ -23,6 +23,7 @@ there.
 pnpm dev          # all three apps
 pnpm dev:web      # http://localhost:5173
 pnpm ci           # lint + typecheck + test — run before saying you're done
+pnpm db:migrate   # apply supabase/migrations/* (psql; tracked in public.schema_migrations)
 pnpm test         # vitest across the workspace
 ```
 
@@ -111,6 +112,17 @@ rather than a new one-off input.
 discovery. `copilot/tools.ts` is the edit contract: one entry in `TOOL_NAMES`, a `validate` case, a
 `describe` case and an `applyCalls` case. `copilot/prompt.ts` builds the system prompt.
 See `COPILOT.md`.
+
+### MCP (AI apps driving the Studio)
+
+`docs/mcp/` explains it; the short version: `packages/studio/src/engine/` is the capability
+registry (derived from the copilot's tools, the store's `Editor` interface and the agent's reads)
+plus `EditorSession`, the real store run headless — exported as `@blooby/studio/engine`, the
+node-safe entry. `apps/api/src/services/mcp/` serves it at `/mcp` with OAuth; the editor's MCP
+tab is `ui/McpPanel.tsx`, the consent page `apps/web/src/features/connect/Connect.tsx`.
+A new store action (with a doc comment) or copilot tool **is** a new MCP capability — then run
+`pnpm --filter @blooby/api mcp:docs` to regenerate `docs/mcp/tools.md` and `parity.json`.
+The API runs studio source under `tsx`; `apps/api/src/loaders/raw.mjs` answers `?raw` imports.
 
 ### API
 

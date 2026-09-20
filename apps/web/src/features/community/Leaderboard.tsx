@@ -1,4 +1,4 @@
-import type { PublicInsights } from '@blooby/studio';
+import { Avatar, type PublicInsights } from '@blooby/studio';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
@@ -63,9 +63,4 @@ function Row({ rank, share, lead, name, meta, value }: {
       </span>
     </li>
   );
-}
-
-function Avatar({ name, url }: { name: string | null; url: string | null }) {
-  if (url) return <img className="board-avatar" src={url} alt="" referrerPolicy="no-referrer" />;
-  return <span className="board-avatar" aria-hidden>{(name ?? '?').trim().charAt(0).toUpperCase()}</span>;
 }

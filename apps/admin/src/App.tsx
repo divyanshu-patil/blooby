@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
 import {
-  BloobyMark, EmptyState, Shell, auth, startTour, startTourWhenReady, useSession,
+  Avatar, BloobyMark, EmptyState, Shell, auth, startTour, startTourWhenReady, useSession,
   type DriveStep, type NavGroup, type SessionUser,
 } from '@blooby/studio';
 import { Overview } from './features/Overview';
@@ -112,7 +112,8 @@ function AdminShell({ user }: { user: SessionUser }) {
       onNavigate={(id) => navigate(id)}
       footer={
         <div className="who">
-          <span className="who-name">{user.email ?? 'Admin'}</span>
+          <Avatar name={user.name ?? user.email} url={user.avatarUrl} size={24} />
+          <span className="who-name" title={user.email ?? undefined}>{user.name ?? user.email ?? 'Admin'}</span>
           <button className="btn ghost sm" title="Replay the tour"
             onClick={() => startTour('admin', ADMIN_TOUR, { force: true })}>?</button>
           <button className="btn ghost sm" onClick={() => void auth.signOut()}>Sign out</button>

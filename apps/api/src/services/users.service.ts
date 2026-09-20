@@ -1,4 +1,5 @@
 import type { UserRole } from '@prisma/client';
+import type { User } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../config/supabase.js';
 import { prisma } from '../config/prisma.js';
 import { profilesRepository } from '../repositories/profiles.repository.js';
@@ -11,6 +12,25 @@ import type { ListUsersDto } from '../dtos/admin/index.js';
  * while everything app-owned comes from Prisma. This service is the only place the two
  * are stitched together.
  */
+const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const PER_PAGE = 1000;
+
+/** A profile plus its auth identity. The chosen username and uploaded avatar win over the provider's. */
+const joined = <P extends { username: string | null; avatarUrl: string | null }>(
+  p: P, i?: { email: string | null; name: string | null; avatarUrl: string | null; lastSignInAt: string | null },
+) => ({ ...p, email: i?.email ?? null, lastSignInAt: i?.lastSignInAt ?? null, name: p.username ?? i?.name ?? null, avatarUrl: p.avatarUrl ?? i?.avatarUrl ?? null });
+
+/** Auth accounts for `wanted`, paging the Admin API until all are found or it runs out. */
+async function accounts(wanted: Set<string>) {
+  const found: User[] = [];
+  for (let page = 1; ; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PER_PAGE });
+    if (error) throw HttpError.upstream(`Could not load accounts: ${error.message}`);
+    found.push(...data.users.filter((u) => wanted.has(u.id)));
+    if (found.length >= wanted.size || data.users.length < PER_PAGE) return found;
+  }
+}
+
 export const usersService = {
   async list(dto: ListUsersDto) {
     const { items, nextCursor } = await profilesRepository.list(
@@ -28,36 +48,34 @@ export const usersService = {
 
     const users = items
       .map((p) => ({
-        ...p,
-        ...identities.get(p.id),
+        ...joined(p, identities.get(p.id)),
         projectCount: projectCount.get(p.id) ?? 0,
       }))
       // search is applied after the join because the term matches email, which only the
       // Admin API knows about
-      .filter((u) => !dto.q || `${u.email ?? ''} ${u.username ?? ''}`.toLowerCase().includes(dto.q.toLowerCase()));
+      .filter((u) => !dto.q || `${u.email ?? ''} ${u.name ?? ''}`.toLowerCase().includes(dto.q.toLowerCase()));
 
     return { items: users, nextCursor };
   },
 
-  /** Batched identity lookup. One Admin API page covers a listing page comfortably. */
+  /**
+   * Batched identity lookup. The Admin API only lists, so it is paged until every wanted
+   * account is found — a single fixed page silently dropped everyone past the 200th signup.
+   */
   async identitiesFor(ids: string[]) {
-    if (!ids.length) return new Map<string, { email: string | null; avatarUrl: string | null; lastSignInAt: string | null }>();
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 200 });
-    if (error) throw HttpError.upstream(`Could not load accounts: ${error.message}`);
-
+    const out = new Map<string, { email: string | null; name: string | null; avatarUrl: string | null; lastSignInAt: string | null }>();
+    if (!ids.length) return out;
     const wanted = new Set(ids);
-    return new Map(
-      data.users
-        .filter((u) => wanted.has(u.id))
-        .map((u) => [
-          u.id,
-          {
-            email: u.email ?? null,
-            avatarUrl: (u.user_metadata?.avatar_url as string | undefined) ?? null,
-            lastSignInAt: u.last_sign_in_at ?? null,
-          },
-        ]),
-    );
+    for (const u of await accounts(wanted)) {
+      const m = (u.user_metadata ?? {}) as Record<string, unknown>;
+      out.set(u.id, {
+        email: u.email ?? null,
+        name: str(m.full_name) ?? str(m.name),
+        avatarUrl: str(m.avatar_url) ?? str(m.picture),
+        lastSignInAt: u.last_sign_in_at ?? null,
+      });
+    }
+    return out;
   },
 
   /**
@@ -68,19 +86,14 @@ export const usersService = {
   async publicNames(ids: string[]) {
     const out = new Map<string, { name: string | null; avatarUrl: string | null }>();
     if (!ids.length) return out;
-    const [profiles, { data, error }] = await Promise.all([
+    const [profiles, identities] = await Promise.all([
       prisma.profile.findMany({ where: { id: { in: ids } }, select: { id: true, username: true, avatarUrl: true } }),
-      supabaseAdmin.auth.admin.listUsers({ perPage: 200 }),
+      // a leaderboard without provider names still renders with usernames — never fail the page on it
+      usersService.identitiesFor(ids).catch(() => new Map<string, { name: string | null; avatarUrl: string | null }>()),
     ]);
-    // a leaderboard without provider names still renders with usernames — never fail the page on it
-    const meta = new Map((error ? [] : data.users).map((u) => [u.id, u.user_metadata ?? {}]));
     for (const p of profiles) {
-      const m = meta.get(p.id) as Record<string, unknown> | undefined;
-      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
-      out.set(p.id, {
-        name: p.username ?? str(m?.full_name) ?? str(m?.name),
-        avatarUrl: p.avatarUrl ?? str(m?.avatar_url),
-      });
+      const i = identities.get(p.id);
+      out.set(p.id, { name: p.username ?? i?.name ?? null, avatarUrl: p.avatarUrl ?? i?.avatarUrl ?? null });
     }
     return out;
   },
@@ -103,7 +116,7 @@ export const usersService = {
       }),
     ]);
 
-    return { ...profile, ...identity.get(userId), projectCount, publishedAssets: published, pendingAssets: pending, recentProjects };
+    return { ...joined(profile, identity.get(userId)), projectCount, publishedAssets: published, pendingAssets: pending, recentProjects };
   },
 
   async setRole(userId: string, role: UserRole, actingAdminId: string) {

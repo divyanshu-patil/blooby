@@ -1,10 +1,8 @@
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import GIF from 'gif.js.optimized';
 import workerUrl from 'gif.js.optimized/dist/gif.worker.js?url';
 import { compOf } from '../core/comp';
-import { sceneAt, type SceneItem, type Viewport } from '../core/scene';
-import { Shapes } from '../ui/Mascot';
+import type { Viewport } from '../core/scene';
+import { frameSvg } from './frame';
 import { activeTimeline } from '../core/types';
 import type { Project } from '../core/types';
 
@@ -15,13 +13,6 @@ export interface RasterOptions {
   background: string | null;
   from?: number;
   to?: number;
-}
-
-/** Same <Shapes> the stage draws — one renderer, so an export can't drift from preview. */
-export function sceneToSvg(scene: SceneItem[], background: string | null, view: Viewport): string {
-  const body = renderToStaticMarkup(createElement(Shapes, { scene }));
-  const bg = background ? `<rect width="${view.width}" height="${view.height}" fill="${background}"/>` : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${view.width}" height="${view.height}" viewBox="0 0 ${view.width} ${view.height}">${bg}${body}</svg>`;
 }
 
 async function svgToImage(svg: string): Promise<HTMLImageElement> {
@@ -37,10 +28,6 @@ function makeCanvas(view: Viewport, scale: number) {
   c.height = Math.round(view.height * scale);
   return c;
 }
-
-/** One frame of the project as an SVG at its own composition size. */
-const frameSvg = (project: Project, ms: number, background: string | null) =>
-  sceneToSvg(sceneAt(project, ms, compOf(project)), background, compOf(project));
 
 /** Walks the timeline frame by frame, handing each rendered canvas to `onFrame`. */
 async function eachFrame(

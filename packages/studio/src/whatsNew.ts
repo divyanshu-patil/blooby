@@ -38,6 +38,38 @@ const step = (element: string, title: string, description: string): DriveStep =>
 
 export const RELEASES: Release[] = [
   {
+    version: '2026.09.20',
+    date: '20 September 2026',
+    title: 'Animate with Claude, ChatGPT and Cursor — and your picture in the sidebar',
+    items: [
+      {
+        id: 'mcp-connect', surface: 'editor',
+        title: 'Connect an AI app',
+        body: 'The new MCP tab shows your Blooby MCP link. Copy it, paste it into Claude (or ChatGPT, Cursor, Claude Code) as a connector, approve on the Blooby page it opens — then ask it to animate, and watch the changes land here. It uses the same tools as the editor, renders frames to check its own work, and can export Lottie for you.',
+        tour: [
+          step('tab-mcp', 'The MCP tab', 'Everything about AI apps: how to connect one, what it is doing right now, and its changes waiting for your approval.'),
+          step('mcp-link', 'Your MCP link', 'Copy it and paste it into your AI app. It opens a Blooby page where you approve it and choose how much it may do.'),
+        ],
+      },
+      {
+        id: 'mcp-control', surface: 'editor',
+        title: 'You stay in control',
+        body: 'Choose Look only, Ask me first or Full control when you connect. In Ask me first, every change waits in the MCP tab for you to approve. Disconnect an app or revoke a token at any time; every AI edit is undoable.',
+      },
+      {
+        id: 'mcp-dashboard', surface: 'dashboard',
+        title: 'AI apps, from the dashboard',
+        body: 'The AI apps page in the sidebar connects apps and manages their access without opening a project.',
+        tour: [step('/ai', 'AI apps', 'Connect and manage the AI apps that work on your projects.')],
+      },
+      {
+        id: 'sidebar-avatar', surface: 'dashboard',
+        title: 'You, in the sidebar',
+        body: 'The sidebar now shows your profile picture and name from your sign-in, instead of just an email address.',
+      },
+    ],
+  },
+  {
     version: '2026.09.18.2',
     date: '18 September 2026',
     title: 'Grouped eyes look around, and a skipped start is flagged',

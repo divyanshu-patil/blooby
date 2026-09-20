@@ -52,7 +52,7 @@ play                  { fromMs?, toMs? }                       // plays that spa
 get_editor_state      { }                                      // playhead, selection, open tab, active state
 set_playhead          { atMs }
 select_layers         { nodeIds: [] }                          // selects on the stage and in the inspector
-open_tab              { tab: "node"|"eyes"|"fx"|"states"|"ai" }// the right-hand inspector tab
+open_tab              { tab: "node"|"eyes"|"fx"|"states"|"ai"|"mcp" }// the right-hand inspector tab
 finish                { summary }                              // end the run with one or two sentences for the user`.trim();
 
 const AGENT_NAMES = ['find_functions', 'call_editor', 'search_presets', 'get_preset', 'inspect_project', 'get_layer',
@@ -359,7 +359,7 @@ export async function runAgentTool(call: ToolCall, signal?: AbortSignal): Promis
     }
     case 'open_tab': {
       const tab = String(a.tab) as RailTab;
-      if (!['node', 'eyes', 'fx', 'states', 'ai'].includes(tab)) return { error: 'tab is node, eyes, fx, states or ai' };
+      if (!['node', 'eyes', 'fx', 'states', 'ai', 'mcp'].includes(tab)) return { error: 'tab is node, eyes, fx, states, ai or mcp' };
       ed.setRailTab(tab);
       return { tab };
     }

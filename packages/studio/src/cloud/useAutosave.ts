@@ -29,11 +29,20 @@ export function useAutosave(projectId: string | null, project: Project, enabled:
   const pending = useRef(false);
   const latest = useRef(project);
   latest.current = project;
+  /** set when the document was replaced by a newer SAVED version (an AI's edits): not an edit to save back */
+  const adopting = useRef(false);
 
   /** Called by the loader once it knows which version and name this editor started from. */
   const setBaseVersion = useCallback((v: number, name?: string) => {
     version.current = v;
     if (name !== undefined) savedName.current = name;
+  }, []);
+
+  /** Take a newer version saved elsewhere (an AI client through MCP) as the new base. */
+  const adoptRemote = useCallback((v: number) => {
+    version.current = v;
+    adopting.current = true;
+    setConflict(false);
   }, []);
 
   const flush = useCallback(async () => {
@@ -77,6 +86,7 @@ export function useAutosave(projectId: string | null, project: Project, enabled:
   // debounce: every edit restarts the timer, so a drag saves once when it settles
   useEffect(() => {
     if (!projectId || !enabled || conflict) return;
+    if (adopting.current) { adopting.current = false; setState('saved'); return; }
     setState((s) => (s === 'saving' ? s : 'dirty'));
     const t = setTimeout(() => void flush(), DEBOUNCE_MS);
     return () => clearTimeout(t);
@@ -92,5 +102,5 @@ export function useAutosave(projectId: string | null, project: Project, enabled:
     return () => window.removeEventListener('beforeunload', warn);
   }, [state]);
 
-  return { state, savedAt, conflict, saveNow: flush, setBaseVersion };
+  return { state, savedAt, conflict, saveNow: flush, setBaseVersion, adoptRemote, version: () => version.current };
 }
