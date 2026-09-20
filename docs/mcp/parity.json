@@ -1,6 +1,6 @@
 {
   "capabilityVersion": "1.0.0",
-  "generatedAt": "2026-09-19T21:15:00.465Z",
+  "generatedAt": "2026-09-20T05:19:50.598Z",
   "summary": {
     "capabilities": 245,
     "byKind": {
@@ -666,7 +666,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#capabilities_search"
     },

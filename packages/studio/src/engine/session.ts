@@ -737,8 +737,12 @@ const SESSION: (Omit<Capability, 'kind' | 'since' | 'reversible' | 'requires'> &
 
 const SESSION_HANDLERS: Record<string, Handler> = Object.fromEntries(SESSION.map((c) => [c.id, c.handler]));
 
+/** Discovery and the guides answer before a project is open — a host may run them on a scratch document. */
+const WITHOUT_PROJECT = new Set(['capabilities_search', 'capability_get', 'guide_get', 'search']);
+
 registerCapabilities(SESSION.map(({ handler: _h, ...c }) => ({
-  ...c, kind: 'session', since: '1.0.0', reversible: c.reversible ?? false, requires: ['project'],
+  ...c, kind: 'session', since: '1.0.0', reversible: c.reversible ?? false,
+  requires: WITHOUT_PROJECT.has(c.id) ? [] : ['project'],
 })));
 
 export { capabilities };

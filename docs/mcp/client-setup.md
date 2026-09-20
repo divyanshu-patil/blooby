@@ -68,6 +68,12 @@ await client.callTool({ name: 'project_create', arguments: { name: 'From my agen
 const frame = await client.callTool({ name: 'render_frame', arguments: { atMs: 500 } }); // content[0] is a PNG
 ```
 
+## "It asks me before every action"
+
+That prompt is your AI app's own, not Blooby's: most clients confirm the first use of each tool
+and offer "always allow". Blooby only asks you when the connection's mode is **Ask me first**,
+and then it asks in Blooby (editor → MCP tab, or the AI apps page), not in the app.
+
 ## Tool profiles
 
 - **Compact** (default, `/mcp`): ~50 everyday tools plus `invoke`, which runs *any* capability by id. Keeps context small — right for ChatGPT, Cursor and most chats.

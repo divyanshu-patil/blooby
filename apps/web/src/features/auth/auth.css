@@ -64,11 +64,27 @@
 }
 .auth-switch button:hover { text-decoration: underline; }
 
-/* the MCP consent page (/connect) */
-.consent-group { border: 0; padding: 0; margin: 0 0 16px; display: flex; flex-direction: column; gap: 8px; }
-.consent-group legend { font-size: 12px; font-weight: 500; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-.consent-row { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.43; color: var(--ink-2); cursor: pointer; }
-.consent-row input { margin-top: 3px; flex: none; }
-.consent-who { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); margin: 4px 0 16px; }
+/* the MCP consent page (/connect): permissions as pickable rows, one matched pair of actions */
+.consent-group { border: 0; padding: 0; margin: 0 0 20px; display: flex; flex-direction: column; gap: 6px; }
+.consent-group legend { font-size: 13px; font-weight: 500; color: var(--ink); padding: 0; margin-bottom: 10px; }
+.consent-row {
+  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--paper); transition: border-color .12s ease, background .12s ease;
+}
+.consent-row:hover { border-color: var(--muted); }
+.consent-row[data-on='true'] { border-color: var(--ink); background: var(--field); }
+.consent-row:focus-within { outline: 2px solid var(--ink); outline-offset: 1px; }
+.consent-row input { margin: 2px 0 0; flex: none; accent-color: var(--ink); width: 15px; height: 15px; }
+.consent-text { display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 1.43; color: var(--ink-2); }
+.consent-strong { font-weight: 500; color: var(--ink); }
+.consent-sub { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.consent-who { display: flex; gap: 10px; align-items: center; font-size: 13px; line-height: 1.45; color: var(--muted); margin: 0 0 18px; }
 .consent-actions { display: flex; gap: 10px; }
 .consent-actions .auth-submit { flex: 1; margin: 0; }
+.consent-deny {
+  height: 44px; padding: 0 20px; font: 500 14px var(--ui); color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-btn, 18px); cursor: pointer;
+}
+.consent-deny:hover { border-color: var(--ink); }
+.consent-deny:disabled { opacity: .5; cursor: default; }

@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { Resvg } from '@resvg/resvg-js';
 import {
-  activeTimeline, bakeLottie, buildDotLottie, buildRuntimePack, builtinPresets, CapabilityError, compOf, presetData, presetTags,
-  registerCapabilities, searchPresets, type Capability, type JsonSchema, type Preset, type Project,
+  activeTimeline, bakeLottie, buildDotLottie, buildRuntimePack, builtinPresets, CapabilityError, compOf, defaultProject, EditorSession,
+  presetData, presetTags, registerCapabilities, searchPresets, type Capability, type JsonSchema, type Preset, type Project,
 } from '@blooby/studio/engine';
 import { assetsService } from '../assets.service.js';
 import { projectsService } from '../projects.service.js';
 import { putExport } from '../storage.service.js';
 import { HttpError } from '../../utils/httpError.js';
-import { forgetLibrary, libraryFor, workspace, type OpenProject } from './workspace.js';
+import { forgetLibrary, libraryFor, openProjectOf, rememberOpen, workspace, type OpenProject } from './workspace.js';
 import type { Principal } from './auth.service.js';
 
 /**
@@ -46,14 +46,43 @@ export const newRun = (goal: string | null = null): Run => ({
   runId: `run_${randomUUID().slice(0, 8)}`, startedAt: new Date().toISOString(), goal, projects: new Set(), ops: [], created: 0, changed: 0, errors: 0,
 });
 
-/** The project this connection works on, opened and synced — or a helpful refusal. */
+/** Note which project this person is working on, for this connection and for the next one. */
+export function setProject(conn: Conn, projectId: string) {
+  conn.projectId = projectId;
+  conn.run.projects.add(projectId);
+  rememberOpen(conn.principal.userId, projectId);
+}
+
+/**
+ * The project this person works on, opened and synced — or a refusal they can act on.
+ *
+ * Falls back to the project they last opened, because a client that does not keep its MCP
+ * session (ChatGPT's connector, among others) arrives on a new connection every call, and
+ * "the project I opened" must survive that.
+ */
 export async function current(conn: Conn): Promise<{ o: OpenProject; warning: string | null }> {
-  if (!conn.projectId) {
-    throw new CapabilityError('NO_PROJECT', 'No project is open on this connection.', { suggestion: 'project_list then project_open { projectId }, or project_create { name }.' });
+  const projectId = conn.projectId ?? openProjectOf(conn.principal.userId);
+  if (!projectId) {
+    const recent = await projectsService.list(conn.principal.userId, { limit: 5, sort: 'recent' })
+      .then((p) => p.items.map((x) => ({ id: x.id, name: x.name }))).catch(() => []);
+    throw new CapabilityError('NO_PROJECT', 'No project is open.', {
+      recentProjects: recent,
+      suggestion: recent.length
+        ? `project_open { projectId: "${recent[0].id}" } opens “${recent[0].name}”, your most recent. project_create { name } starts a new one.`
+        : 'project_create { name } starts one.',
+    });
   }
-  const o = await workspace.open(conn.principal.userId, conn.projectId).catch(asCapabilityError);
+  const o = await workspace.open(conn.principal.userId, projectId).catch(asCapabilityError);
+  setProject(conn, projectId);
   return { o, warning: await workspace.sync(o) };
 }
+
+/**
+ * A throwaway session for the capabilities that do not need a document — capability search,
+ * the guides. Without it an agent could not look anything up before opening a project.
+ */
+let scratch: Promise<EditorSession> | null = null;
+export const scratchSession = () => (scratch ??= EditorSession.open(defaultProject()));
 
 function asCapabilityError(e: unknown): never {
   if (e instanceof CapabilityError) throw e;
@@ -186,8 +215,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       }
       if (!id) throw new CapabilityError('MISSING_ARGUMENT', 'Give projectId or name.', { field: 'projectId' });
       const o = await workspace.open(conn.principal.userId, id).catch(asCapabilityError);
-      conn.projectId = id;
-      conn.run.projects.add(id);
+      setProject(conn, id);
       const state = (await o.session.invoke('editor_get_state', { level: 'standard' })).result;
       return { summary: `Opened “${o.name}”`, data: { projectId: id, name: o.name, canEdit: o.canEdit, state, next: 'render_frame to see it; guide_get { topic: "workflow" } for how to work.' } };
     },
@@ -197,12 +225,17 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     description: 'A new cloud project with the default mascot, opened on this connection. It appears on the person\'s dashboard straight away.',
     inputSchema: obj({ name: str }, ['name']), examples: [{ name: 'Happy entrance' }],
     handler: async (conn, a) => {
+      const twin = await projectsService.list(conn.principal.userId, { limit: 5, q: String(a.name), sort: 'recent' })
+        .then((p) => p.items.find((x) => x.name.toLowerCase() === String(a.name).toLowerCase())).catch(() => undefined);
       const row = await projectsService.create(conn.principal.userId, { name: String(a.name).slice(0, 120), project: {} }).catch(asCapabilityError);
       const o = await workspace.open(conn.principal.userId, row.id);
-      conn.projectId = row.id;
-      conn.run.projects.add(row.id);
+      setProject(conn, row.id);
       workspace.scheduleSave(o);   // write the full default document, not the `{}` seed
-      return { summary: `Created “${row.name}”`, data: { projectId: row.id, name: row.name, state: (await o.session.invoke('editor_get_state', { level: 'standard' })).result } };
+      return {
+        summary: `Created “${row.name}”`,
+        data: { projectId: row.id, name: row.name, state: (await o.session.invoke('editor_get_state', { level: 'standard' })).result },
+        warnings: twin ? [`You already had a project called “${twin.name}” (${twin.id}); this is a second one. project_delete removes either.`] : [],
+      };
     },
   },
   {
@@ -260,8 +293,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       if (o?.session.dirty && o.canEdit) await workspace.save(o);
       const copy = await projectsService.duplicate(source, conn.principal.userId, a.name as string | undefined).catch(asCapabilityError);
       await workspace.open(conn.principal.userId, copy.id);
-      conn.projectId = copy.id;
-      conn.run.projects.add(copy.id);
+      setProject(conn, copy.id);
       return { summary: `Duplicated as “${copy.name}” and opened it`, data: { projectId: copy.id, name: copy.name } };
     },
   },
@@ -274,6 +306,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
         const o = workspace.get(conn.principal.userId, conn.projectId);
         if (o?.session.dirty && o.canEdit) await workspace.save(o).catch(() => undefined);
       }
+      if (conn.projectId) workspace.close(conn.principal.userId, conn.projectId);
       conn.projectId = null;
       return { summary: 'Closed' };
     },

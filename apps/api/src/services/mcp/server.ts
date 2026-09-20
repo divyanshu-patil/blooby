@@ -10,8 +10,8 @@ import {
 } from '@blooby/studio/engine';
 import { mcpRepository } from '../../repositories/mcp.repository.js';
 import { projectsService } from '../projects.service.js';
-import { current, DESTRUCTIVE, HOST_HANDLERS, readExport, type Conn, type HostResult } from './host.js';
-import { libraryFor, workspace } from './workspace.js';
+import { current, DESTRUCTIVE, HOST_HANDLERS, readExport, scratchSession, type Conn, type HostResult } from './host.js';
+import { libraryFor, openProjectOf, workspace } from './workspace.js';
 import { PROMPTS } from './prompts.js';
 
 /**
@@ -80,7 +80,9 @@ export function toolsFor(conn: Conn, profile: Profile): Tool[] {
 
 const windows = new Map<string, number[]>();
 const inFlight = new Map<string, number>();
-const LIMITS: [RegExp, number][] = [[/^render_/, 60], [/^export_start$/, 20], [/.*/, 900]];
+// Generous on purpose: an agent building an animation makes hundreds of small edits, and being
+// throttled mid-run is worse than the load. These are an abuse ceiling, not a budget.
+const LIMITS: [RegExp, number][] = [[/^render_/, 300], [/^export_start$/, 120], [/.*/, 6000]];
 function throttle(userId: string, id: string) {
   const [re, max] = LIMITS.find(([r]) => r.test(id))!;
   const k = `${userId}:${re.source}`;
@@ -119,7 +121,7 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
     if (cap.mutates && conn.principal.mode === 'read_only') throw new CapabilityError('READ_ONLY_CONNECTION', 'This connection may look but not change anything.');
     throttle(userId, id);
     const n = inFlight.get(userId) ?? 0;
-    if (n >= 4) throw new CapabilityError('BUSY', 'Four calls are already running for this account — wait for them.', { retryAfterMs: 500 });
+    if (n >= 12) throw new CapabilityError('BUSY', 'Twelve calls are already running for this account — wait for one to finish.', { retryAfterMs: 500 });
     inFlight.set(userId, n + 1);
 
     let out: HostResult;
@@ -127,7 +129,11 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
       if (cap.mutates && conn.principal.mode === 'suggest' && cap.kind !== 'server') out = await propose(conn, id, args);
       else if (cap.mutates && conn.principal.mode === 'suggest' && DESTRUCTIVE.has(id)) throw new CapabilityError('NOT_IN_SUGGEST_MODE', 'Deleting is not available in "ask me first" mode.');
       else if (HOST_HANDLERS.has(id)) out = await HOST_HANDLERS.get(id)!(conn, args);
-      else {
+      else if (!cap.requires.includes('project') && !conn.projectId && !openProjectOf(userId)) {
+        // discovery and the guides answer before anything is open
+        const r = await (await scratchSession()).invoke(id, args);
+        out = { summary: r.summary, data: r.result };
+      } else {
         const { o, warning } = await current(conn);
         const before = o.session.revision;
         const r = await o.session.invoke(id, args);

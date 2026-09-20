@@ -22,6 +22,8 @@ export { api, ApiError } from './cloud/client';
 export { projectsApi, assetsApi, communityApi, splashApi, adminApi, copilotApi, authApi, mcpApi } from './cloud/api';
 export type { McpConsent, McpLive, McpMode, McpOverview, McpProposal } from './cloud/api';
 export { useMcpLive } from './cloud/useMcpLive';
+export { useMcpConsole, MCP_CLIENTS, MODE_LABEL } from './cloud/useMcpConsole';
+export { CopyButton } from './ui/McpPanel';
 export { McpPanel } from './ui/McpPanel';
 export type { CopilotAdminView, CopilotConfig, CopilotKeyRow } from './cloud/api';
 export { useSession, auth, consumeAuthError } from './cloud/auth';
