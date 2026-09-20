@@ -14,7 +14,9 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "ci": "turbo run lint typecheck test",
-    "test:coverage": "turbo run test:coverage"
+    "test:coverage": "turbo run test:coverage",
+    "db:migrate": "pnpm --filter @blooby/api db:migrate",
+    "db:migrate:status": "pnpm --filter @blooby/api db:migrate:status"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",

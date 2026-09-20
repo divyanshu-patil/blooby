@@ -23,6 +23,7 @@ there.
 pnpm dev          # all three apps
 pnpm dev:web      # http://localhost:5173
 pnpm ci           # lint + typecheck + test — run before saying you're done
+pnpm db:migrate   # apply supabase/migrations/* (psql; tracked in public.schema_migrations)
 pnpm test         # vitest across the workspace
 ```
 

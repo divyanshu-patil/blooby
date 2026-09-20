@@ -5,8 +5,7 @@
 ```sh
 pnpm install
 cp apps/api/.env.example apps/api/.env      # fill in Supabase, database and S3 values
-# apply the MCP tables once (Supabase CLI, or the SQL editor):
-#   supabase/migrations/20260920120000_mcp.sql
+pnpm db:migrate                              # applies supabase/migrations/* (needs psql)
 pnpm dev                                     # web :5173, admin :5174, api :3000
 ```
 

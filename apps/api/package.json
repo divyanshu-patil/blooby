@@ -20,7 +20,10 @@
     "typecheck": "tsc -p tsconfig.json",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "mcp:docs": "tsx --import ./src/loaders/register.mjs scripts/mcp-docs.ts"
+    "mcp:docs": "tsx --import ./src/loaders/register.mjs scripts/mcp-docs.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:migrate:status": "tsx scripts/db-migrate.ts --status",
+    "db:migrate:baseline": "tsx scripts/db-migrate.ts --baseline"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1119.0",
