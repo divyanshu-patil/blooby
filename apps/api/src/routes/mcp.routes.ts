@@ -56,7 +56,7 @@ mcpRoutes.use(cors({ origin: true, exposedHeaders: ['Mcp-Session-Id', 'WWW-Authe
 mcpRoutes.use(express.json({ limit: '4mb' }));
 mcpRoutes.use(bearer);
 mcpRoutes.use(rateLimit({
-  windowMs: 60_000, limit: 1200, standardHeaders: 'draft-7', legacyHeaders: false,
+  windowMs: 60_000, limit: 6000, standardHeaders: 'draft-7', legacyHeaders: false,
   keyGenerator: (req) => (req.auth ? principalOf(req).tokenId : 'anon'),
   message: { jsonrpc: '2.0', error: { code: -32000, message: 'Too many requests — slow down.' }, id: null },
 }));

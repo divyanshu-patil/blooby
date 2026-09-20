@@ -53,38 +53,41 @@ function Consent({ request, user }: { request: string; user: SessionUser }) {
             <>
               <h1 className="auth-title">Connect {data.clientName}</h1>
               <p className="auth-sub">
-                <strong>{data.clientName}</strong> wants to work in Blooby as you. Choose what it may do — you can
-                disconnect it any time from the MCP tab in the editor.
+                It will work in Blooby as you. Choose what it may do — you can disconnect it at any time from
+                AI apps in Blooby.
               </p>
 
               <fieldset className="consent-group">
-                <legend>It may</legend>
+                <legend>{data.clientName} may</legend>
                 {data.scopes.map((s) => (
-                  <label key={s.scope} className="consent-row">
+                  <label key={s.scope} className="consent-row" data-on={chosen.includes(s.scope)}>
                     <input type="checkbox" checked={chosen.includes(s.scope)}
                       onChange={(e) => setScopes(e.target.checked ? [...chosen, s.scope] : chosen.filter((x) => x !== s.scope))} />
-                    <span>{s.description}</span>
+                    <span className="consent-text">{s.description}</span>
                   </label>
                 ))}
               </fieldset>
 
               <fieldset className="consent-group">
-                <legend>How much control</legend>
+                <legend>How much control it has</legend>
                 {(['full', 'suggest', 'read_only'] as McpMode[]).map((m) => (
-                  <label key={m} className="consent-row">
+                  <label key={m} className="consent-row" data-on={mode === m}>
                     <input type="radio" name="mode" checked={mode === m} onChange={() => setMode(m)} />
-                    <span><strong>{MODE_LABEL[m]}</strong> — {data.modes[m]}</span>
+                    <span className="consent-text">
+                      <span className="consent-strong">{MODE_LABEL[m]}</span>
+                      <span className="consent-sub">{data.modes[m]}</span>
+                    </span>
                   </label>
                 ))}
               </fieldset>
 
               <p className="consent-who">
-                <Avatar name={user.name ?? user.email} url={user.avatarUrl} size={22} />
-                <span>Signed in as {user.name ?? user.email}. You will return to <strong>{data.redirectHost}</strong>.</span>
+                <Avatar name={user.name ?? user.email} url={user.avatarUrl} size={24} />
+                <span>Signed in as {user.name ?? user.email}. Approving returns you to <strong>{data.redirectHost}</strong>.</span>
               </p>
 
               <div className="consent-actions">
-                <button className="btn" disabled={busy} onClick={() => void decide(false)}>Deny</button>
+                <button className="consent-deny" disabled={busy} onClick={() => void decide(false)}>Deny</button>
                 <button className="auth-submit" disabled={busy || !chosen.length} onClick={() => void decide(true)}>
                   {busy ? 'Connecting…' : `Allow ${data.clientName}`}
                 </button>
@@ -94,7 +97,7 @@ function Consent({ request, user }: { request: string; user: SessionUser }) {
           )}
           {!data && !error && request && <p className="auth-sub">Loading…</p>}
         </div>
-        <p className="auth-switch">Blooby never shares your password or sign-in with the app — it gets its own key, limited to what you allow.</p>
+        <p className="auth-switch">Blooby never gives the app your password or your sign-in. It gets its own key, limited to what you allow above.</p>
       </div>
     </main>
   );

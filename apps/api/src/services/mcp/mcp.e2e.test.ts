@@ -137,6 +137,8 @@ afterAll(() => new Promise((r) => { server.closeAllConnections(); server.close((
 
 const ANN = 'a0000000-0000-4000-8000-000000000001';
 const BOB = 'b0000000-0000-4000-8000-000000000002';
+// a third person, so this file's earlier tests leave them nothing open
+const CARL = 'c0000000-0000-4000-8000-000000000003';
 
 type ToolResult = { content: { type: string; text?: string; data?: string; mimeType?: string; resource?: { uri: string; mimeType: string; text?: string } }[]; isError?: boolean };
 async function connect(token: string, query = '') {
@@ -446,4 +448,46 @@ it('covers the rest of the project, preset, job and account capabilities', async
   expect(result.resource?.mimeType).toBe('image/svg+xml');
   await ok('job_cancel', { jobId });
   await c.close();
+}, 30_000);
+
+/**
+ * Some connectors do not keep the Mcp-Session-Id, so every call arrives on a fresh connection.
+ * The project someone opened must survive that — losing it made an agent believe the project
+ * was gone and create duplicates.
+ */
+it('keeps the open project across connections, and answers discovery before one is open', async () => {
+  const { token } = await tokensService.createPat(CARL, { name: 'stateless' });
+
+  const first = await connect(token);
+  // before anything is open: discovery and the guides still answer
+  const caps = await call(first, 'capabilities_search', { query: 'keyframe' });
+  expect(caps.body.ok, JSON.stringify(caps.body).slice(0, 200)).toBe(true);
+  expect((await call(first, 'guide_get', { topic: 'craft' })).body.ok).toBe(true);
+  // …and an edit says exactly how to get a project, naming real ones
+  const none = await call(first, 'add_keyframe', { nodeId: 'body', property: 'opacity', atMs: 0, value: 1 });
+  expect(none.body.error.code).toBe('NO_PROJECT');
+  expect(none.body.error.suggestion).toContain('project_');
+
+  const made = await call(first, 'project_create', { name: 'Surfing on a Pencil' });
+  const projectId = made.body.result.projectId as string;
+  await first.close();
+
+  // a different connection, as if the client forgot its session
+  const second = await connect(token);
+  const state = await call(second, 'editor_get_state', {});
+  expect(state.body.ok, JSON.stringify(state.body).slice(0, 200)).toBe(true);
+  expect((await call(second, 'project_current')).body.result.projectId).toBe(projectId);
+  const edit = await call(second, 'add_layer', { type: 'shape', shape: 'star', name: 'board' });
+  expect(edit.body.ok, JSON.stringify(edit.body).slice(0, 200)).toBe(true);
+  await second.close();
+
+  // and creating the same project twice says so instead of quietly making a duplicate
+  const third = await connect(token);
+  const twin = await call(third, 'project_create', { name: 'Surfing on a Pencil' });
+  expect(twin.body.warnings?.[0]).toContain('already had a project');
+  await call(third, 'project_close');
+  const closed = await connect(token);
+  expect((await call(closed, 'project_current')).body.result.projectId).toBe(null);
+  await third.close();
+  await closed.close();
 }, 30_000);

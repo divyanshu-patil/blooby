@@ -639,13 +639,6 @@ input[type='range']::-moz-range-thumb { width: 11px; height: 11px; border-radius
 .proposal .acts { display: flex; gap: 6px; padding: 7px 8px; border-top: 1px solid var(--line-soft); background: var(--field); }
 
 .keypool { display: flex; flex-direction: column; gap: 5px; }
-/* MCP tab: numbered connection steps with copyable snippets */
-.mcp-steps { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 8px; }
-.mcp-steps li { display: flex; flex-direction: column; gap: 4px; }
-.mcp-code.mcp-link { font-size: 12px; padding: 7px 9px; }
-.mcp-more { display: flex; flex-direction: column; gap: 8px; }
-.mcp-more summary { cursor: pointer; }
-.mcp-code { flex: 1; min-width: 0; margin: 0; padding: 5px 7px; font: 500 10.5px var(--mono); background: var(--field); border: 1px solid var(--line-soft); border-radius: 4px; white-space: pre-wrap; word-break: break-all; user-select: all; }
 .keyrow { display: flex; align-items: center; gap: 6px; font: 500 11px var(--mono); }
 .dot-status { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 /* the state-machine panel's "this state is on the stage" dot — same affordance, and it
@@ -1391,3 +1384,46 @@ textarea.ask:focus { border-color: var(--signal); outline: none; }
 
 /* the wire picked in the node editor, edited right under it */
 .sm-graph-edit { margin-top: 8px; }
+
+/* --- MCP tab: connecting an AI app ------------------------------------------ */
+/* The link is the setup, so it leads; status is a sentence, not a badge. */
+.mcp-status { display: flex; align-items: center; gap: 7px; font: 500 11.5px var(--ui); color: var(--muted); margin: 0 0 2px; }
+.mcp-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--line); flex: none; }
+.mcp-status[data-live='true'] { color: var(--ink); }
+.mcp-status[data-live='true']::before { background: #2f9e57; animation: mcp-pulse 1.8s ease-in-out infinite; }
+@keyframes mcp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .mcp-status[data-live='true']::before { animation: none; } }
+
+.mcp-link-row { display: flex; align-items: center; gap: 6px; }
+.mcp-link-row > .txt, .mcp-link-row > .mcp-code { flex: 1; min-width: 0; }
+input.txt.mono { font: 500 11px var(--mono); }
+.mcp-code {
+  display: block; margin: 0; padding: 6px 8px; font: 500 10.5px/1.5 var(--mono);
+  background: var(--field); border: 1px solid var(--line-soft); border-radius: 6px;
+  white-space: pre-wrap; word-break: break-all; user-select: all; color: var(--ink-2);
+}
+.mcp-bad { color: var(--hot); }
+
+.mcp-approvals { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin-top: 4px; background: var(--field); border-radius: 8px; }
+.mcp-approval { display: flex; align-items: center; gap: 8px; }
+.mcp-approval-what { flex: 1; min-width: 0; font: 400 11.5px/1.45 var(--ui); color: var(--ink-2); }
+
+.mcp-clients { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.mcp-clients li { display: flex; flex-direction: column; gap: 3px; }
+.mcp-client-name { font: 500 11.5px var(--ui); color: var(--ink); }
+
+.mcp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.mcp-list li { display: flex; align-items: center; gap: 6px; padding: 7px 0; border-top: 1px solid var(--line-soft); }
+.mcp-list li:first-child { border-top: 0; }
+.mcp-list-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mcp-list-name { font: 500 12px var(--ui); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mcp-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.mcp-feed li { display: flex; align-items: baseline; gap: 8px; padding: 5px 0 5px 12px; position: relative; font: 400 11.5px var(--ui); color: var(--ink-2); }
+.mcp-feed li::before { content: ''; position: absolute; left: 0; top: 10px; width: 5px; height: 5px; border-radius: 50%; background: var(--line); }
+.mcp-feed li[data-ok='true']::before { background: var(--ink-2); }
+.mcp-feed li[data-ok='false']::before { background: var(--hot); }
+.mcp-feed-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-feed time { flex: none; font: 400 10.5px var(--ui); color: var(--muted); }
+
+.mcp-secret { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--field); border: 1px solid var(--line); border-radius: 8px; }

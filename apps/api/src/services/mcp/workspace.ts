@@ -39,6 +39,20 @@ export interface OpenProject {
 const AUTOSAVE_MS = 2500;
 const IDLE_MS = 30 * 60 * 1000;
 const open = new Map<string, OpenProject>();
+/**
+ * The project each person has open, by user rather than by MCP session.
+ *
+ * Some clients (ChatGPT connectors among them) do not keep the Mcp-Session-Id between calls,
+ * so every tool call arrives on a fresh connection. Remembering the open project per PERSON
+ * is what makes `project_open` stick for them — and it is what someone means anyway: the
+ * project they opened, not the project one socket opened.
+ */
+const lastOpened = new Map<string, string>();
+export const rememberOpen = (userId: string, projectId: string) => lastOpened.set(userId, projectId);
+export const forgetOpen = (userId: string, projectId?: string) => {
+  if (!projectId || lastOpened.get(userId) === projectId) lastOpened.delete(userId);
+};
+export const openProjectOf = (userId: string) => lastOpened.get(userId) ?? null;
 const opening = new Map<string, Promise<OpenProject>>();
 const proposals = new Map<string, Proposal>();
 const key = (userId: string, projectId: string) => `${userId}:${projectId}`;
@@ -151,6 +165,7 @@ export const workspace = {
   },
 
   close(userId: string, projectId: string) {
+    forgetOpen(userId, projectId);
     const o = open.get(key(userId, projectId));
     if (!o) return;
     if (o.session.dirty && o.canEdit) void workspace.save(o).catch(() => {});

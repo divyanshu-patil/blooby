@@ -57,6 +57,11 @@ export const RELEASES: Release[] = [
         body: 'Choose Look only, Ask me first or Full control when you connect. In Ask me first, every change waits in the MCP tab for you to approve. Disconnect an app or revoke a token at any time; every AI edit is undoable.',
       },
       {
+        id: 'mcp-stays-open', surface: 'editor',
+        title: 'The project you open stays open',
+        body: 'An AI app now keeps working in the project you opened, even if its connection drops between messages — and it can look up what Blooby can do before opening anything.',
+      },
+      {
         id: 'mcp-dashboard', surface: 'dashboard',
         title: 'AI apps, from the dashboard',
         body: 'The AI apps page in the sidebar connects apps and manages their access without opening a project.',
