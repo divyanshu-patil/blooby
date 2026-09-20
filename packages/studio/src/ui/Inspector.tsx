@@ -319,25 +319,26 @@ function TransformSection({ node, isRoot }: { node: RigNode; isRoot: boolean }) 
  * between two. Shuffle is how you pick one.
  */
 function BlobRows({ node }: { node: RigNode }) {
-  const updateNode = useEditor((s) => s.updateNode);
+  const setValue = useEditor((s) => s.setValue);
   const amount = node.blob?.amount ?? 0;
-  const seed = node.blob?.seed ?? 1;
   return (
     <Collapsible title="Shape" storageKey="insp-blob" defaultOpen={amount > 0}>
       <PropRow nodeId={node.id} property="blob.amount" />
+      <PropRow nodeId={node.id} property="blob.seed" />
       <div className="row" style={{ gap: 4 }}>
-        <span className="prop-label" style={{ flex: 1 }}>Seed</span>
-        <span className="txt">{seed}</span>
+        <span className="spacer" />
+        {/* setValue, not updateNode: once Variation is animated a shuffle has to land on
+            the track like any other edit, or it would write a base pose nothing reads */}
         <button className="btn ghost sm" disabled={amount <= 0}
-          title={amount > 0 ? 'Another irregular shape, same amount of it' : 'Turn Blobbiness up first'}
-          onClick={() => updateNode(node.id, (n) => {
-            n.blob = { amount: n.blob?.amount ?? 0, seed: Math.floor(Math.random() * 9999) + 1 };
-          }, 'Shuffle body shape')}>Shuffle</button>
+          title={amount > 0 ? 'Jump somewhere else on the dial — a different shape, same amount of it' : 'Turn Blobbiness up first'}
+          onClick={() => setValue(node.id, 'blob.seed', Math.round(Math.random() * 10000) / 100, 'Shuffle body shape')}>
+          Shuffle
+        </button>
       </div>
       <p className="hint">
-        Pulls the body off round. Keyframe Blobbiness and it morphs; the seed stays put, so it
-        morphs between two shapes rather than through all of them. At 0 the body is a plain
-        ellipse and adds nothing to an export.
+        Blobbiness is how far off round; Variation is which shape. Both keyframe — hold
+        Blobbiness and animate Variation and the body morphs from one shape into another.
+        At Blobbiness 0 the body is a plain ellipse and adds nothing to an export.
       </p>
     </Collapsible>
   );

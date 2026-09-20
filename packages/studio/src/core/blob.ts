@@ -5,8 +5,10 @@ import type { Vec2 } from './types';
  *
  * A mascot drawn as a perfect circle reads as a UI element. A little asymmetry — one side
  * fuller than the other, a flat where a highlight wants to sit — reads as a character. So
- * the body carries one dial, `blob.amount`, from 0 (the circle it always was) to 1 (clearly
- * hand-drawn), and a `seed` that picks WHICH irregular shape it is.
+ * the body carries two dials. `blob.amount` is how far off round, 0 (the circle it always
+ * was) to 1 (clearly hand-drawn). `blob.seed` is WHICH irregular shape, as a continuous
+ * position rather than an index — so holding the amount and keyframing the seed morphs the
+ * body from one shape into another. Both animate.
  *
  * Three things about the construction are load-bearing, and all three are about export:
  *
@@ -21,7 +23,11 @@ import type { Vec2 } from './types';
  *    none appear or vanish. A count that grew with the dial would make the outline jump
  *    on the frame it changed, in the editor and in the morph frames of an exported strip.
  *
- * 3. **At `amount` 0 the radius is exactly the circle's.** So dialling up from nothing is
+ * 3. **Both dials are continuous.** Neither one steps, so neither can pop on the frame it
+ *    crosses a boundary — the whole reason the seed is a smooth function rather than the
+ *    integer hash it started as.
+ *
+ * 4. **At `amount` 0 the radius is exactly the circle's.** So dialling up from nothing is
  *    continuous, and the body only stops being a plain ellipse once the dial is off zero
  *    (see scene.ts) — an untouched project exports byte for byte as it did before.
  *
@@ -38,13 +44,39 @@ const LOBES = 12;
  *  Past about a third it stops reading as a body and starts reading as a puddle. */
 const MAX_DEVIATION = 0.28;
 
-/** The harmonics a seed picks out: which lobes, how strong, and where they sit. */
+const TAU = Math.PI * 2;
+
+/** Which lobes the shape is made of. Three is enough to read as irregular, few enough to stay smooth. */
+const LOBE_K = [2, 3, 4];
+
+/**
+ * How fast each lobe turns, and swells, as `seed` advances.
+ *
+ * All six are irrational and share no ratio, so the three lobes never come back into step
+ * — walking the dial keeps finding new shapes instead of cycling through a handful. The
+ * rates are around a half turn per unit, which makes `seed` and `seed + 1` clearly
+ * different bodies while `seed + 0.05` is a small nudge.
+ */
+const PHASE_RATE = [0.7548776662, 0.5698402910, 0.3247179572];
+const SWELL_RATE = [0.3722813233, 0.2360679775, 0.1149420449];
+
+/**
+ * The harmonics at a point on the dial.
+ *
+ * `seed` is a CONTINUOUS position, not an index. It began as a hash of a truncated
+ * integer, which made the shape a step function: sliding 3 → 4 did nothing for nine
+ * tenths and then snapped 51.6px on a 720px body at the boundary. Every lobe's phase and
+ * weight is now a smooth function of the dial, so it can be keyframed like any other
+ * property and the body travels between shapes instead of cutting between them.
+ */
 function harmonics(seed: number): { k: number; w: number; phase: number }[] {
-  // a small integer hash — same seed, same body, on every machine and every reload
-  let s = Math.abs(Math.trunc(seed)) * 2654435761 % 2147483647 || 1;
-  const next = () => (s = (s * 48271) % 2147483647) / 2147483647;
-  const parts = [2, 3, 4].map((k) => ({ k, w: 0.4 + next() * 0.6, phase: next() * Math.PI * 2 }));
-  // normalised so `amount` means the same amount of wobble whatever the seed drew
+  const parts = LOBE_K.map((k, i) => ({
+    k,
+    // 0.4..1.0: a lobe softens but never disappears, so the body keeps its character
+    w: 0.7 + 0.3 * Math.sin(seed * SWELL_RATE[i] * TAU + i * 1.7),
+    phase: seed * PHASE_RATE[i] * TAU + i * 2.1,
+  }));
+  // normalised so `amount` means the same amount of wobble wherever the dial is
   const total = parts.reduce((n, p) => n + p.w, 0);
   return parts.map((p) => ({ ...p, w: p.w / total }));
 }

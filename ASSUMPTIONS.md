@@ -229,7 +229,19 @@ shrink is written stored, decided per entry. CRCs verified against the standard 
 vector; `unzip -t` reads the output and reports the archive comment, `Made with Blooby`.
 
 **The body's blobbiness is a pure function, on a fixed ring.** `RigNode.blob.amount`
-pulls the body off round (`core/blob.ts`), and three properties of the construction are
+pulls the body off round and `blob.seed` says which irregular shape (`core/blob.ts`).
+Both animate. The seed is a CONTINUOUS position, not an index: it started as a hash of a
+truncated integer, which made the shape a step function — sliding 3 → 4 did nothing for
+nine tenths and then snapped 51.6px on a 720px body, so keyframing it would have popped
+once per whole number. Each lobe's phase and weight is now a smooth function of the dial,
+measured at ~20px per tenth with no step at the boundaries, and the six rates are
+irrational and share no ratio so walking the dial keeps finding new shapes instead of
+cycling. Weights stay normalised, so Blobbiness means the same amount of wobble wherever
+the Variation dial sits (measured spread 0.04 across the range).
+
+Cost, on a bare 2s strip: a static blob is 1.3KB of `.lottie` against the round body's
+1.1KB; animating Blobbiness is 3.2KB (12 keyframes), animating Variation 8.3KB (29). Three
+properties of the construction are
 there for the exporter, not the canvas. It takes no clock and no noise field, so a body
 nobody animated yields the same `d` on every frame and `bezierShapes` writes ONE static
 path — a static blob measured 1.1KB against the plain body's 1.4KB. The vertex count is

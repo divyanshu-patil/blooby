@@ -76,7 +76,7 @@ export const RELEASES: Release[] = [
       {
         id: 'blob-body', surface: 'editor',
         title: 'Give your mascot a less perfect body',
-        body: 'A new Shape section on the body has a Blobbiness dial: turn it up and the body stops being a perfect circle and starts looking drawn. Shuffle picks a different irregular shape at the same amount. Keyframe Blobbiness like any other property and the body morphs between shapes — and it exports to Lottie. Left at 0 the body is exactly the circle it always was.',
+        body: 'A new Shape section on the body has two dials. Blobbiness turns the body from a perfect circle into something that looks drawn. Variation picks which irregular shape it is. Both keyframe like any other property: animate Blobbiness and the body swells between round and blobby, or hold it and animate Variation and the body morphs from one shape into another. Shuffle jumps somewhere else on the dial. It all exports to Lottie, and left at 0 the body is exactly the circle it always was.',
         tour: [step('tab-node', 'Shape', 'Select the body, then open Shape to find Blobbiness and Shuffle.')],
       },
       {

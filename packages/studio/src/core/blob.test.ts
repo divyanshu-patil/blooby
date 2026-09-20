@@ -47,6 +47,37 @@ const worstGap = (a: { x: number; y: number }[], b: { x: number; y: number }[]) 
   it('and at every seed', check(new Set([1, 2, 99, 1234].map((s) => segs(blobPath(0.5, s)))).size === 1));
 }
 
+/**
+ * The seed is a POSITION, not an index — the whole point of it being animatable.
+ *
+ * It used to hash a truncated integer, so sliding 3 to 4 did nothing for nine tenths and
+ * then snapped 51.6px on a 720px body. Keyframing that would have popped once per whole
+ * number. Every tenth must now move the outline by a comparable amount.
+ */
+{
+  const ring = (a: number, s: number) => pts(blobPath(a, s), 64);
+  const steps = Array.from({ length: 10 }, (_, k) => worstGap(ring(0.6, 3 + (k + 1) / 10), ring(0.6, 3 + k / 10)));
+  it('no tenth of the dial is a dead step', check(Math.min(...steps) > 2, steps.map((v) => v.toFixed(1)).join()));
+  it('and none of them is a snap', check(Math.max(...steps) < 40, steps.map((v) => v.toFixed(1)).join()));
+  it('the boundary between whole numbers is not special', check(
+    Math.max(...steps) / Math.min(...steps) < 3, `${Math.min(...steps).toFixed(1)}..${Math.max(...steps).toFixed(1)}px`));
+
+  // a keyframed morph at 30fps has to creep, not cut
+  let worst = 0;
+  for (let f = 1; f <= 60; f++) worst = Math.max(worst, worstGap(ring(0.6, 3 + (f / 60) * 2), ring(0.6, 3 + ((f - 1) / 60) * 2)));
+  it('a 2s Variation morph never jumps', check(worst < 15, `${worst.toFixed(2)}px in one frame`));
+
+  // and the dial has to keep finding new shapes rather than cycling
+  it('far apart on the dial is a different body', check(worstGap(ring(0.6, 1), ring(0.6, 2)) > 30));
+  const spreadAt = (sd: number) => {
+    const r = ring(0.6, sd).map((q) => Math.hypot(q.x, q.y));
+    return (Math.max(...r) - Math.min(...r)) / (SIZE / 2);
+  };
+  const spreads = [0, 1, 3, 12.5, 40, 97].map(spreadAt);
+  it('but Blobbiness still means the same thing everywhere on it', check(
+    Math.max(...spreads) - Math.min(...spreads) < 0.1, spreads.map((v) => v.toFixed(3)).join()));
+}
+
 /** It is a blob, not a star: enough deviation to read, not so much it stops being a body. */
 {
   const radii = (a: number) => pts(blobPath(a, 5)).map((p) => Math.hypot(p.x, p.y));
@@ -61,6 +92,7 @@ const worstGap = (a: { x: number; y: number }[], b: { x: number; y: number }[]) 
 {
   const node = defaultProject().rig.nodes.body;
   it('blob.amount is animatable', check(NUMERIC_PROPS.includes('blob.amount')));
+  it('and so is blob.seed, which is what morphs between shapes', check(NUMERIC_PROPS.includes('blob.seed')));
   setProp(node, 'blob.amount', 0.7);
   it('and round-trips through the props table', check(getProp(node, 'blob.amount') === 0.7));
   setProp(node, 'blob.amount', 5);
