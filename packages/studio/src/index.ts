@@ -2,6 +2,7 @@
 export { Editor } from './ui/Editor';
 export { useEditor } from './core/store';
 export { defaultProject, builtinPresets, builtinExpressions, COMP, compOf, presetPreviewProject } from './core/defaults';
+export { packProject, packPresets, unpackPresets } from './core/presetRefs';
 export { installPublicApi } from './core/publicApi';
 export { fetchCatalog, hasBackend, supabase } from './core/catalog';
 export { sceneAt } from './core/scene';

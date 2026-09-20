@@ -24,6 +24,7 @@ import { getActiveId, putEntry, setActiveId, uidGallery, type GalleryEntry } fro
 import { fetchCatalog } from './catalog';
 import { defaultValues, directTransition, machineOf, nextTransition, slug, type DirectOptions } from './stateMachine';
 import { migrateProject, SCHEMA_VERSION } from './migrate';
+import { packProject } from './presetRefs';
 import type { Block, CurveType, EasingCurve, Emitter, Expression, InputValue, KeyValue, Modifier, Preset, Project, Rig, RigNode, SmCondition, SmInput, SmTransition, TextStyle, Timeline, Track, Transition, Vec2 } from './types';
 import { activeTimeline, CAMERA_ID, rigOf, switchTimeline } from './types';
 
@@ -343,11 +344,13 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 function autosave(p: Project) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch { /* quota — the export button still works */ }
+    // built-in presets go down as references, which is most of the bytes (core/presetRefs.ts)
+    const packed = packProject(p);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(packed)); } catch { /* quota — the export button still works */ }
     // mirror into whichever gallery entry is currently open, so "New clip" always has
     // somewhere safe to come back to without a separate explicit save step
     const id = getActiveId();
-    if (id) putEntry({ id, name: p.name, updatedAt: Date.now(), project: p }).catch(() => { /* IndexedDB unavailable — local/session work still stands */ });
+    if (id) putEntry({ id, name: p.name, updatedAt: Date.now(), project: packed }).catch(() => { /* IndexedDB unavailable — local/session work still stands */ });
   }, 400);
 }
 

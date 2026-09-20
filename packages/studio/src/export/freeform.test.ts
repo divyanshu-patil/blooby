@@ -181,7 +181,7 @@ it('and is not faked as a rounded rectangle', check(!byName('Pic')));
     inputs: [{ name: 'state', type: 'String', value: '' }],
     transitions: [{ id: 't', from: two.timelines[0].id, to: second.id, logic: 'AND', durationMs: 300, conditions: [{ input: 'state', operator: 'Equal', value: 'Wave' }] }],
   };
-  const files = await unzip(new Uint8Array(await buildDotLottie(two, { background: null }).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
+  const files = await unzip(new Uint8Array(await (await buildDotLottie(two, { background: null })).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
   const anim = JSON.parse(new TextDecoder().decode(files.get('a/mascot.json')!));
   const machine = JSON.parse(new TextDecoder().decode(files.get('s/mascot.json')!));
   it('the .lottie composition is the project\'s size', check(anim.w === 1080 && anim.h === 720));

@@ -1,6 +1,6 @@
 import { buildDotLottie } from './dotlottie';
 import { dotLottieLayout } from './strip';
-import { zipStore } from './zip';
+import { writeZip } from './zip';
 import { concreteTransitions, easingToBezier, initialState, machineOf, RUNTIME_SETTER } from '../core/stateMachine';
 import { easingLabel } from '../core/easing';
 import type { LottieOptions } from './lottie';
@@ -340,19 +340,21 @@ mascot.current?.fire(${JSON.stringify(m.inputs.find((i) => i.type === 'Event')!.
  * and a README. Downloading a `.lottie` alone left the "now wire it up" half of §7–§11
  * as an exercise, which is where a state machine usually dies.
  */
-export function buildRuntimePack(project: Project, opts: Omit<LottieOptions, 'from' | 'to' | 'name'>) {
+export async function buildRuntimePack(project: Project, opts: Omit<LottieOptions, 'from' | 'to' | 'name'>) {
   const enc = new TextEncoder();
   const bytes = (s: string) => enc.encode(s) as Uint8Array<ArrayBuffer>;
-  const { blob, machine } = buildDotLottie(project, opts);
+  const { blob, machine } = await buildDotLottie(project, opts);
   const base = fileBase(project);
+  const buf = await blob.arrayBuffer();
 
-  return blob.arrayBuffer().then((buf) => ({
+  return {
     machine,
-    blob: zipStore([
+    blob: await writeZip([
+      // already deflated inside the container; deflating it again only costs time
       { name: `${base}.lottie`, data: new Uint8Array(buf) as Uint8Array<ArrayBuffer> },
       { name: 'blooby.machine.json', data: bytes(JSON.stringify(machineConfig(project), null, 2)) },
       { name: 'Mascot.tsx', data: bytes(mascotSource(project)) },
       { name: 'README.md', data: bytes(readme(project)) },
     ]),
-  }));
+  };
 }

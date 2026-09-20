@@ -55,7 +55,7 @@ import { unzip } from '../export/zip';
   })()));
 
   // what ships: the dotLottie parser's own rules
-  const files = await unzip(new Uint8Array(await buildDotLottie(P(), { background: null }).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
+  const files = await unzip(new Uint8Array(await (await buildDotLottie(P(), { background: null })).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
   const machine = JSON.parse(new TextDecoder().decode(files.get(`s/${m().id}.json`)!));
   const excited = machine.states.find((s: { name: string }) => s.name === 'Excited');
   const edge = excited.transitions.find((x: { toState: string }) => x.toState === 'Angry');
@@ -105,7 +105,7 @@ import { unzip } from '../export/zip';
 
   // what ships: every state carries its own edges, as dotLottie has no "any"
   const machineJson = async () => {
-    const files = await unzip(new Uint8Array(await buildDotLottie(P(), { background: null }).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
+    const files = await unzip(new Uint8Array(await (await buildDotLottie(P(), { background: null })).blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
     return JSON.parse(new TextDecoder().decode(files.get(`s/${machineOf(P()).id}.json`)!)) as { states: { name: string; transitions: { toState: string }[] }[] };
   };
   const shipped = await machineJson();

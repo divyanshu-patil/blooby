@@ -75,7 +75,7 @@ export function ExportBar() {
 
   const dotLottie = async () => {
     const fonts = await withFonts(project);
-    const { blob, animations, machine } = buildDotLottie(project, { background });
+    const { blob, animations, machine } = await buildDotLottie(project, { background });
     download(blob, `${base}.lottie`);
     const edges = machine.json.states.reduce((n, st) => n + st.transitions.length, 0);
     setNote([`${animations.length} animation${animations.length === 1 ? '' : 's'} · ${machine.json.inputs.length} inputs · ${edges} transitions · state machine "${machine.id}"`, fonts].filter(Boolean).join(' · '));

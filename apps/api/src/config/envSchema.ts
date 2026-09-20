@@ -69,7 +69,7 @@ export const envSchema = z.object({
       message:
         'points at the SESSION pooler (:5432), which allows only 15 client connections and '
         + 'will fail with EMAXCONNSESSION. Use the transaction pooler: change the port to 6543 '
-        + 'and append ?pgbouncer=true&connection_limit=1',
+        + 'and append ?pgbouncer=true&connection_limit=10',
     })
     .refine((u) => !/:6543\b/.test(u) || /[?&]pgbouncer=true\b/.test(u), {
       message: 'uses the transaction pooler (:6543) but is missing ?pgbouncer=true — prepared '
@@ -77,7 +77,7 @@ export const envSchema = z.object({
     })
     .refine((u) => !/:6543\b/.test(u) || /[?&]connection_limit=\d+\b/.test(u), {
       message: 'uses the transaction pooler (:6543) but sets no connection_limit — Prisma will '
-        + 'open (cpus * 2 + 1) connections per process. Append &connection_limit=1',
+        + 'open (cpus * 2 + 1) connections per process. Append &connection_limit=10',
     }),
 
   AWS_REGION: z.string().min(1),

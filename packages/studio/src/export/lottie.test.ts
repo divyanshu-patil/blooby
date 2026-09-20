@@ -218,3 +218,49 @@ import { activeTimeline } from '../core/types';
   it('and one that comes back stays invisible until the frame it is back', check(
     key(19)?.h === 1 && key(19)?.s[0] === 0 && key(20)?.s[0] === 100, JSON.stringify(o)));
 }
+
+/**
+ * Draw order is zIndex, whatever any single frame shows.
+ *
+ * The order used to be read off the MIDDLE frame of the exported range, so every layer
+ * missing from that one frame collapsed onto a shared sentinel that sorted last — and in
+ * Lottie last is on top. A hand authored BEHIND the body, on screen only for a wave near
+ * the start of a strip, exported in front of it. That is the one ordering the document
+ * has (core/layers.ts), so it cannot depend on where the playhead happens to be.
+ */
+{
+  const fps = 30;
+  const at = (over: Partial<SceneItem>) => ({
+    id: 'x', name: 'x', shape: 'ellipse', cx: 360, cy: 360, w: 80, h: 80, r: 40, rotation: 0,
+    color: { r: 0, g: 0, b: 0, a: 1 }, alpha: 1, depth: 0, zIndex: 0, ...over,
+  }) as SceneItem;
+  const body = at({ id: 'body', name: 'Body', zIndex: 0 });
+  const hand = at({ id: 'hand', name: 'Hand', zIndex: -1, cx: 240 });
+  const hat = at({ id: 'hat', name: 'Hat', zIndex: 5, cy: 240 });
+  // the hand waves early and the hat lands late; neither is on screen in the middle
+  const sampleAt = (ms: number) => {
+    const f = Math.round((ms / 1000) * fps);
+    return f < 10 ? [hand, body] : f < 20 ? [body] : [body, hat];
+  };
+  const j = bakeLottie({ ...defaultProject(), fps }, { background: null, name: 'order', from: 0, to: 1000, sampleAt }).json as Record<string, any>;
+  // ind 1 is drawn on top, so reversing the list reads bottom-to-top
+  const painter = [...j.layers].reverse().map((l: any) => l.nm);
+  it('a layer absent from the middle frame keeps its place in the order', check(
+    painter.join() === 'Hand,Body,Hat', painter.join()));
+}
+
+/**
+ * Two layers on the same zIndex are still separated by depth — the two eyes on a turning
+ * head. Lottie cannot restack over time, so one frame decides it; the point of the test is
+ * that adding the zIndex key above did not flatten this.
+ */
+{
+  const eye = (id: string, depth: number) => ({
+    id, name: id, shape: 'pill', cx: 360, cy: 360, w: 40, h: 40, r: 20, rotation: 0,
+    color: { r: 0, g: 0, b: 0, a: 1 }, alpha: 1, depth, zIndex: 3,
+  }) as SceneItem;
+  const sampleAt = () => [eye('far', -1), eye('near', 1)];
+  const j = bakeLottie(defaultProject(), { background: null, name: 'depth', from: 0, to: 300, sampleAt }).json as Record<string, any>;
+  const painter = [...j.layers].reverse().map((l: any) => l.nm);
+  it('depth still orders layers that share a zIndex', check(painter.join() === 'far,near', painter.join()));
+}

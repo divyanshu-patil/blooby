@@ -7,6 +7,7 @@ import { creativePresets } from './creativePresets';
 import { mascotKitPresets } from './mascotKit';
 import { slug } from './stateMachine';
 import { ensureFaces } from './mascot';
+import { unpackPresets } from './presetRefs';
 import type { Block, Modifier, Project, Track } from './types';
 
 /**
@@ -30,7 +31,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 14;
 
 interface Migration {
   /** the version this step produces */
@@ -291,6 +292,35 @@ const MIGRATIONS: Migration[] = [
       p.presets.splice(last + 1 || p.presets.length, 0, ...creativePresets().filter((x) => !have.has(x.id)));
     },
   },
+  {
+    to: 13,
+    label: 'built-in presets are stored by reference',
+    /**
+     * A version marker, not a rewrite.
+     *
+     * From here a saved document may hold `{ id, builtin: true }` where it used to hold a
+     * whole built-in preset (core/presetRefs.ts). `unpackPresets` in `migrateProject`
+     * expands those on EVERY load, at any version, because a document written this way
+     * arrives already at 13 and would skip a step. What the bump buys is the other
+     * direction: an older build opening one of these sees a version from the future, warns
+     * and leaves it alone, instead of quietly showing a picker full of empty presets.
+     *
+     * Nothing to do on the way up — an older document carries whole presets, which is
+     * still exactly what this build reads.
+     */
+    run() {},
+  },
+  {
+    to: 14,
+    label: 'the body can be a blob',
+    /**
+     * `RigNode.blob` arrived (core/blob.ts). Another version marker: the field is optional
+     * and absent means the perfect circle every older project already draws, so there is
+     * nothing to convert on the way up. The bump is so an older build opening a blobby
+     * project warns instead of silently rounding the body off and saving that back.
+     */
+    run() {},
+  },
 ];
 
 export interface MigrationResult {
@@ -313,6 +343,15 @@ export interface MigrationResult {
 export function migrateProject(raw: Project): MigrationResult {
   const project = raw;
   const from = versionOf(project);
+
+  /**
+   * Before anything else, and whatever the version: a document saved from schema 13 on
+   * stores an unmodified built-in preset as `{ id, builtin: true }`, and every step below
+   * — and the whole app after it — expects whole presets. This is deserialisation, not a
+   * migration step: a document written this way arrives AT 13, so a step numbered 13 would
+   * be skipped. It is a no-op on anything that has no references in it.
+   */
+  if (Array.isArray(project.presets)) project.presets = unpackPresets(project.presets);
 
   // A file from a newer build: its extra fields are unknown to us, and running old steps
   // over them could only damage it. Opening read-only-ish beats refusing outright — the

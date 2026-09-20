@@ -1,73 +1,44 @@
 import { it } from 'vitest';
 import { check } from '../core/testkit';
-import { crc32, unzip, zipStore } from './zip';
+import { crc32, unzip, writeZip, ZIP_COMMENT } from './zip';
 
 // --- zip: the CRC everything downstream depends on -----------------------------
 it('crc32 of the check vector', check(crc32(new TextEncoder().encode('123456789') as Uint8Array<ArrayBuffer>) === 0xcbf43926));
 
-// --- unzip: the import path, including the deflate a real .lottie uses ---------
-{
-  const enc = new TextEncoder();
-  const round = await unzip(new Uint8Array(await zipStore([
-    { name: 'manifest.json', data: enc.encode('{"version":"2"}') as Uint8Array<ArrayBuffer> },
-    { name: 'a/idle.json', data: enc.encode('{"fr":60}') as Uint8Array<ArrayBuffer> },
-  ]).arrayBuffer()) as Uint8Array<ArrayBuffer>);
-  it('reads back both stored entries', check(round.size === 2, [...round.keys()].join(',')));
-  it('with their bytes intact', check(new TextDecoder().decode(round.get('a/idle.json')!) === '{"fr":60}'));
+const enc = new TextEncoder();
+const bytes = (s: string) => enc.encode(s) as Uint8Array<ArrayBuffer>;
+const raw = async (b: Blob) => new Uint8Array(await b.arrayBuffer()) as Uint8Array<ArrayBuffer>;
 
-  // every .lottie not written by us is deflated, so that branch has to be exercised
-  const payload = enc.encode('{"deflated":true,"pad":"' + 'x'.repeat(400) + '"}') as Uint8Array<ArrayBuffer>;
-  const deflated = new Uint8Array(await new Response(
-    new Blob([payload]).stream().pipeThrough(new CompressionStream('deflate-raw')),
-  ).arrayBuffer()) as Uint8Array<ArrayBuffer>;
-  const zip = deflatedZip('s/machine.json', payload, deflated);
-  const out = await unzip(zip);
-  it('a deflated entry inflates', check(
-    new TextDecoder().decode(out.get('s/machine.json')!) === new TextDecoder().decode(payload)));
-  it('and deflate actually shrank it, so the store path was not silently taken',
-    check(deflated.length < payload.length));
+// --- the round trip, over a payload big enough for deflate to bite -------------
+{
+  // a real animation is repeated numeric arrays, which is the shape deflate feeds on;
+  // a two-line manifest is not, and is expected to come back out stored
+  const anim = `{"layers":[${Array.from({ length: 400 }, (_, i) => `{"t":${i},"s":[0,0]}`).join(',')}]}`;
+  const zip = await writeZip([
+    { name: 'manifest.json', data: bytes('{"version":"2"}') },
+    { name: 'a/idle.json', data: bytes(anim) },
+  ]);
+  const out = await unzip(await raw(zip));
+  it('reads back both entries', check(out.size === 2, [...out.keys()].join(',')));
+  it('with their bytes intact', check(new TextDecoder().decode(out.get('a/idle.json')!) === anim));
+  it('and the manifest too', check(new TextDecoder().decode(out.get('manifest.json')!) === '{"version":"2"}'));
+
+  /**
+   * The whole point of the writer. A stored `.lottie` was running 800KB–3MB, because
+   * nothing in the pipeline compressed and a baked composition is the most compressible
+   * thing there is. If this ever goes back to storing, the exports quietly get 6× bigger
+   * and nothing else complains.
+   */
+  it('the animation is deflated, not stored', check(
+    new DataView(await zip.arrayBuffer()).getUint16(8, true) === 0 // manifest.json: too small, stored
+    && (await raw(zip)).length < anim.length / 2, `${zip.size} vs ${anim.length}`));
 }
 
-/** A one-entry zip written with method 8 — the shape `zipStore` deliberately never emits. */
-function deflatedZip(name: string, raw: Uint8Array<ArrayBuffer>, deflated: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-  const n = new TextEncoder().encode(name) as Uint8Array<ArrayBuffer>;
-  const crc = crc32(raw);
-  const local = new Uint8Array(30 + n.length);
-  const lv = new DataView(local.buffer);
-  lv.setUint32(0, 0x04034b50, true);
-  lv.setUint16(4, 20, true);
-  lv.setUint16(8, 8, true); // deflate
-  lv.setUint32(14, crc, true);
-  lv.setUint32(18, deflated.length, true);
-  lv.setUint32(22, raw.length, true);
-  lv.setUint16(26, n.length, true);
-  local.set(n, 30);
-
-  const cd = new Uint8Array(46 + n.length);
-  const cv = new DataView(cd.buffer);
-  cv.setUint32(0, 0x02014b50, true);
-  cv.setUint16(4, 20, true);
-  cv.setUint16(6, 20, true);
-  cv.setUint16(10, 8, true);
-  cv.setUint32(16, crc, true);
-  cv.setUint32(20, deflated.length, true);
-  cv.setUint32(24, raw.length, true);
-  cv.setUint16(28, n.length, true);
-  cv.setUint32(42, 0, true);
-  cd.set(n, 46);
-
-  const end = new Uint8Array(22);
-  const ev = new DataView(end.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(8, 1, true);
-  ev.setUint16(10, 1, true);
-  ev.setUint32(12, cd.length, true);
-  ev.setUint32(16, local.length + deflated.length, true);
-
-  const out = new Uint8Array(local.length + deflated.length + cd.length + end.length);
-  out.set(local, 0);
-  out.set(deflated, local.length);
-  out.set(cd, local.length + deflated.length);
-  out.set(end, local.length + deflated.length + cd.length);
-  return out as Uint8Array<ArrayBuffer>;
+// --- the credit every zip tool shows -------------------------------------------
+{
+  const zip = await raw(await writeZip([{ name: 'a.json', data: bytes('{}') }]));
+  const tail = new TextDecoder().decode(zip.subarray(zip.length - ZIP_COMMENT.length));
+  it('the archive comment says who made it', check(tail === ZIP_COMMENT, tail));
+  // the reader scans backwards past exactly this comment to find the directory
+  it('and a commented archive still reads', check((await unzip(zip)).has('a.json')));
 }

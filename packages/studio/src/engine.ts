@@ -18,6 +18,7 @@ export { TOOL_DOCS } from './copilot/tools';
 export { catalogFromRows } from './core/catalog';
 export { compOf } from './core/comp';
 export { migrateProject, SCHEMA_VERSION } from './core/migrate';
+export { packProject, unpackPresets } from './core/presetRefs';
 export { defaultProject, builtinPresets } from './core/defaults';
 export { activeTimeline, type Project, type Preset, type Expression } from './core/types';
 /** core/types.ts as text — the whole data model with the reasoning in its comments */

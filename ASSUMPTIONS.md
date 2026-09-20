@@ -218,10 +218,72 @@ paths with their own fills and strokes. The one exception is an SVG with no read
 geometry at all, which is named in `skipped` — never faked as a rounded rectangle — and
 still renders in GIF, MP4 and PNG from its preserved markup.
 
-**`.lottie` is written by a hand-rolled store-only ZIP** (`export/zip.ts`, ~45 lines).
-The payload is already-minified JSON going straight into a player, so deflate would save
-little and cost a dependency. CRCs verified against the standard check vector, and the
-output opens with `unzip`.
+**`.lottie` is written by a hand-rolled ZIP** (`export/zip.ts`, ~60 lines), deflating each
+entry through the platform's own `CompressionStream('deflate-raw')` — still no dependency,
+because zip's method 8 *is* raw deflate. It stored entries uncompressed until 2026-09-20,
+on the assumption that minified JSON was already small; **that was wrong and cost about
+6× on every export.** A baked composition is mostly repeated numeric arrays, which is the
+most compressible thing there is: measured over four projects, entries deflate to 8–16% of
+their size (a three-state cinematic mascot went 3.1MB → 299KB). An entry deflate cannot
+shrink is written stored, decided per entry. CRCs verified against the standard check
+vector; `unzip -t` reads the output and reports the archive comment, `Made with Blooby`.
+
+**The body's blobbiness is a pure function, on a fixed ring.** `RigNode.blob.amount`
+pulls the body off round and `blob.seed` says which irregular shape (`core/blob.ts`).
+Both animate. The seed is a CONTINUOUS position, not an index: it started as a hash of a
+truncated integer, which made the shape a step function — sliding 3 → 4 did nothing for
+nine tenths and then snapped 51.6px on a 720px body, so keyframing it would have popped
+once per whole number. Each lobe's phase and weight is now a smooth function of the dial,
+measured at ~20px per tenth with no step at the boundaries, and the six rates are
+irrational and share no ratio so walking the dial keeps finding new shapes instead of
+cycling. Weights stay normalised, so Blobbiness means the same amount of wobble wherever
+the Variation dial sits (measured spread 0.04 across the range).
+
+Cost, on a bare 2s strip: a static blob is 1.3KB of `.lottie` against the round body's
+1.1KB; animating Blobbiness is 3.2KB (12 keyframes), animating Variation 8.3KB (29). Three
+properties of the construction are
+there for the exporter, not the canvas. It takes no clock and no noise field, so a body
+nobody animated yields the same `d` on every frame and `bezierShapes` writes ONE static
+path — a static blob measured 1.1KB against the plain body's 1.4KB. The vertex count is
+fixed at 12 whatever the dial says, so keyframing it interpolates a ring against the same
+ring: measured over a 2s morph, no outline point moves more than ~2px in a frame. And at
+amount 0 the radius is exactly the circle's, with the body staying a real ellipse until
+the dial leaves zero, so an untouched project exports as it did before. `seed` is
+deliberately NOT animatable — interpolating it would slide the body through every shape
+between two, rather than between them.
+
+**A project stores the built-in preset library by reference, not by value.**
+`defaultProject()` puts all ~108 built-in presets into `Project.presets`, and until
+2026-09-20 every save wrote them out: measured over 48 real projects they were **92.8% of
+all stored bytes** (29.6MB of 31.8MB, ~1.19MB of a 1.26MB document), shipped browser → API
+→ S3 on every autosave to move ~49KB of actual animation. `core/presetRefs.ts` writes an
+unmodified built-in as `{ id, builtin: true }` and `migrateProject` expands it on load —
+83.3% smaller on that same real data, 679KB → 113KB per project.
+
+The comparison ignores `id` fields matching `uid()`'s shape, because `builtinPresets()`
+mints fresh keyframe and track ids on every call and two calls are never equal as JSON. It
+is deliberately fail-safe: anything not certainly identical is written out whole, so the
+206 presets across those projects that no longer match current code — older files holding
+the library as it was the day they were made — are preserved exactly. A round trip renews
+a built-in's internal keyframe ids, which is safe because `appendPreset` mints its own for
+everything it places and a Block only ever references a preset by `presetId`.
+
+**Export size is dominated by baked vertices, and they are near the floor.** The other
+things that look wasteful are not, measured on a 141-layer strip: the all-zero `i`/`o`
+tangent arrays are 700KB of the raw JSON but only 51KB deflated, and the per-keyframe
+linear-easing pairs only 14KB — both are pure repetition, which deflate already eats.
+Cutting either would save little and break every player. What is left is vertex
+coordinates, which do not compress.
+
+**A limb outline is ~4.7px from its true curve, and more points will not fix it.** The
+export resamples an outline to a ring of evenly spaced points with zero tangents.
+Measured against a 1024-point reference on 100 real limb outlines, 72 points sit 4.7px
+off at worst and 96 points still sit 3.7px off — the miss is a sharp feature that even
+arc-length spacing cannot land on, not a shortage of points, and giving the ring
+Catmull-Rom tangents does not help either (48 tangented points measured *worse* than 72
+plain ones). So the vertex count stays, and this 4.7px is the noise floor that justifies
+`EPS.v` (0.5px) and `GEOM` (0.1px) in `export/lottie.ts`: together they cost a measured
+0.51px of worst-case drawn-point shift, on limbs only, for a fifth of the file.
 
 **dotLottie: rewritten against v2.0 and verified against a real player** (this was
 reported broken, and it was — the v1 shape assumed above was wrong on two structural
@@ -317,7 +379,7 @@ A document from a *newer* build is detected and left alone rather than run throu
 steps, with a console warning; the parts this build understands still open.
 
 **`unzip` uses `DecompressionStream('deflate-raw')`**, so reading a deflated `.lottie`
-(everything not written by us) still needs no zip dependency. Entries are read from the
+(now including our own) still needs no zip dependency. Entries are read from the
 central directory rather than by scanning local headers, so a streamed archive with data
 descriptors reads correctly.
 

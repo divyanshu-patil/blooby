@@ -4,6 +4,7 @@ import { lerpColor } from './color';
 import { lerpPath, mapPath, morphPath, pathBounds, pathSampler, primitivePath } from './path';
 import { shapeResolver } from './emitters';
 import { noise1d } from './noise';
+import { blobOf } from './blob';
 import { bodyTurnScale, FLAT, projectToScreen, silhouetteScale, type Projected } from './curvature';
 import { hoseInputOf, limbPoints as limbPointKeys, rubberHose, type HoseInput } from './limb';
 import { CAMERA_PROPS, getCameraProp, getProp, isEffectProp, NUMERIC_PROPS, PROPS, readEffectProp, readProp, setCameraProp, setProp, STROKE_DEFAULT, writeEffectProp, writeProp } from './props';
@@ -1248,7 +1249,11 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
         r: Math.min(rx, ry) * limb * seen, rotation: roll,
         ...paintOf(node, seen * alpha),
         depth: -2, zIndex: node.zIndex,
-        ...(node.shapePath || effectOf(node, 'jitter') || effectOf(node, 'wave') ? { path: boil(node, node.shapePath ?? CIRCLE, rx * 2, ry * 2) } : {}),
+        // A blob body is a path like any other outline, so it morphs, strokes and exports
+        // through the machinery that already exists. Off (the default) the body stays a
+        // real ellipse and nothing downstream changes.
+        ...(node.shapePath || blobOf(node.blob) || effectOf(node, 'jitter') || effectOf(node, 'wave')
+          ? { path: boil(node, node.shapePath ?? blobOf(node.blob) ?? CIRCLE, rx * 2, ry * 2) } : {}),
         ...drawn(node, f),
         ...(goo ? { goo } : {}),
       });

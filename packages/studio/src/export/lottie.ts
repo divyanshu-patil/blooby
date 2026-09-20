@@ -55,7 +55,17 @@ interface Chan {
   wh: Vec[]; rr: Vec[];
 }
 
-const EPS = { p: 0.2, s: 0.12, r: 0.04, o: 0.4, c: 0.0015, v: 0.25 };
+/**
+ * How far a dropped frame may stray from the line drawn through its neighbours.
+ *
+ * `v` is a vertex, in composition units. Half a pixel on a 720px canvas sounds tight
+ * until you measure what the representation ITSELF costs: an outline is written as a ring
+ * of points with zero tangents, and a limb's ring sits about 4.7px from the true curve at
+ * its sharpest — resampling it at 96 points instead of 72 only takes that to 3.7px, so
+ * the miss is a feature the even spacing cannot catch, not a shortage of points. Against
+ * that floor, 0.5 is noise, and it is worth roughly a fifth of the file.
+ */
+const EPS = { p: 0.2, s: 0.12, r: 0.04, o: 0.4, c: 0.0015, v: 0.5 };
 
 /** Lottie's own enums for a stroke's ends and corners. */
 const LINE_CAP = { butt: 1, round: 2, square: 3 } as const;
@@ -109,6 +119,30 @@ function prop(frames: Vec[], eps: number, startFrame: number, cuts: number[] = [
   return { a: 1, k };
 }
 
+/**
+ * Repeat the last visible value through every frame the layer cannot be seen on.
+ *
+ * A strip carries every layer through every pose — that is what makes a Tweened
+ * transition scrubbable (strip.ts) — so in a three-state file a layer is typically
+ * invisible for 85% of its frames, and its real position, scale, colour and vertices
+ * there are bytes for something no player will ever draw. Repeating the last visible
+ * value instead is precisely the input `reduce()` collapses to two keyframes, and the
+ * frames anyone can actually see are written exactly as before.
+ *
+ * Opacity itself is never held — it is the channel that says the layer is invisible.
+ */
+function holdHidden<T>(frames: T[], visible: boolean[]): T[] {
+  const first = visible.indexOf(true);
+  if (first < 0) return frames.map(() => frames[0]);
+  const out: T[] = [];
+  let last = frames[first];
+  for (let f = 0; f < frames.length; f++) {
+    if (visible[f]) last = frames[f];
+    out.push(visible[f] ? frames[f] : f < first ? frames[first] : last);
+  }
+  return out;
+}
+
 /** The frames after which a layer appears or disappears — where its opacity must cut. */
 const cutsOf = (present: boolean[]) =>
   present.flatMap((v, f) => (f + 1 < present.length && v !== present[f + 1] ? [f] : []));
@@ -145,12 +179,26 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     }
   }
 
-  // stable draw order: the order they settle into at the middle of the range
+  /**
+   * Draw order is `zIndex` — the document's one and only ordering (core/layers.ts), and
+   * the primary key `sceneAt` itself sorts by, so the export stacks exactly as the canvas.
+   *
+   * This used to rank layers by where they sat in the MIDDLE frame of the range, which
+   * read the right answer off the wrong thing: every layer missing from that one frame
+   * collapsed onto a single sentinel that sorts last, and last is on top. A hand authored
+   * BEHIND the body, on screen only for a wave near the start, came out in front of it.
+   * A layer's place in the order is not a property of any one frame.
+   *
+   * `depth` still breaks a tie between layers that SHARE a zIndex — the two eyes on a
+   * turning head. Lottie cannot reorder layers over time, so one frame has to decide it:
+   * the middle of the range, where the pose has usually settled, falling back to the
+   * layer's own first frame when it is not on screen there.
+   */
   const mid = frames[Math.floor(frames.length / 2)];
-  order.sort((a, b) => {
-    const ia = mid.findIndex((s) => s.id === a), ib = mid.findIndex((s) => s.id === b);
-    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
-  });
+  const depthOf = (id: string) => (mid.find((s) => s.id === id) ?? seen.get(id)!).depth;
+  // Array.prototype.sort is stable, so a full tie keeps first-appearance order — which is
+  // what holds one emitter's particles together
+  order.sort((a, b) => seen.get(a)!.zIndex - seen.get(b)!.zIndex || depthOf(a) - depthOf(b));
 
   // With several mascots every one has a "Left eye": the layer says whose it is, so each
   // mascot reads as its own group of layers in any Lottie tool.
@@ -253,12 +301,12 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       const paint = (a: number) => (cur.alpha === undefined ? 1 : Math.min(1, a / Math.max(alpha, 1e-6)));
       ch.o.push([it ? round(alpha * 100, 2) : 0]);
       present.push(!!it);
-      ch.c.push([round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4), 1]);
+      ch.c.push([round(cur.color.r / 255, HUE), round(cur.color.g / 255, HUE), round(cur.color.b / 255, HUE), 1]);
       ch.fo.push([round(paint(cur.color.a) * 100, 2)]);
       const st = it?.stroke;
       if (st) stroked = st;
       const sc = st?.color ?? stroked?.color ?? { r: 0, g: 0, b: 0, a: 0 };
-      ch.sc.push([round(sc.r / 255, 4), round(sc.g / 255, 4), round(sc.b / 255, 4), 1]);
+      ch.sc.push([round(sc.r / 255, HUE), round(sc.g / 255, HUE), round(sc.b / 255, HUE), 1]);
       ch.so.push([st ? round(paint(st.color.a) * 100, 2) : 0]);
       // a stroke is screen px, but the shape it wraps is scaled by the layer — divide it
       // back out (a pill is resized, not scaled, so it needs nothing)
@@ -269,6 +317,12 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       ch.te.push([round((cur.trim?.end ?? 1) * 100, 2)]);
       ch.tof.push([round((cur.trim?.offset ?? 0) * 360, 2)]);
     }
+    // nothing below this line describes a frame anyone can see, so freeze it there
+    const vis = ch.o.map(([v]) => v > 0);
+    for (const key of ['p', 's', 'r', 'c', 'fo', 'sc', 'so', 'sw', 'wh', 'rr', 'ts', 'te', 'tof'] as const) {
+      ch[key] = holdHidden(ch[key], vis);
+    }
+
     const trims = ch.ts.some(([v], i) => v > 0 || ch.te[i][0] < 100 || ch.tof[i][0] !== 0);
     // what a Lottie player cannot draw: kept in the project and in raster exports, and named here
     for (const scene of frames) {
@@ -282,7 +336,7 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
     }
 
     const geometry: Record<string, unknown>[] = outlines
-      ? bezierShapes(id, frames, outlines, w0, h0, (n2) => { keyframeCount += n2; })
+      ? bezierShapes(id, frames, outlines, w0, h0, vis, (n2) => { keyframeCount += n2; })
       : first.shape === 'ellipse'
         ? [{ ty: 'el', d: 1, s: { a: 0, k: [w0, h0] }, p: { a: 0, k: [0, 0] }, nm: 'body' }]
         : [{
@@ -343,7 +397,12 @@ export function bakeLottie(project: Project, opts: LottieOptions): BakeResult {
       // no embedded font: the descriptor names a family and the player falls back to it.
       // Only written when something actually uses it, so a file with no glyphs is unchanged.
       ...(fontNames.size ? { fonts: { list: [...fontNames].map((f) => ({ fName: f, fFamily: f === FONT ? 'sans-serif' : f, fStyle: 'Regular', ascent: 72 })) } } : {}),
-      meta: { g: 'blooby' },
+      /**
+       * Who made the file. `meta.g` is Lottie's own generator field — every editor that
+       * opens one shows it — and `a`/`d` are the same object's author and description, so
+       * the credit survives a round trip through someone else's tool.
+       */
+      meta: { g: 'Blooby', a: 'Blooby', d: 'Made with Blooby' },
     },
     frames: total,
     keyframeCount,
@@ -391,12 +450,12 @@ function glyphLayers(
     const paint = (a: number) => Math.min(1, a / Math.max(alpha, 1e-6));
     ch.o.push([it ? round(alpha * 100, 2) : 0]);
     present.push(!!it);
-    ch.c.push([round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4), 1]);
+    ch.c.push([round(cur.color.r / 255, HUE), round(cur.color.g / 255, HUE), round(cur.color.b / 255, HUE), 1]);
     ch.fo.push([round(paint(cur.color.a) * 100, 2)]);
     const st = it?.stroke;
     if (st) stroked = st;
     const sc = st?.color ?? stroked?.color ?? { r: 0, g: 0, b: 0, a: 0 };
-    ch.sc.push([round(sc.r / 255, 4), round(sc.g / 255, 4), round(sc.b / 255, 4), 1]);
+    ch.sc.push([round(sc.r / 255, HUE), round(sc.g / 255, HUE), round(sc.b / 255, HUE), 1]);
     ch.so.push([st ? round(paint(st.color.a) * 100, 2) : 0]);
     ch.sw.push([round(st?.width ?? stroked?.width ?? 0, 3)]);
 
@@ -450,7 +509,7 @@ function glyphLayers(
     const shapes = splitSubpaths(glyphOutline(font, sl.ch)!).map((sub, si) => {
       const bz = pathToBezier(sub);
       if (!bz) return null;
-      const at = (q: Vec2) => [round(q.x * k, 3), round(q.y * k, 3)];
+      const at = (q: Vec2) => [round(q.x * k, GEOM), round(q.y * k, GEOM)];
       return { ty: 'sh', ind: si, ks: { a: 0, k: { i: bz.i.map(at), o: bz.o.map(at), v: bz.v.map(at), c: bz.c } }, nm: `${sl.ch} ${si}`, hd: false };
     }).filter(Boolean) as Record<string, unknown>[];
     const items: Record<string, unknown>[] = [...shapes];
@@ -477,6 +536,23 @@ const round = (v: number, d: number) => {
   return Math.round(v * m) / m;
 };
 
+/**
+ * How many decimals a written number keeps.
+ *
+ * Every digit past these is bytes nobody can see, and there are a hundred thousand of
+ * them in a baked strip. `GEOM` is a vertex in composition units: a tenth of a pixel on a
+ * 720px canvas, which is a twentieth of what the zero-tangent ring is already off by (see
+ * EPS.v), and per-vertex rather than coherent — the layer's own position keeps two
+ * decimals, so nothing that moves as a whole is quantised. `HUE` is a 0..1 colour
+ * channel, where three decimals is a quarter of one 8-bit level: the same byte after
+ * quantisation, always.
+ *
+ * Coarser also means fewer distinct tokens, which is most of why the container deflates
+ * as well as it does.
+ */
+const GEOM = 1;
+const HUE = 3;
+
 
 type Animated = { a: number; k: unknown };
 interface LayerPaint {
@@ -488,7 +564,7 @@ interface LayerPaint {
   trim?: { s: Animated; e: Animated; o: Animated };
 }
 
-const staticColor = (c: ColorStop) => ({ a: 0, k: [round(c.r / 255, 4), round(c.g / 255, 4), round(c.b / 255, 4), 1] });
+const staticColor = (c: ColorStop) => ({ a: 0, k: [round(c.r / 255, HUE), round(c.g / 255, HUE), round(c.b / 255, HUE), 1] });
 
 /**
  * The shape groups for one layer, each with its own fill and stroke.
@@ -581,7 +657,7 @@ function textLayer(
     const doc = {
       s: round(size, 2), f: fontName, t: cur.text ?? '', j: 2, tr: 0,
       lh: round(size * 1.2, 2), ls: 0,
-      fc: [round(cur.color.r / 255, 4), round(cur.color.g / 255, 4), round(cur.color.b / 255, 4)],
+      fc: [round(cur.color.r / 255, HUE), round(cur.color.g / 255, HUE), round(cur.color.b / 255, HUE)],
     };
     const prev = docs[docs.length - 1];
     if (!prev || JSON.stringify(prev.s) !== JSON.stringify(doc)) docs.push({ t: f, s: doc });
@@ -695,7 +771,7 @@ const VERTS = 48;
  */
 function bezierShapes(
   id: string, frames: SceneItem[][], outlines: Outline[], w0: number, h0: number,
-  countKeys: (n: number) => void,
+  visible: boolean[], countKeys: (n: number) => void,
 ): Record<string, unknown>[] {
   // a closed outline is filled; an open one (an imported line) must stay open, or its
   // stroke gains a closing edge the artwork never had
@@ -717,12 +793,15 @@ function bezierShapes(
     if (ds.every((d) => d === ds[0])) {
       const bz = pathToBezier(ds[0]);
       if (bz) {
-        const at = (p: Vec2) => [round(p.x * w0, 3), round(p.y * h0, 3)];
+        const at = (p: Vec2) => [round(p.x * w0, GEOM), round(p.y * h0, GEOM)];
         return { ty: 'sh', ind: oi, ks: { a: 0, k: { i: bz.i.map(at), o: bz.o.map(at), v: bz.v.map(at), c: bz.c } }, nm: `path${oi}`, hd: false };
       }
     }
     // scaled into the layer's own base box: the transform channel handles the rest
-    const perFrame = ds.map((d) => flattenPath(d, verts).map((p) => [round(p.x * w0, 3), round(p.y * h0, 3)]));
+    const perFrame = holdHidden(
+      ds.map((d) => flattenPath(d, verts).map((p) => [round(p.x * w0, GEOM), round(p.y * h0, GEOM)])),
+      visible,
+    );
 
     const zeros = perFrame[0].map(() => [0, 0]);
     const same = perFrame.every((f) => JSON.stringify(f) === JSON.stringify(perFrame[0]));
