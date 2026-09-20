@@ -129,6 +129,9 @@ importers:
       jwks-rsa:
         specifier: ^3.1.0
         version: 3.2.2
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.12
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -148,9 +151,6 @@ importers:
       prisma:
         specifier: ^6.3.0
         version: 6.19.3(typescript@6.0.3)
-      tsx:
-        specifier: ^4.19.2
-        version: 4.23.12
       typescript:
         specifier: ~6.0.2
         version: 6.0.3
