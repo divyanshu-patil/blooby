@@ -43,7 +43,7 @@ function Consent({ request, user }: { request: string; user: SessionUser }) {
   };
 
   return (
-    <main className="auth">
+    <main className="auth connect">
       <div className="auth-inner">
         <div className="auth-brand"><BloobyMark size={28} /><span>blooby</span></div>
         <div className="auth-card">
@@ -52,38 +52,37 @@ function Consent({ request, user }: { request: string; user: SessionUser }) {
           {data && (
             <>
               <h1 className="auth-title">Connect {data.clientName}</h1>
-              <p className="auth-sub">
-                It will work in Blooby as you. Choose what it may do — you can disconnect it at any time from
-                AI apps in Blooby.
-              </p>
+              <p className="auth-sub">It will work in Blooby as you. Disconnect it any time from AI apps.</p>
 
               <fieldset className="consent-group">
                 <legend>{data.clientName} may</legend>
-                {data.scopes.map((s) => (
-                  <label key={s.scope} className="consent-row" data-on={chosen.includes(s.scope)}>
-                    <input type="checkbox" checked={chosen.includes(s.scope)}
-                      onChange={(e) => setScopes(e.target.checked ? [...chosen, s.scope] : chosen.filter((x) => x !== s.scope))} />
-                    <span className="consent-text">{s.description}</span>
-                  </label>
-                ))}
+                <div className="consent-scopes">
+                  {data.scopes.map((s) => (
+                    <label key={s.scope} className="consent-scope">
+                      <input type="checkbox" checked={chosen.includes(s.scope)}
+                        onChange={(e) => setScopes(e.target.checked ? [...chosen, s.scope] : chosen.filter((x) => x !== s.scope))} />
+                      <span>{s.description}</span>
+                    </label>
+                  ))}
+                </div>
               </fieldset>
 
               <fieldset className="consent-group">
-                <legend>How much control it has</legend>
-                {(['full', 'suggest', 'read_only'] as McpMode[]).map((m) => (
-                  <label key={m} className="consent-row" data-on={mode === m}>
-                    <input type="radio" name="mode" checked={mode === m} onChange={() => setMode(m)} />
-                    <span className="consent-text">
-                      <span className="consent-strong">{MODE_LABEL[m]}</span>
-                      <span className="consent-sub">{data.modes[m]}</span>
-                    </span>
-                  </label>
-                ))}
+                <legend>How much control</legend>
+                <div className="consent-modes">
+                  {(['full', 'suggest', 'read_only'] as McpMode[]).map((m) => (
+                    <label key={m} className="consent-mode" data-on={mode === m}>
+                      <input type="radio" name="mode" checked={mode === m} onChange={() => setMode(m)} />
+                      <span>{MODE_LABEL[m]}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="consent-sub">{data.modes[mode]}</p>
               </fieldset>
 
               <p className="consent-who">
-                <Avatar name={user.name ?? user.email} url={user.avatarUrl} size={24} />
-                <span>Signed in as {user.name ?? user.email}. Approving returns you to <strong>{data.redirectHost}</strong>.</span>
+                <Avatar name={user.name ?? user.email} url={user.avatarUrl} size={20} />
+                <span>{user.name ?? user.email} · returns to <strong>{data.redirectHost}</strong></span>
               </p>
 
               <div className="consent-actions">
@@ -97,7 +96,7 @@ function Consent({ request, user }: { request: string; user: SessionUser }) {
           )}
           {!data && !error && request && <p className="auth-sub">Loading…</p>}
         </div>
-        <p className="auth-switch">Blooby never gives the app your password or your sign-in. It gets its own key, limited to what you allow above.</p>
+        <p className="auth-switch">{data?.clientName ?? 'The app'} never gets your password — only its own key, limited to what you allow.</p>
       </div>
     </main>
   );

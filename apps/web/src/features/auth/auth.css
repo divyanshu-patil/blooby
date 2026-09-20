@@ -64,26 +64,43 @@
 }
 .auth-switch button:hover { text-decoration: underline; }
 
-/* the MCP consent page (/connect): permissions as pickable rows, one matched pair of actions */
-.consent-group { border: 0; padding: 0; margin: 0 0 20px; display: flex; flex-direction: column; gap: 6px; }
-.consent-group legend { font-size: 13px; font-weight: 500; color: var(--ink); padding: 0; margin-bottom: 10px; }
-.consent-row {
-  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
-  padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px;
-  background: var(--paper); transition: border-color .12s ease, background .12s ease;
+/* the MCP consent page (/connect) — one screenful, and scrollable when it is not.
+   `place-items: center` on .auth makes an overflowing card unreachable at the top, so this
+   page centres with `margin: auto` on a flex child, which keeps both ends scrollable. */
+.auth.connect { display: flex; justify-content: center; align-items: flex-start; }
+.auth.connect .auth-inner { margin: auto; }
+.auth.connect .auth-brand { margin-bottom: 16px; }
+.auth.connect .auth-card { padding: 20px; }
+.auth.connect .auth-title { font-size: 21px; }
+.auth.connect .auth-sub { margin-bottom: 16px; }
+.auth.connect .auth-switch { margin-top: 14px; font-size: 13px; }
+
+.consent-group { border: 0; padding: 0; margin: 0 0 16px; }
+.consent-group legend { font-size: 13px; font-weight: 500; color: var(--ink); padding: 0; margin-bottom: 8px; }
+
+.consent-scopes { display: flex; flex-direction: column; }
+.consent-scope {
+  display: flex; gap: 9px; align-items: flex-start; cursor: pointer;
+  padding: 5px 0; font-size: 13.5px; line-height: 1.4; color: var(--ink-2);
 }
-.consent-row:hover { border-color: var(--muted); }
-.consent-row[data-on='true'] { border-color: var(--ink); background: var(--field); }
-.consent-row:focus-within { outline: 2px solid var(--ink); outline-offset: 1px; }
-.consent-row input { margin: 2px 0 0; flex: none; accent-color: var(--ink); width: 15px; height: 15px; }
-.consent-text { display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 1.43; color: var(--ink-2); }
-.consent-strong { font-weight: 500; color: var(--ink); }
-.consent-sub { font-size: 13px; line-height: 1.45; color: var(--muted); }
-.consent-who { display: flex; gap: 10px; align-items: center; font-size: 13px; line-height: 1.45; color: var(--muted); margin: 0 0 18px; }
+.consent-scope input { margin: 2px 0 0; flex: none; accent-color: var(--ink); width: 15px; height: 15px; }
+.consent-scope:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
+
+/* three choices, one row: the descriptions are one line underneath rather than three stacked cards */
+.consent-modes { display: flex; border: 1px solid var(--line); border-radius: var(--r-btn, 18px); overflow: hidden; }
+.consent-mode { flex: 1; text-align: center; cursor: pointer; }
+.consent-mode + .consent-mode { border-left: 1px solid var(--line); }
+.consent-mode input { position: absolute; opacity: 0; pointer-events: none; }
+.consent-mode span { display: block; padding: 8px 6px; font-size: 13px; color: var(--muted); }
+.consent-mode[data-on='true'] span { background: var(--ink); color: #fafafa; }
+.consent-mode:has(input:focus-visible) span { outline: 2px solid var(--ink); outline-offset: -2px; }
+.consent-sub { font-size: 12.5px; line-height: 1.4; color: var(--muted); margin: 8px 0 0; }
+
+.consent-who { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--muted); margin: 0 0 14px; }
 .consent-actions { display: flex; gap: 10px; }
-.consent-actions .auth-submit { flex: 1; margin: 0; }
+.consent-actions .auth-submit { flex: 1; margin: 0; height: 40px; }
 .consent-deny {
-  height: 44px; padding: 0 20px; font: 500 14px var(--ui); color: var(--ink);
+  height: 40px; padding: 0 18px; font: 500 14px var(--ui); color: var(--ink);
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-btn, 18px); cursor: pointer;
 }
 .consent-deny:hover { border-color: var(--ink); }
