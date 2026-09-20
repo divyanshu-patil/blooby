@@ -228,6 +228,18 @@ their size (a three-state cinematic mascot went 3.1MB → 299KB). An entry defla
 shrink is written stored, decided per entry. CRCs verified against the standard check
 vector; `unzip -t` reads the output and reports the archive comment, `Made with Blooby`.
 
+**The body's blobbiness is a pure function, on a fixed ring.** `RigNode.blob.amount`
+pulls the body off round (`core/blob.ts`), and three properties of the construction are
+there for the exporter, not the canvas. It takes no clock and no noise field, so a body
+nobody animated yields the same `d` on every frame and `bezierShapes` writes ONE static
+path — a static blob measured 1.1KB against the plain body's 1.4KB. The vertex count is
+fixed at 12 whatever the dial says, so keyframing it interpolates a ring against the same
+ring: measured over a 2s morph, no outline point moves more than ~2px in a frame. And at
+amount 0 the radius is exactly the circle's, with the body staying a real ellipse until
+the dial leaves zero, so an untouched project exports as it did before. `seed` is
+deliberately NOT animatable — interpolating it would slide the body through every shape
+between two, rather than between them.
+
 **A project stores the built-in preset library by reference, not by value.**
 `defaultProject()` puts all ~108 built-in presets into `Project.presets`, and until
 2026-09-20 every save wrote them out: measured over 48 real projects they were **92.8% of

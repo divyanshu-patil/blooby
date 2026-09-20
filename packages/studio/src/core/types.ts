@@ -183,6 +183,15 @@ export interface RigNode {
   squish?: Vec2;
 
   /**
+   * Pulls the body off round, so it reads as drawn rather than as a UI circle.
+   *
+   * `amount` 0 (or absent) is the plain ellipse it always was and costs nothing anywhere;
+   * 1 is clearly hand-made. `seed` picks which irregular shape, not how much. Only
+   * `amount` is animatable — see core/blob.ts for why the seed is not.
+   */
+  blob?: { amount: number; seed?: number };
+
+  /**
    * The visible stretch of an outline's stroke, as fractions of its length (a trim path).
    * start 0 / end 1 is the whole line. start > end is not an error: it is the same span
    * drawn the other way round, so a draw-on can run backwards through it.

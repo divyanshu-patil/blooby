@@ -74,6 +74,12 @@ export const RELEASES: Release[] = [
         tour: [step('export', 'Export', 'Lottie, .lottie and the React Native pack — all much lighter than they were.')],
       },
       {
+        id: 'blob-body', surface: 'editor',
+        title: 'Give your mascot a less perfect body',
+        body: 'A new Shape section on the body has a Blobbiness dial: turn it up and the body stops being a perfect circle and starts looking drawn. Shuffle picks a different irregular shape at the same amount. Keyframe Blobbiness like any other property and the body morphs between shapes — and it exports to Lottie. Left at 0 the body is exactly the circle it always was.',
+        tour: [step('tab-node', 'Shape', 'Select the body, then open Shape to find Blobbiness and Shuffle.')],
+      },
+      {
         id: 'lighter-saves', surface: 'editor',
         title: 'Saving to the cloud is much faster',
         body: 'Every project was carrying its own copy of the whole built-in preset library — about 1.2MB of a 1.3MB project, uploaded on every autosave and downloaded every time you opened it. Projects now reference the built-in presets instead of copying them, which makes a typical project around six times smaller and saves noticeably quicker. Presets you have made or changed are still stored in full, exactly as they are.',

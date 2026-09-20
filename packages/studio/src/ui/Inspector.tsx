@@ -305,7 +305,41 @@ function TransformSection({ node, isRoot }: { node: RigNode; isRoot: boolean }) 
           {!isRoot && <PropRow nodeId={node.id} property="size.y" label="Height" />}
         </Collapsible>
       )}
+      {node.kind === 'body' && <BlobRows node={node} />}
     </>
+  );
+}
+
+/**
+ * The body's blobbiness, and which blob it is.
+ *
+ * Blobbiness is an ordinary animatable property, so it keyframes like anything else and
+ * the body morphs between shapes. The seed is not: it chooses WHICH irregular outline,
+ * and interpolating it would slide the body through every shape in between rather than
+ * between two. Shuffle is how you pick one.
+ */
+function BlobRows({ node }: { node: RigNode }) {
+  const updateNode = useEditor((s) => s.updateNode);
+  const amount = node.blob?.amount ?? 0;
+  const seed = node.blob?.seed ?? 1;
+  return (
+    <Collapsible title="Shape" storageKey="insp-blob" defaultOpen={amount > 0}>
+      <PropRow nodeId={node.id} property="blob.amount" />
+      <div className="row" style={{ gap: 4 }}>
+        <span className="prop-label" style={{ flex: 1 }}>Seed</span>
+        <span className="txt">{seed}</span>
+        <button className="btn ghost sm" disabled={amount <= 0}
+          title={amount > 0 ? 'Another irregular shape, same amount of it' : 'Turn Blobbiness up first'}
+          onClick={() => updateNode(node.id, (n) => {
+            n.blob = { amount: n.blob?.amount ?? 0, seed: Math.floor(Math.random() * 9999) + 1 };
+          }, 'Shuffle body shape')}>Shuffle</button>
+      </div>
+      <p className="hint">
+        Pulls the body off round. Keyframe Blobbiness and it morphs; the seed stays put, so it
+        morphs between two shapes rather than through all of them. At 0 the body is a plain
+        ellipse and adds nothing to an export.
+      </p>
+    </Collapsible>
   );
 }
 

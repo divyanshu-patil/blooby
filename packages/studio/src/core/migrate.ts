@@ -31,7 +31,7 @@ import type { Block, Modifier, Project, Track } from './types';
  */
 
 /** Bump this with every new entry in MIGRATIONS. `defaultProject()` stamps it. */
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 interface Migration {
   /** the version this step produces */
@@ -307,6 +307,17 @@ const MIGRATIONS: Migration[] = [
      *
      * Nothing to do on the way up — an older document carries whole presets, which is
      * still exactly what this build reads.
+     */
+    run() {},
+  },
+  {
+    to: 14,
+    label: 'the body can be a blob',
+    /**
+     * `RigNode.blob` arrived (core/blob.ts). Another version marker: the field is optional
+     * and absent means the perfect circle every older project already draws, so there is
+     * nothing to convert on the way up. The bump is so an older build opening a blobby
+     * project warns instead of silently rounding the body off and saving that back.
      */
     run() {},
   },

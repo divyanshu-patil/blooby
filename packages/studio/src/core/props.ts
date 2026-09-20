@@ -37,6 +37,7 @@ export function getProp(node: RigNode, path: string): KeyValue | undefined {
     case 'anchor.y': return node.anchor?.y ?? 0;
     case 'squish.x': return node.squish?.x ?? 1;
     case 'squish.y': return node.squish?.y ?? 1;
+    case 'blob.amount': return node.blob?.amount ?? 0;
     case 'trim.start': return node.trim?.start ?? 0;
     case 'trim.end': return node.trim?.end ?? 1;
     case 'trim.offset': return node.trim?.offset ?? 0;
@@ -219,6 +220,7 @@ export function setProp(node: RigNode, path: string, v: KeyValue): void {
     case 'anchor.y': node.anchor = { x: node.anchor?.x ?? 0, y: n }; break;
     case 'squish.x': node.squish = { x: n, y: node.squish?.y ?? 1 }; break;
     case 'squish.y': node.squish = { x: node.squish?.x ?? 1, y: n }; break;
+    case 'blob.amount': node.blob = { amount: Math.min(1, Math.max(0, n)), ...(node.blob?.seed !== undefined ? { seed: node.blob.seed } : {}) }; break;
     case 'trim.start': node.trim = { start: Math.min(1, Math.max(0, n)), end: node.trim?.end ?? 1 }; break;
     case 'trim.end': node.trim = { start: node.trim?.start ?? 0, end: Math.min(1, Math.max(0, n)), ...(node.trim?.offset ? { offset: node.trim.offset } : {}) }; break;
     case 'trim.offset': node.trim = { start: node.trim?.start ?? 0, end: node.trim?.end ?? 1, offset: n }; break;
@@ -389,6 +391,8 @@ export const PROPS: Record<string, PropSpec> = {
     help: 'Squash-and-stretch width, multiplied onto scale. 1 is neutral. A squash is squish.x 1.1 with squish.y 0.9; a stretch the reverse. Keep them within ±25%.' },
   'squish.y': { on: 'node', label: 'Squish Y', range: [0.4, 1.8, 0.01, '\u00d7'],
     help: 'Squash-and-stretch height, multiplied onto scale. 1 is neutral. Moves opposite to squish.x so the volume reads as kept.' },
+  'blob.amount': { on: 'node', label: 'Blobbiness', range: [0, 1, 0.01, ''],
+    help: 'Pulls the body off round, 0 a plain circle and 1 clearly hand-drawn. Which irregular shape it is comes from the Seed beside it, which is not animatable — keyframe this instead and the body morphs between shapes. At 0 the body stays a true ellipse and costs nothing in an export.' },
   'trim.start': { on: 'node', label: 'Start offset', range: [0, 1, 0.01, ''],
     help: 'Curves and outlines: where the visible stroke begins, 0-1 along the line. With trim.end it draws a line on: start 0, end 0 → 1 over 600-900ms. start > end draws the same span reversed.' },
   'trim.end': { on: 'node', label: 'End offset', range: [0, 1, 0.01, ''],
