@@ -77,3 +77,23 @@ it('rejects a PORT that is not a positive integer', () => {
   const r = parse({ PORT: '8080' });
   expect(r.success && r.data.PORT).toBe(8080);
 });
+
+/**
+ * TRUST_PROXY decides whether X-Forwarded-For is believed. Both mistakes are costly: unset
+ * behind a load balancer gives the whole deployment one rate-limit bucket, and trusting
+ * everything lets a client forge its address to escape its own.
+ */
+it('refuses a permissive trust-proxy setting, and explains the risk', () => {
+  for (const v of ['true', 'TRUE', '*']) {
+    const r = parse({ TRUST_PROXY: v });
+    expect(r.success, v).toBe(false);
+    if (!r.success) expect(r.error.issues[0].message).toMatch(/forge/);
+  }
+});
+
+it('takes a hop count, a list of addresses, or nothing at all', () => {
+  for (const v of ['1', '2', 'loopback, 10.0.0.0/8', '', 'false']) {
+    expect(parse({ TRUST_PROXY: v }).success, v).toBe(true);
+  }
+  expect(parse().success).toBe(true);   // absent is fine: no proxy in development
+});

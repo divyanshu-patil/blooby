@@ -12,6 +12,11 @@ export function createApp() {
 
   app.disable('x-powered-by');
 
+  // Whether X-Forwarded-For may be believed, and from how many hops. Unset behind a proxy
+  // would make every request look like it came from the proxy — one rate-limit bucket for
+  // the whole deployment — and too trusting lets a client forge its own address.
+  app.set('trust proxy', env.trustProxy);
+
   // Postgres bigint columns (projects.size_bytes) arrive as JS BigInt, which
   // JSON.stringify throws on. Handled once here rather than mapped in every controller
   // that happens to return a project — a route added later cannot forget it.

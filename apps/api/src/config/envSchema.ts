@@ -22,6 +22,31 @@ export const envSchema = z.object({
    */
   PUBLIC_API_URL: z.string().url().default("http://localhost:3000"),
 
+  /**
+   * How many proxies sit in front of this server, or which ones to believe.
+   *
+   * Express reads the client's address from `X-Forwarded-For` only when this says it may.
+   * Nothing has to be configured on the proxy — managed hosts (Render, Fly, Heroku,
+   * Cloudflare) and nginx already send that header. Get it wrong in either direction and
+   * rate limits and logs are wrong with it: unset behind a proxy puts every user in ONE
+   * bucket (the proxy's address), and too-trusting lets anyone forge the header to escape
+   * their own. So: leave it empty in development, and set it to the number of proxies in
+   * production — "1" for a single load balancer, which is the usual answer. A list of
+   * addresses or subnets works too ("loopback, 10.0.0.0/8").
+   *
+   * `true` is refused on purpose: it trusts a header anybody can send, which
+   * express-rate-limit also rejects (ERR_ERL_PERMISSIVE_TRUST_PROXY).
+   */
+  TRUST_PROXY: z
+    .string()
+    .default("")
+    .refine((v) => !/^(true|\*)$/i.test(v.trim()), {
+      message:
+        'must not be "true" — that believes an X-Forwarded-For from anyone, so a client can forge '
+        + 'its address and slip its rate limit. Use the number of proxies in front of this server '
+        + '("1" behind one load balancer), or the addresses to trust.',
+    }),
+
   SUPABASE_URL: z.string().url(),
   /** Bypasses RLS. Server only — never reaches a browser bundle. */
   SUPABASE_SECRET_KEY: z.string().min(1),

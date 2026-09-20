@@ -28,6 +28,12 @@ export const env = {
   // trailing slashes come and go in .env files; every URL built from these must not double up
   appUrl: raw.APP_URL.replace(/\/+$/, ""),
   publicApiUrl: raw.PUBLIC_API_URL.replace(/\/+$/, ""),
+  /** what `app.set('trust proxy')` gets: false when unset, a hop count, or the list as written */
+  trustProxy: ((v: string): number | string | false => {
+    const t = v.trim();
+    if (!t || /^(false|0|off)$/i.test(t)) return false;
+    return /^\d+$/.test(t) ? Number(t) : t;
+  })(raw.TRUST_PROXY),
   corsOrigins: [raw.APP_URL, raw.ADMIN_URL].map((u) => u.replace(/\/+$/, "")),
   allowedMediaTypes: raw.ALLOWED_MEDIA_TYPES.split(",")
     .map((s) => s.trim())
