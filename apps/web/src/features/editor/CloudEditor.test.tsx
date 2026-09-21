@@ -23,7 +23,12 @@ vi.mock('@blooby/studio', async () => {
 });
 
 const { CloudEditor } = await import('./CloudEditor');
-const { defaultProject } = await import('@blooby/studio');
+const { defaultProject: buildDefault } = await import('@blooby/studio');
+
+/** Building one costs ~90ms — every builtin preset — and nothing here mutates it. Built
+ *  once for the file, the same way cloud/Thumb.tsx does it for a grid of cards. */
+let blank: ReturnType<typeof buildDefault> | null = null;
+const defaultProject = () => (blank ??= buildDefault());
 
 beforeEach(() => {
   for (const fn of [getData, markOpened, saveNow, setBaseVersion]) fn.mockReset();

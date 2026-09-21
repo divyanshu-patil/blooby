@@ -20,6 +20,7 @@ from `@blooby/studio`, never by deep path — if a component needs to be shared,
 there.
 
 ```bash
+docker compose up -d   # redis (optional — see apps/api/.env.example)
 pnpm dev          # all three apps
 pnpm dev:web      # http://localhost:5173
 pnpm ci           # lint + typecheck + test — run before saying you're done

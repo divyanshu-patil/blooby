@@ -1,6 +1,32 @@
 import { createHash } from 'node:crypto';
 import type { Request } from 'express';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, type Store } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
+import { redis } from '../config/redis.js';
+
+/**
+ * Where the counts live.
+ *
+ * In memory, a limit of 60 saves a minute is 60 PER INSTANCE: scale to three and it is
+ * silently 180, which is not what the number says. Shared, it means what it says however
+ * many instances are running, and a restart no longer resets everyone's budget.
+ *
+ * Without Redis this returns undefined and express-rate-limit uses its own memory store,
+ * which is the behaviour this server has always had.
+ *
+ * `passOnStoreError` is the other half: if Redis is unreachable the request is ALLOWED
+ * through rather than 500ing. A rate limiter is there to protect against abuse, and
+ * failing every request because the thing that counts them is down is a worse outage than
+ * the one it would prevent.
+ */
+function store(prefix: string): Store | undefined {
+  const client = redis;
+  if (!client) return undefined;
+  return new RedisStore({
+    prefix: `rl:${prefix}:`,
+    sendCommand: (...args: string[]) => client.call(...(args as [string, ...string[]])) as Promise<never>,
+  });
+}
 
 /**
  * Who a request counts against.
@@ -26,6 +52,8 @@ export function caller(req: Request): string {
 export const generalLimiter = rateLimit({
   windowMs: 60_000,
   limit: 600,
+  store: store('general'),
+  passOnStoreError: true,
   keyGenerator: caller,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -41,6 +69,8 @@ export const generalLimiter = rateLimit({
 export const writeLimiter = rateLimit({
   windowMs: 60_000,
   limit: 60,
+  store: store('write'),
+  passOnStoreError: true,
   keyGenerator: caller,
   standardHeaders: 'draft-7',
   legacyHeaders: false,

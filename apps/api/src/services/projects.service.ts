@@ -2,6 +2,7 @@ import type { Project } from '@prisma/client';
 import { projectsRepository } from '../repositories/projects.repository.js';
 import { assetsRepository } from '../repositories/assets.repository.js';
 import { HttpError } from '../utils/httpError.js';
+import { shared } from '../utils/invalidate.js';
 import { ttlCache } from '../utils/ttlCache.js';
 import { usersService } from './users.service.js';
 import * as storage from './storage.service.js';
@@ -68,6 +69,7 @@ const DATA_URL_TTL_S = 3600;
  */
 const OWNER_TTL_MS = 10 * 60_000;
 const ownerOf = ttlCache<string | null>(OWNER_TTL_MS, async (id) => (await projectsRepository.findById(id))?.userId ?? null);
+const forgetOwnerEverywhere = shared('project-owner', ownerOf.forget);
 
 /** A row plus the link its JSON can be fetched from. Used wherever a card is drawn. */
 async function withDataUrl<P extends { s3Key: string }>(rows: P[]) {
@@ -77,7 +79,7 @@ async function withDataUrl<P extends { s3Key: string }>(rows: P[]) {
 export const projectsService = {
   /** Drop the remembered owner of a project. Called when one is deleted; exported so a
    *  test, or anything that removes a row outside this service, can do the same. */
-  forgetOwner: (projectId: string) => ownerOf.forget(projectId),
+  forgetOwner: (projectId: string) => forgetOwnerEverywhere(projectId),
 
   /** public projects, each with its owner's public name (see usersService.publicNames) */
   async listPublic(opts: ListPublicProjectsDto) {
@@ -141,7 +143,7 @@ export const projectsService = {
   async remove(projectId: string, userId: string) {
     await ownedBy(projectId, userId);   // 404/403 before anything is destroyed
     await projectsRepository.delete(projectId);
-    ownerOf.forget(projectId);
+    forgetOwnerEverywhere(projectId);
     // after the row, so a storage hiccup never leaves an undeletable project behind.
     // Listed by prefix rather than by version count, so anything left over from when
     // every save had its own key goes too.
@@ -192,7 +194,7 @@ export const projectsService = {
    */
   async save(projectId: string, userId: string, dto: SaveProjectDataDto) {
     const owner = await ownerOf(projectId);
-    if (!owner) { ownerOf.forget(projectId); throw HttpError.notFound('That project does not exist'); }
+    if (!owner) { forgetOwnerEverywhere(projectId); throw HttpError.notFound('That project does not exist'); }
 
     // The owner, replacing a version they name: authorized by the one immutable fact, so
     // the compare-and-set below is the ONLY trip to the database this save makes. That is
@@ -255,7 +257,7 @@ async function writeAndBump(projectId: string, ownerId: string, expected: number
     // matched nothing: either someone else saved first, or the project is gone. Worth a
     // read to say which — this path is already an error, and being told to reload a
     // project that no longer exists is worse than the extra round trip.
-    ownerOf.forget(projectId);
+    forgetOwnerEverywhere(projectId);
     if (!(await projectsRepository.findById(projectId))) throw HttpError.notFound('That project does not exist');
     throw HttpError.conflict('This project was saved somewhere else a moment ago. Reload to get the latest version.');
   }

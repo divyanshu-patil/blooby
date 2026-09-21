@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { prisma } from '../config/prisma.js';
 import { profilesRepository } from '../repositories/profiles.repository.js';
 import { HttpError } from '../utils/httpError.js';
+import { shared } from '../utils/invalidate.js';
 import type { ListUsersDto } from '../dtos/admin/index.js';
 
 /**
@@ -32,6 +33,7 @@ const IDENTITY_TTL_MS = 60_000;
  *  too: an id with no auth account would otherwise re-page the whole directory forever. */
 const directory = new Map<string, { at: number; identity: Identity | null }>();
 const stale = (id: string) => (directory.get(id)?.at ?? 0) < Date.now() - IDENTITY_TTL_MS;
+const evictIdentity = shared('identity', (id: string) => { directory.delete(id); });
 
 /** A profile plus its auth identity. The chosen username and uploaded avatar win over the provider's. */
 const joined = <P extends { username: string | null; avatarUrl: string | null }>(
@@ -119,7 +121,7 @@ export const usersService = {
   },
 
   /** Forget a cached identity so the next read re-asks the provider. No id: forget all. */
-  forgetIdentity: (id?: string) => { if (id) directory.delete(id); else directory.clear(); },
+  forgetIdentity: (id?: string) => { if (id) evictIdentity(id); else directory.clear(); },
 
   /**
    * What the public may know about people: a name and an avatar, never an email. The name is
