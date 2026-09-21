@@ -68,11 +68,8 @@ for (const name of ['web', 'admin']) {
   // nearly everywhere, so it is the dark mark
   put(dir, 'favicon.ico', ico([16, 32, 48].map((size) => ({ size, png: render('blooby-icon-dark.svg', size) }))));
 
-  // only the app is installable; nobody adds the admin panel to a home screen
-  if (name === 'web') {
-    put(dir, 'icon-192.png', render('blooby-icon-maskable.svg', 192));
-    put(dir, 'icon-512.png', render('blooby-icon-maskable.svg', 512));
-  }
+  put(dir, 'icon-192.png', render('blooby-icon-maskable.svg', 192));
+  put(dir, 'icon-512.png', render('blooby-icon-maskable.svg', 512));
 }
 
 // for the README: GitHub does not render a relative-path SVG reliably, so the one place

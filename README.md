@@ -88,9 +88,10 @@ values are shipped in the browser bundle, so put only publishable keys in them.*
 | `apps/api` | `NODE_ENV`, `PORT` | yes | Runtime mode and port (default `3000`) |
 | | `APP_URL`, `ADMIN_URL` | yes | Web and admin origins (CORS) |
 | | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_JWKS_URL` | yes | Auth and data. The secret key is server-only |
-| | `DATABASE_URL` | yes | Prisma connection. Use the Supabase **transaction** pooler (`:6543`, `pgbouncer=true&connection_limit=1`) |
+| | `DATABASE_URL` | yes | Prisma connection. Use the Supabase **transaction** pooler (`:6543`, `pgbouncer=true&connection_limit=10`). Not `connection_limit=1` — that serialises every query in the process onto one connection |
 | | `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | yes | Project JSON storage (private bucket) |
 | | `ALLOWED_MEDIA_TYPES`, `MAX_PROJECT_BYTES` | yes | Upload limits |
+| | `REDIS_URL` | no | Shared rate limits and cache invalidation across instances. Unset is a supported way to run it — see `docker compose up -d redis` |
 | | `OLLAMA_URL` | no | Upstream for cloud Copilot requests |
 
 \* Leave all three unset in `apps/web` to run the editor offline on the bundled presets.
@@ -161,8 +162,9 @@ geometry in one transform, `BloobyMark` in `packages/studio/src/kit` uses it in 
 and the API's share cards (`services/og.service.ts`) use it too.
 
 `apps/web/public` and `apps/admin/public` are **generated** from `brand/` — favicon.svg,
-favicon.ico (16/32/48), favicon-96.png, apple-touch-icon.png, and for the app icon-192 and
-icon-512 with a web manifest. Regenerate them after changing the masters:
+favicon.ico (16/32/48), favicon-96.png, apple-touch-icon.png, icon-192.png, icon-512.png and
+a web manifest, for both apps. They share one mark, so an installed admin panel is told
+apart from the app by its name and not by its icon. Regenerate after changing the masters:
 
 ```bash
 pnpm icons
