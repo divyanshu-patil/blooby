@@ -1,0 +1,12 @@
+The mark, straight from blooby-icon.icon/Assets, in its own 4587 coordinate space:
+
+  circle  cx 2293.58  cy 2356.58  r 2088
+  eye 1   rect x 2293.68   y 1094     w 722      h 1486     rx 361      rotate 21.0472° about (2293.68, 1094)
+  eye 2   rect x 3602.03   y 1689.49  w 574.157  h 1346.14  rx 287.079  rotate 21.0472° about (3602.03, 1689.49)
+
+Every SVG in this folder wraps exactly those three shapes in one transform rather than
+re-typing them at a new size — the 21° tilt and the two different eye sizes are what make
+the mark recognisable, and they are the first thing lost when somebody eyeballs a redraw.
+
+  scale 1/8.7 puts the circle at r 240 in a 512 box:  translate(-7.62989 -14.87126) scale(0.11494252873563218)
+  scale 1/10.2 puts it at r 204.7 (Android's maskable safe zone): translate(31.1 25.9) scale(0.09803921568627451)

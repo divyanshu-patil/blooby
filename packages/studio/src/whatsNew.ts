@@ -48,6 +48,11 @@ export const RELEASES: Release[] = [
         body: 'Every request used to look your account up in the database first, and every project travelled through our server twice on its way to you. Now it does neither: your projects come straight from storage, compressed, and the server is out of the way. Dashboards fill in at once and saves land in a fraction of the time.',
       },
       {
+        id: 'new-icon', surface: 'dashboard',
+        title: 'Blooby has its icon',
+        body: 'The real mark is in the browser tab now, on your home screen if you add it there, and on every link you share. It follows your system theme: dark on a light tab strip, light on a dark one.',
+      },
+      {
         id: 'share-cards', surface: 'dashboard',
         title: 'A shared project shows the mascot',
         body: 'Paste a link to one of your public projects into Slack, Discord, X or anywhere else and the preview is the mascot itself, with the project’s name — rendered by the same engine as the editor, so it can never be out of date. Private projects show the plain blooby card and nothing about them at all.',

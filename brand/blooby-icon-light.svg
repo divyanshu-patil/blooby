@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- The light mark: for DARK backgrounds. Geometry: see geometry.txt. -->
+  <g transform="translate(-7.62989 -14.87126) scale(0.11494252873563218)">
+    <circle cx="2293.58" cy="2356.58" r="2088" fill="#D9D9D9"/>
+    <rect x="2293.68" y="1094" width="722" height="1486" rx="361" transform="rotate(21.0472 2293.68 1094)" fill="#000000"/>
+    <rect x="3602.03" y="1689.49" width="574.157" height="1346.14" rx="287.079" transform="rotate(21.0472 3602.03 1689.49)" fill="#000000"/>
+  </g>
+</svg>

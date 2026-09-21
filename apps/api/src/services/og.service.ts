@@ -23,6 +23,17 @@ export const OG_HEIGHT = 630;
 
 const escape = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+/** The icon's own geometry in a 512 box — the same three shapes as brand/favicon.svg. */
+const MARK_SHAPES = `<g transform="translate(-7.62989 -14.87126) scale(0.11494252873563218)">
+  <circle cx="2293.58" cy="2356.58" r="2088" fill="#17171c"/>
+  <rect x="2293.68" y="1094" width="722" height="1486" rx="361" transform="rotate(21.0472 2293.68 1094)" fill="#fafafa"/>
+  <rect x="3602.03" y="1689.49" width="574.157" height="1346.14" rx="287.079" transform="rotate(21.0472 3602.03 1689.49)" fill="#fafafa"/>
+</g>`;
+
+/** The official mark, at `size`, with its top-left corner at (x, y). */
+const markAt = (x: number, y: number, size: number) =>
+  `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="0 0 512 512">${MARK_SHAPES}</svg>`;
+
 /**
  * The card: words on the left, the mascot on the right.
  *
@@ -61,7 +72,8 @@ function card(inner: string, view: FrameWindow, title: string, caption: string):
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${OG_WIDTH}" height="${OG_HEIGHT}" viewBox="0 0 ${OG_WIDTH} ${OG_HEIGHT}">
 <rect width="${OG_WIDTH}" height="${OG_HEIGHT}" fill="#fafafa"/>
 ${placed}
-<text x="${pad}" y="${pad + 30}" font-family="${font}" font-size="22" font-weight="600" letter-spacing="3" fill="#6b6b76">BLOOBY</text>
+${markAt(pad, pad, 38)}
+<text x="${pad + 50}" y="${pad + 28}" font-family="${font}" font-size="26" font-weight="600" fill="#17171c">blooby</text>
 ${lines.map((l, i) => `<text x="${pad}" y="${titleTop + i * 62}" font-family="${font}" font-size="54" font-weight="600" fill="#17171c">${escape(l)}</text>`).join('\n')}
 <text x="${pad}" y="${titleTop + lines.length * 62 + 6}" font-family="${font}" font-size="24" fill="#6b6b76">${escape(caption.slice(0, 60))}</text>
 </svg>`;
