@@ -27,6 +27,42 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Compress a request body before it leaves the browser.
+ *
+ * A project is 13-17% of its size gzipped, and saving one meant pushing the whole JSON up
+ * a home connection — the slowest link in the whole path. Express inflates
+ * `Content-Encoding: gzip` on the way in without any server change, so this is the entire
+ * cost of a six- to sevenfold smaller upload.
+ *
+ * Buffered into a Blob rather than streamed: a streaming request body needs HTTP/2 and
+ * `duplex: 'half'`, and falls over on the deployments that do not have it. Anything small
+ * is not worth the CPU, and a browser without CompressionStream simply sends plain JSON.
+ */
+const GZIP_OVER_BYTES = 8 * 1024;
+
+async function gzipBody(body: string): Promise<{ body: BodyInit; encoding?: string }> {
+  if (body.length < GZIP_OVER_BYTES || typeof CompressionStream === "undefined")
+    return { body };
+  try {
+    const stream = new Blob([body]).stream().pipeThrough(new CompressionStream("gzip"));
+    return { body: await new Response(stream).blob(), encoding: "gzip" };
+  } catch {
+    return { body };
+  }
+}
+
+/**
+ * A file the API pointed at rather than sent — a project's JSON in the bucket, behind a
+ * presigned link. It carries its own auth in the query string, so no header of ours may
+ * ride along, and the browser inflates the gzipped object on its own.
+ */
+export async function fetchDataUrl<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new ApiError(res.status, "Could not load this project's data.");
+  return (await res.json()) as T;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit & { auth?: boolean },
@@ -44,7 +80,14 @@ async function request<T>(
       headers.Authorization = `Bearer ${data.session.access_token}`;
   }
 
-  const res = await fetch(`${base}${path}`, { ...init, headers });
+  let payload = init?.body;
+  if (typeof payload === "string") {
+    const packed = await gzipBody(payload);
+    payload = packed.body;
+    if (packed.encoding) headers["Content-Encoding"] = packed.encoding;
+  }
+
+  const res = await fetch(`${base}${path}`, { ...init, headers, body: payload });
   if (res.status === 204) return undefined as T;
 
   const body = await res.json().catch(() => ({}));

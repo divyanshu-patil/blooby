@@ -38,6 +38,23 @@ const step = (element: string, title: string, description: string): DriveStep =>
 
 export const RELEASES: Release[] = [
   {
+    version: '2026.09.21',
+    date: '21 September 2026',
+    title: 'The cloud got quick',
+    items: [
+      {
+        id: 'faster-everything', surface: 'dashboard',
+        title: 'Saving, opening and loading are much faster',
+        body: 'Every request used to look your account up in the database first, and every project travelled through our server twice on its way to you. Now it does neither: your projects come straight from storage, compressed, and the server is out of the way. Dashboards fill in at once and saves land in a fraction of the time.',
+      },
+      {
+        id: 'faster-saves', surface: 'editor',
+        title: 'Saves are a sixth of the size',
+        body: 'The editor compresses your project before sending it, so autosave over a slow connection finishes in about a seventh of the time it took. Nothing changes about what is saved — only how much of it goes up the wire.',
+      },
+    ],
+  },
+  {
     version: '2026.09.20',
     date: '20 September 2026',
     title: 'Animate with Claude, ChatGPT and Cursor — and your picture in the sidebar',

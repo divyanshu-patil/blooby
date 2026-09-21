@@ -1,5 +1,12 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import { envSchema } from "./envSchema.js";
+
+// Under test the environment is vitest.config.ts's committed .env.test and nothing else.
+// dotenv does not overwrite what is already set, so any key .env.test happens not to
+// mention used to fall through to the developer's own .env — and a test then passed or
+// failed depending on whose machine it ran on (TRUST_PROXY=1 in one .env quietly broke
+// the forged-forwarding-header test for exactly one person).
+if (process.env.NODE_ENV !== "test") loadDotenv();
 
 /**
  * Every value the server needs, validated once at boot.

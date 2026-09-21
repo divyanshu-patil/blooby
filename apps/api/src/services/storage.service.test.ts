@@ -1,3 +1,4 @@
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const send = vi.fn();
@@ -23,6 +24,43 @@ it('writes one object and reports where it went', async () => {
   expect(stored.bucket).toBe('test-bucket');
   expect(stored.sizeBytes).toBe(JSON.stringify({ hello: 'world' }).length);
   expect(send).toHaveBeenCalledTimes(1);
+});
+
+/**
+ * A project is 13-17% of its size gzipped, measured on the real bucket, and the encoding
+ * rides on the OBJECT — so a browser fetching a presigned URL inflates it for free and
+ * every card on a dashboard moves six or seven times less.
+ */
+it('stores the object compressed, and says so on the object itself', async () => {
+  const doc = { hello: 'world', filler: 'x'.repeat(4000) };
+  await storage.putProjectJson('u1', 'p1', doc);
+  const put = send.mock.calls[0][0].input;
+  expect(put.ContentEncoding).toBe('gzip');
+  expect(put.Body.length).toBeLessThan(JSON.stringify(doc).length);
+  expect(JSON.parse(gunzipSync(put.Body as Buffer).toString())).toEqual(doc);
+});
+
+/** sizeBytes and the checksum describe the document, not the encoding — they are what the
+ *  limit is measured against and what the admin panel shows, for old projects and new. */
+it('reports the document\'s size, not the compressed size', async () => {
+  const doc = { a: 'b'.repeat(10_000) };
+  const stored = await storage.putProjectJson('u1', 'p1', doc);
+  expect(stored.sizeBytes).toBe(JSON.stringify(doc).length);
+  expect((send.mock.calls[0][0].input.Body as Buffer).length).toBeLessThan(stored.sizeBytes);
+});
+
+it('reads a compressed object back', async () => {
+  const doc = { round: 'trip' };
+  send.mockResolvedValue({ Body: { transformToByteArray: async () => gzipSync(JSON.stringify(doc)) } });
+  expect(await storage.getProjectJson('users/u1/projects/p1.json')).toEqual(doc);
+});
+
+/** Everything written before compression is plain JSON and must keep opening. The check is
+ *  gzip's own magic number, not any stored metadata, which can be wrong or absent. */
+it('reads an object written before compression, as plain JSON', async () => {
+  const doc = { old: true };
+  send.mockResolvedValue({ Body: { transformToByteArray: async () => Buffer.from(JSON.stringify(doc)) } });
+  expect(await storage.getProjectJson('users/u1/projects/p1.json')).toEqual(doc);
 });
 
 it('checksums the exact bytes it stored, so a later save can be compared', async () => {

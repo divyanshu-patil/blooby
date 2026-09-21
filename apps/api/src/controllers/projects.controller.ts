@@ -26,8 +26,9 @@ export const projectsController = {
   duplicate: (req: Request, res: Response) =>
     projectsService.duplicate(req.params.id!, req.user!.id, (req.body as { name?: string }).name).then((p) => res.status(201).json(p)),
 
+  // the row and a presigned link, never the payload — see projectsService.getDataUrl
   getData: (req: Request, res: Response) =>
-    projectsService.getData(req.params.id!, req.user?.id ?? null).then((r) => res.json(r)),
+    projectsService.getDataUrl(req.params.id!, req.user?.id ?? null).then((r) => res.json(r)),
 
   save: (req: Request, res: Response) =>
     projectsService.save(req.params.id!, req.user!.id, req.body as SaveProjectDataDto).then((r) => res.json(r)),

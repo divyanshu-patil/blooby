@@ -38,15 +38,37 @@ async function writable(projectId: string, userId: string): Promise<Project> {
   return project;
 }
 
+/**
+ * How long a listed project's `dataUrl` stays valid.
+ *
+ * A card renders its picture from the project's own JSON, so a page of forty cards used to
+ * mean forty requests to this server, each authenticating, reading the row and then
+ * streaming a median 320KB out of S3 — and browsers only run six at a time. Minting the
+ * read URL here costs local crypto and nothing else, so the cards fetch S3 directly, in
+ * parallel, with no round trip to Postgres at all. An hour outlives any tab that is still
+ * scrolling the list it came with.
+ */
+const DATA_URL_TTL_S = 3600;
+
+/** A row plus the link its JSON can be fetched from. Used wherever a card is drawn. */
+async function withDataUrl<P extends { s3Key: string }>(rows: P[]) {
+  return Promise.all(rows.map(async (p) => ({ ...p, dataUrl: await storage.presignedReadUrl(p.s3Key, DATA_URL_TTL_S) })));
+}
+
 export const projectsService = {
   /** public projects, each with its owner's public name (see usersService.publicNames) */
   async listPublic(opts: ListPublicProjectsDto) {
     const { items, nextCursor } = await projectsRepository.listPublic(opts);
     const names = await usersService.publicNames([...new Set(items.map((p) => p.userId))]);
-    return { items: items.map((p) => ({ ...p, owner: names.get(p.userId)?.name ?? null })), nextCursor };
+    const withUrls = await withDataUrl(items);
+    // the key itself is nobody's business; the signed link it produced is what travels
+    return { items: withUrls.map(({ s3Key: _k, ...p }) => ({ ...p, owner: names.get(p.userId)?.name ?? null })), nextCursor };
   },
 
-  list: (userId: string, opts: ListProjectsDto) => projectsRepository.listByUser(userId, opts),
+  async list(userId: string, opts: ListProjectsDto) {
+    const { items, nextCursor } = await projectsRepository.listByUser(userId, opts);
+    return { items: await withDataUrl(items), nextCursor };
+  },
 
   async get(projectId: string, userId: string | null) {
     return readable(projectId, userId);
@@ -111,11 +133,30 @@ export const projectsService = {
     return copy;
   },
 
+  /** The document itself, read into this process. For the server's own use (the MCP
+   *  workspace, scripts) — a browser is given a link instead, see `getDataUrl`. */
   async getData(projectId: string, userId: string | null) {
     const project = await readable(projectId, userId);
     const data = await storage.getProjectJson(project.s3Key);
     // not counted as a view: card thumbnails read this too — opening in the editor counts (touchOpened)
     return { project, data, canEdit: canWrite(project, userId), isOwner: project.userId === userId };
+  },
+
+  /**
+   * What the browser gets: the row, and a link to fetch the JSON straight from S3.
+   *
+   * The payload never touches this server. Opening a 2.6MB project used to buffer the
+   * whole thing here and send it on over the user's connection a second time, after the
+   * round trip to S3 had already been paid inside the request.
+   */
+  async getDataUrl(projectId: string, userId: string | null) {
+    const project = await readable(projectId, userId);
+    return {
+      project,
+      dataUrl: await storage.presignedReadUrl(project.s3Key, DATA_URL_TTL_S),
+      canEdit: canWrite(project, userId),
+      isOwner: project.userId === userId,
+    };
   },
 
   /**

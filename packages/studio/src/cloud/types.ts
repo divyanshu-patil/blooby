@@ -26,6 +26,12 @@ export interface ProjectRow {
   owner?: string | null;
   /** the owner's avatar — set on admin listings */
   ownerAvatarUrl?: string | null;
+  /**
+   * A short-lived link to the project's JSON in the bucket, on every listing and on
+   * `getData`. A card fetches it DIRECTLY: the API never carries the payload, and a page
+   * of cards costs no requests to it at all.
+   */
+  dataUrl?: string;
 }
 
 /** What the community page shows in the open: most-used items and the most active creators. */

@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, fetchDataUrl } from './client';
 import type { AdminUser, Analytics, AssetKind, AssetRow, AssetSource, Page, ProjectRow, PublicInsights, SplashscreenRow } from './types';
 
 /** Feature-level API modules. UI components call these, never fetch directly. */
@@ -14,8 +14,25 @@ export const projectsApi = {
   remove: (id: string) => api.del<void>(`/api/projects/${id}`),
   duplicate: (id: string, name?: string) => api.post<ProjectRow>(`/api/projects/${id}/duplicate`, { name }),
   markOpened: (id: string) => api.post<ProjectRow>(`/api/projects/${id}/opened`),
-  /** `canEdit`: whether this caller may save to it — the owner, or anyone while it is public with edit access */
-  getData: (id: string) => api.get<{ project: ProjectRow; data: unknown; canEdit?: boolean; isOwner?: boolean }>(`/api/projects/${id}/data`),
+  /**
+   * The project's row, and its document.
+   *
+   * The API answers with a presigned link, not the JSON: the document goes browser ↔ S3
+   * directly, so the server never buffers a 2.6MB project nor spends a round trip on it
+   * inside a request. A card on a listing already HAS that link (`row.dataUrl`) and should
+   * use `projectData` instead of calling here at all.
+   *
+   * `canEdit`: whether this caller may save to it — the owner, or anyone while it is
+   * public with edit access.
+   */
+  async getData(id: string) {
+    const r = await api.get<{ project: ProjectRow; dataUrl: string; canEdit?: boolean; isOwner?: boolean }>(`/api/projects/${id}/data`);
+    return { ...r, data: await fetchDataUrl<unknown>(r.dataUrl) };
+  },
+
+  /** A listed project's document, straight from the bucket. No request to the API. */
+  projectData: (row: ProjectRow) =>
+    row.dataUrl ? fetchDataUrl<unknown>(row.dataUrl) : projectsApi.getData(row.id).then((r) => r.data),
   save: (id: string, body: { project: unknown; thumbnailUrl?: string | null; expectedVersion?: number }) =>
     api.put<{ version: number; sizeBytes: number; checksum: string; savedAt: string }>(`/api/projects/${id}/data`, body),
 };

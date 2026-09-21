@@ -36,8 +36,10 @@ export const projectsRepository = {
       ...(opts.q ? { name: { contains: opts.q, mode: 'insensitive' } } : {}),
     };
     const select = {
+      // s3Key is here only so the service can mint a read link for the card; it is
+      // stripped before the row leaves listPublic
       id: true, userId: true, name: true, thumbnailUrl: true, access: true, viewCount: true, duplicateCount: true,
-      createdAt: true, updatedAt: true,
+      createdAt: true, updatedAt: true, s3Key: true,
     } satisfies Prisma.ProjectSelect;
     let items;
     let nextCursor: string | null = null;
