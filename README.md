@@ -1,17 +1,21 @@
-<img src="brand/exports/mark-dark-160.png#gh-light-mode-only" alt="" width="80" align="left" />
-<img src="brand/exports/mark-light-160.png#gh-dark-mode-only" alt="" width="80" align="left" />
+<p align="center">
+  <img src="brand/exports/mark-dark-256.png#gh-light-mode-only" alt="Blooby" width="128" />
+  <img src="brand/exports/mark-light-256.png#gh-dark-mode-only" alt="Blooby" width="128" />
+</p>
 
-# Blooby
+<h1 align="center">Blooby</h1>
 
-A browser studio for building and animating mascot characters, and shipping them as
-Lottie, dotLottie (with a real state machine), GIF, MP4, PNG or a React Native component.
+<p align="center">
+  A browser studio for building and animating mascot characters, and shipping them as<br />
+  Lottie, dotLottie (with a real state machine), GIF, MP4, PNG or a React Native component.
+</p>
 
-<br clear="left" />
-
-[![CI](https://github.com/divyanshu-patil/blooby/actions/workflows/ci.yml/badge.svg)](https://github.com/divyanshu-patil/blooby/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-black.svg)](./LICENSE)
-![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6.svg)
-![React](https://img.shields.io/badge/React-19-149eca.svg)
+<p align="center">
+  <a href="https://github.com/divyanshu-patil/blooby/actions/workflows/ci.yml"><img src="https://github.com/divyanshu-patil/blooby/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-black.svg" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/TypeScript-6-3178c6.svg" alt="TypeScript 6" />
+  <img src="https://img.shields.io/badge/React-19-149eca.svg" alt="React 19" />
+</p>
 
 ## Overview
 
@@ -166,28 +170,35 @@ brand/              the icon: vector masters, and what every favicon is generate
 
 ## The icon
 
-`brand/` is the source of truth. The mark is a circle and two tilted pills — the same
-three shapes the editor draws — and it comes in two colourways:
+`brand/` is the source of truth, and `brand/blooby-icon.icon/` is the Icon Composer project
+everything comes out of. The masters are **its own exports** — the real icon, with the
+gradient, the sheen and the soft shadow:
 
-| File | Body | For |
+| Master | Body | For |
 |---|---|---|
-| `blooby-icon-dark.svg` | near-black | **light** backgrounds |
-| `blooby-icon-light.svg` | paper | **dark** backgrounds |
-| `blooby-icon-maskable.svg` | near-black on an opaque plate | Android launchers, which crop to their own shape |
-| `apple-touch-icon.svg` | near-black on an opaque plate | iOS home screens, which do not composite transparency |
-| `favicon.svg` | **both** | the tab strip — it carries its own `prefers-color-scheme` |
-| `blooby-icon.icon/` | — | the Apple Icon Composer project the rest came from |
+| `exports/blooby-icon-2176-dark.png` | near-black | **light** backgrounds |
+| `exports/blooby-icon-1088.png` | paper | **dark** backgrounds |
 
-`brand/geometry.txt` has the three shapes' exact numbers. Nothing redraws them by eye: the
-21° tilt and the two different eye sizes are what make the mark recognisable at 16px, and
-they are the first thing an approximation loses. Every SVG here wraps the same source
-geometry in one transform, `BloobyMark` in `packages/studio/src/kit` uses it in the app,
-and the API's share cards (`services/og.service.ts`) use it too.
+Those effects are why the icon is a raster and not a vector here: they are a *rendering*,
+not a shape, and an SVG of the same three shapes is a flatter icon wearing the silhouette.
+`blooby-icon-dark.svg` and `blooby-icon-light.svg` keep that flat geometry for the few
+places that need a shape rather than a picture, and `geometry.txt` records the numbers —
+a circle and two pills tilted 21° at two different sizes — so nobody redraws them by eye.
 
-`apps/web/public` and `apps/admin/public` are **generated** from `brand/` — favicon.svg,
-favicon.ico (16/32/48), favicon-96.png, apple-touch-icon.png, icon-192.png, icon-512.png and
-a web manifest, for both apps. They share one mark, so an installed admin panel is told
-apart from the app by its name and not by its icon. Regenerate after changing the masters:
+Everything else is **generated**. `pnpm icons` rebuilds it after any change to a master:
+
+| Generated | From |
+|---|---|
+| `apps/*/public/favicon-{dark,light}-{32,96}.png` | both colourways; `index.html` picks with `media` |
+| `apps/*/public/favicon.ico` (16/32/48) | the dark mark — a bare request has no theme to go on |
+| `apps/*/public/apple-touch-icon.png` | dark, on an opaque plate: iOS does not composite transparency |
+| `apps/*/public/icon-{192,512}.png` | dark, plated and inset to Android's maskable safe zone |
+| `packages/studio/src/kit/blooby-mark.png` | what `BloobyMark` renders in the app |
+| `apps/api/src/services/brandMark.ts` | the same bytes as a data URI, for the share cards |
+| `brand/exports/mark-{dark,light}-256.png` | the header of this file |
+
+Both apps carry the same mark, so an installed admin panel is told apart from the app by
+its name and not by its icon.
 
 ```bash
 pnpm icons
