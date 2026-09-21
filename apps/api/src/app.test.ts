@@ -22,7 +22,9 @@ afterAll(() => new Promise((r) => server.close(() => r(undefined))));
 it('answers /health without any authentication', async () => {
   const res = await fetch(`${base}/health`);
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ ok: true, env: 'test' });
+  // `redis: 'off'` is the healthy answer with no REDIS_URL — the endpoint reports the
+  // dependency so a misconfigured Key Value instance is visible without host access
+  expect(await res.json()).toEqual({ ok: true, env: 'test', redis: 'off' });
 });
 
 it('turns an unmatched path into the same error envelope every route uses', async () => {

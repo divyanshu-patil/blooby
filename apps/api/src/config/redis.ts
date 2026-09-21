@@ -52,3 +52,20 @@ export const redis = open('main');
 export const redisSub = open('sub');
 
 export const hasRedis = () => redis !== null;
+
+/**
+ * Is there a Redis, and does it answer? One PING, bounded by the client's own 1s
+ * `commandTimeout`. `off` is not a failure — running without Redis is supported.
+ *
+ * This exists because there was no way to tell a working Key Value instance from a
+ * misconfigured one without shell access to the host: the boot log says `· redis` as
+ * soon as REDIS_URL is non-empty, whether or not anything is listening at the other end.
+ */
+export async function redisStatus(): Promise<'off' | 'up' | 'down'> {
+  if (!redis) return 'off';
+  try {
+    return (await redis.ping()) === 'PONG' ? 'up' : 'down';
+  } catch {
+    return 'down';
+  }
+}

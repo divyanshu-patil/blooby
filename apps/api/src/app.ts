@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import { env } from './config/env.js';
 import { errorHandler, notFound } from './middlewares/errorHandler.js';
+import { redisStatus } from './config/redis.js';
 import { generalLimiter } from './middlewares/rateLimiter.js';
 import { requestLogger } from './middlewares/requestLogger.js';
 import { routes } from './routes/index.js';
@@ -35,7 +36,17 @@ export function createApp() {
   app.use(requestLogger);
   app.use(generalLimiter);
 
-  app.get('/health', (_req, res) => res.json({ ok: true, env: env.NODE_ENV }));
+  /**
+   * `redis` is a real PING, not a read of REDIS_URL: the client is constructed the moment
+   * the variable is non-empty and connects later, so config being present proves nothing
+   * about a Key Value instance being reachable. `off` means no URL is configured at all,
+   * which is a supported way to run — hence `ok: true` either way. Nothing here can fail
+   * the check, or a Redis outage would take the whole service out of rotation, which is
+   * precisely what config/redis.ts exists to prevent.
+   */
+  app.get('/health', async (_req, res) => {
+    res.json({ ok: true, env: env.NODE_ENV, redis: await redisStatus() });
+  });
   // link previews: asked for by unfurlers and crawlers from anywhere, never authenticated,
   // and outside /api because the URL itself ends up pasted into chat windows
   app.use('/og', ogRoutes);
