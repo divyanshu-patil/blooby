@@ -2,6 +2,7 @@ import type { Project } from '@prisma/client';
 import { projectsRepository } from '../repositories/projects.repository.js';
 import { assetsRepository } from '../repositories/assets.repository.js';
 import { HttpError } from '../utils/httpError.js';
+import { ttlCache } from '../utils/ttlCache.js';
 import { usersService } from './users.service.js';
 import * as storage from './storage.service.js';
 import type { CreateProjectDto, ListProjectsDto, ListPublicProjectsDto, SaveProjectDataDto, UpdateProjectDto } from '../dtos/projects/index.js';
@@ -50,12 +51,34 @@ async function writable(projectId: string, userId: string): Promise<Project> {
  */
 const DATA_URL_TTL_S = 3600;
 
+/**
+ * projectId → the id of the person who owns it.
+ *
+ * The one fact about a project that CANNOT go stale: a project never changes hands. There
+ * is no transfer, no share that reassigns it, nothing in the schema that would rewrite
+ * `user_id`. So unlike visibility or access — which the owner may flip at any moment, and
+ * which are therefore always read live — this can be answered from memory without any
+ * window in which the answer is wrong.
+ *
+ * What it buys is the second round trip out of an autosave. See `save`.
+ *
+ * A DELETED project is the only thing a stale entry can misreport, and it is caught
+ * downstream: the compare-and-set matches no row, the entry is dropped and the real answer
+ * read from the database before anything is reported to the caller.
+ */
+const OWNER_TTL_MS = 10 * 60_000;
+const ownerOf = ttlCache<string | null>(OWNER_TTL_MS, async (id) => (await projectsRepository.findById(id))?.userId ?? null);
+
 /** A row plus the link its JSON can be fetched from. Used wherever a card is drawn. */
 async function withDataUrl<P extends { s3Key: string }>(rows: P[]) {
   return Promise.all(rows.map(async (p) => ({ ...p, dataUrl: await storage.presignedReadUrl(p.s3Key, DATA_URL_TTL_S) })));
 }
 
 export const projectsService = {
+  /** Drop the remembered owner of a project. Called when one is deleted; exported so a
+   *  test, or anything that removes a row outside this service, can do the same. */
+  forgetOwner: (projectId: string) => ownerOf.forget(projectId),
+
   /** public projects, each with its owner's public name (see usersService.publicNames) */
   async listPublic(opts: ListPublicProjectsDto) {
     const { items, nextCursor } = await projectsRepository.listPublic(opts);
@@ -118,6 +141,7 @@ export const projectsService = {
   async remove(projectId: string, userId: string) {
     await ownedBy(projectId, userId);   // 404/403 before anything is destroyed
     await projectsRepository.delete(projectId);
+    ownerOf.forget(projectId);
     // after the row, so a storage hiccup never leaves an undeletable project behind.
     // Listed by prefix rather than by version count, so anything left over from when
     // every save had its own key goes too.
@@ -167,6 +191,19 @@ export const projectsService = {
    * instead of silently winning. It just no longer names a key.
    */
   async save(projectId: string, userId: string, dto: SaveProjectDataDto) {
+    const owner = await ownerOf(projectId);
+    if (!owner) { ownerOf.forget(projectId); throw HttpError.notFound('That project does not exist'); }
+
+    // The owner, replacing a version they name: authorized by the one immutable fact, so
+    // the compare-and-set below is the ONLY trip to the database this save makes. That is
+    // the whole autosave path — it used to read the row first and pay ~580ms for it.
+    if (owner === userId && dto.expectedVersion !== undefined) {
+      return writeAndBump(projectId, owner, dto.expectedVersion, dto);
+    }
+
+    // Everyone else reads live. Whether a project is public, and whether public means
+    // editable, is the owner's to change at any moment and must never be answered from a
+    // cache. So is the current version, when the caller did not say which one they have.
     const project = await writable(projectId, userId);
 
     if (dto.expectedVersion !== undefined && dto.expectedVersion !== project.currentVersion) {
@@ -175,24 +212,8 @@ export const projectsService = {
       );
     }
 
-    const nextVersion = project.currentVersion + 1;
     // under the OWNER's key, whoever is editing: one object per project
-    const stored = await storage.putProjectJson(project.userId, projectId, dto.project);
-
-    const updated = await projectsRepository.bumpVersionIfCurrent(projectId, project.currentVersion, {
-      currentVersion: nextVersion,
-      s3Key: stored.key,
-      s3Bucket: stored.bucket,
-      sizeBytes: stored.sizeBytes,
-      checksum: stored.checksum,
-      ...(dto.thumbnailUrl !== undefined ? { thumbnailUrl: dto.thumbnailUrl } : {}),
-    });
-
-    if (updated === 0) {
-      throw HttpError.conflict('This project was saved somewhere else a moment ago. Reload to get the latest version.');
-    }
-
-    return { version: nextVersion, sizeBytes: stored.sizeBytes, checksum: stored.checksum, savedAt: new Date().toISOString() };
+    return writeAndBump(projectId, project.userId, project.currentVersion, dto);
   },
 
   /**
@@ -207,3 +228,37 @@ export const projectsService = {
     return project;
   },
 };
+
+/**
+ * Write the object, then claim the version — in that order, always.
+ *
+ * S3 PutObject is atomic, so a failed upload leaves the previous object whole and the row
+ * still pointing at it: the caller sees an error, retries with the same expectedVersion
+ * and succeeds. Bumping first would mean a failed upload left the database claiming a
+ * version that storage does not have, and the retry would then be told it has a conflict
+ * with work that was never written.
+ */
+async function writeAndBump(projectId: string, ownerId: string, expected: number, dto: SaveProjectDataDto) {
+  const stored = await storage.putProjectJson(ownerId, projectId, dto.project);
+  const nextVersion = expected + 1;
+
+  const updated = await projectsRepository.bumpVersionIfCurrent(projectId, expected, {
+    currentVersion: nextVersion,
+    s3Key: stored.key,
+    s3Bucket: stored.bucket,
+    sizeBytes: stored.sizeBytes,
+    checksum: stored.checksum,
+    ...(dto.thumbnailUrl !== undefined ? { thumbnailUrl: dto.thumbnailUrl } : {}),
+  });
+
+  if (updated === 0) {
+    // matched nothing: either someone else saved first, or the project is gone. Worth a
+    // read to say which — this path is already an error, and being told to reload a
+    // project that no longer exists is worse than the extra round trip.
+    ownerOf.forget(projectId);
+    if (!(await projectsRepository.findById(projectId))) throw HttpError.notFound('That project does not exist');
+    throw HttpError.conflict('This project was saved somewhere else a moment ago. Reload to get the latest version.');
+  }
+
+  return { version: nextVersion, sizeBytes: stored.sizeBytes, checksum: stored.checksum, savedAt: new Date().toISOString() };
+}
