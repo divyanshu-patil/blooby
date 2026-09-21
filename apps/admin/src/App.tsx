@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
 import {
-  Avatar, BloobyMark, EmptyState, Shell, auth, startTour, startTourWhenReady, usePageViews, useSession,
+  Avatar, BloobyMark, EmptyState, GoogleMark, Shell, auth, consumeAuthError, startTour,
+  startTourWhenReady, usePageViews, useSession,
   type DriveStep, type NavGroup, type SessionUser,
 } from '@blooby/studio';
 import { Overview } from './features/Overview';
@@ -146,7 +147,35 @@ function EditorRoute() {
   return <OfficialEditor nav={NAV} active="/editor" onNavigate={(id) => navigate(id)} />;
 }
 
+/**
+ * The admin sign-in. Google only — an admin account is granted, never self-registered,
+ * so there is nothing here for an email form to do.
+ *
+ * It says what it is out loud: this markup used to borrow the web app's class names
+ * (`auth-inner`, `auth-brand`, `auth-oauth`) without that stylesheet being loaded here,
+ * so the brand row and the one button on the page rendered unstyled.
+ */
 function SignIn() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // A refused OAuth round-trip comes back as a query string the router drops on its way
+  // here; `consumeAuthError` caught it at module load. Without this, being turned away
+  // looked exactly like never having clicked the button.
+  useEffect(() => { const e = consumeAuthError(); if (e) setError(e); }, []);
+
+  const signIn = async () => {
+    setBusy(true); setError(null);
+    try {
+      const { error } = await auth.signInWithGoogle();
+      if (error) throw new Error(error.message);
+      // on success the browser is already leaving for Google; `busy` stays on
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not reach Google. Try again.');
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="auth">
       <div className="auth-inner">
@@ -154,7 +183,11 @@ function SignIn() {
         <div className="auth-card">
           <h1 className="auth-title">Sign in</h1>
           <p className="auth-sub">This area is restricted to administrators.</p>
-          <button className="auth-oauth" onClick={() => void auth.signInWithGoogle()}>Continue with Google</button>
+          <button className="auth-oauth" onClick={() => void signIn()} disabled={busy}>
+            <GoogleMark />
+            {busy ? 'Taking you to Google…' : 'Continue with Google'}
+          </button>
+          {error && <p className="auth-msg" data-tone="bad">{error}</p>}
         </div>
       </div>
     </main>

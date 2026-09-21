@@ -2,12 +2,38 @@
    file stays small — the sidebar, cards, tables and dialogs are the same components the
    user-facing app renders. */
 
+/* --- sign in ------------------------------------------------------------ */
+/* The markup here speaks the same vocabulary as the web app's sign-in, but that
+   stylesheet lives in apps/web and is not loaded in this app — so these rules have to
+   exist. They did not, and the brand row and the only button on the page rendered
+   unstyled. Kept deliberately in step with apps/web/src/features/auth/auth.css:
+   two apps, one front door, and nobody should be able to tell which they are looking at. */
 .auth { display: grid; place-items: center; min-height: 100vh; background: var(--paper); padding: 24px; }
-.auth-card { width: min(392px, 100%); padding: 26px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; box-shadow: var(--shadow); }
-.auth-title { font-family: var(--display); font-size: 23px; font-weight: 700; letter-spacing: -.025em; margin: 0 0 5px; }
-.auth-sub { font-size: 13px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
-.btn.google { width: 100%; justify-content: center; background: var(--field); border: 1px solid var(--line); font-weight: 500; }
-.btn.google:hover { border-color: var(--signal); }
+.auth-inner { width: min(400px, 100%); }
+.auth-brand {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-bottom: 24px; color: var(--ink);
+  font-family: var(--display); font-size: 24px; font-weight: 600; letter-spacing: -.6px;
+}
+.auth-card {
+  padding: 24px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--r-card); box-shadow: var(--shadow);
+}
+.auth-title {
+  font-family: var(--display); font-size: 24px; font-weight: 600;
+  letter-spacing: -.6px; line-height: 1.33; margin: 0 0 4px; color: var(--ink);
+}
+.auth-sub { font-size: 14px; line-height: 1.43; color: var(--muted); margin: 0 0 20px; }
+.auth-oauth {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: 40px; padding: 0 16px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-btn);
+  font: 500 14px var(--ui); color: var(--ink); cursor: pointer;
+}
+.auth-oauth:hover { background: var(--field); }
+.auth-oauth:disabled { opacity: .5; cursor: default; }
+.auth-msg { font-size: 14px; line-height: 1.43; color: var(--ink-2); margin: 16px 0 0; }
+.auth-msg[data-tone='bad'] { color: var(--hot); }
 
 .who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
 .who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -125,15 +151,39 @@
 .card-thumb .splash-preview { aspect-ratio: 4 / 3; border-radius: 0; }
 
 .splash-picker {
-  display: flex; flex-wrap: wrap; gap: 6px;
-  max-height: 132px; overflow: auto; margin-bottom: 12px;
-  padding: 10px; background: var(--field); border-radius: var(--r-nested, 10px);
+  margin-bottom: 12px; padding: 10px;
+  background: var(--field); border-radius: var(--r-nested, 10px);
+}
+.splash-picker > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font: 600 13px var(--ui); color: var(--ink); list-style: none;
+}
+.splash-picker > summary::-webkit-details-marker { display: none; }
+.splash-picker > summary::before { content: '\25B8'; transition: transform .12s ease; }
+.splash-picker[open] > summary::before { transform: rotate(90deg); }
+.splash-picker > summary .hint { margin-left: auto; font-weight: 400; color: var(--muted); }
+.splash-search { width: 100%; margin: 10px 0 8px; }
+
+/* scrolls on its own so the dialog does not grow with the library */
+.splash-grid {
+  display: grid; gap: 8px; max-height: 240px; overflow: auto;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
 }
 .splash-pick {
-  padding: 6px 12px; border-radius: var(--r-btn); font: 500 14px var(--ui);
-  background: var(--panel); border: 1px solid var(--line); color: var(--ink); cursor: pointer;
+  display: grid; gap: 6px; padding: 6px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--r-nested, 10px); color: var(--ink); text-align: center;
 }
 .splash-pick:hover { border-color: var(--ink); }
+.splash-pick-thumb {
+  display: grid; place-items: center; aspect-ratio: 1;
+  background: var(--field); border-radius: 6px; overflow: hidden;
+}
+.splash-pick-thumb svg { width: 100%; height: 100%; }
+.splash-pick-name {
+  font: 500 11px var(--ui); color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* --- moderation preview -------------------------------------------------- */
 .review-stage {

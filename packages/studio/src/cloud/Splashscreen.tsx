@@ -62,9 +62,10 @@ export function Splashscreen({ onDone }: { onDone?: () => void }) {
 
   if (phase === 'gone' || phase === 'idle' || !splash) return null;
 
+  const view = compOf(splash.data as Project);
   const scene = (() => {
     try {
-      return sceneAt(splash.data as Project, t, compOf(splash.data as Project));
+      return sceneAt(splash.data as Project, t, view);
     } catch {
       // a payload the renderer rejects must not take the app down with it
       return null;
@@ -85,8 +86,11 @@ export function Splashscreen({ onDone }: { onDone?: () => void }) {
         transition: `opacity ${splash.fadeMs}ms ease`,
       }}
     >
-      <div style={{ width: 'min(52vmin, 380px)', aspectRatio: '1' }}>
-        <MascotThumb scene={scene} view={compOf(splash?.data as Project)} />
+      <div style={{ width: 'min(52vmin, 380px)', aspectRatio: `${view.width} / ${view.height}` }}>
+        {/* the composition IS the frame. Fitting the scene's own bounds instead made the
+         *  mascot resize frame by frame as particles flew, and made every splash a
+         *  different size depending on what its animation happened to contain. */}
+        <MascotThumb scene={scene} view={view} box={{ x0: 0, y0: 0, x1: view.width, y1: view.height }} pad={0} />
       </div>
     </div>
   );

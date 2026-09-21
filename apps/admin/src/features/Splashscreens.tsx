@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import {
-  ChipBar, Dialog, EmptyState, ErrorState, PageHeader, activeTimeline, adminApi,
-  assetsApi, defaultProject, presetPreviewProject, relativeTime, useAsync, useEditor,
-  type AssetRow, type Preset, type Project, type SplashscreenRow,
+  AssetThumb, ChipBar, Dialog, EmptyState, ErrorState, PageHeader, activeTimeline, adminApi,
+  assetsApi, builtinPresets, defaultProject, presetPreviewProject, relativeTime, useAsync, useEditor,
+  type Preset, type Project, type SplashscreenRow,
 } from '@blooby/studio';
 import { SplashPreview } from './SplashPreview';
 
@@ -124,9 +124,11 @@ function SplashEditor({ existing, onClose, onSaved, onAct }: {
   const [error, setError] = useState<string | null>(null);
 
   const presets = useAsync(
-    () => (source === 'library' ? assetsApi.browse({ kind: 'preset', limit: 48 }) : Promise.resolve(null)),
+    // 100 is the API's ceiling on `limit` — asking for more is a 400, not a bigger page
+    () => (source === 'library' ? assetsApi.browse({ kind: 'preset', limit: 100 }) : Promise.resolve(null)),
     [source],
   );
+  const [query, setQuery] = useState('');
 
   const pickSource = (next: Source) => {
     setSource(next);
@@ -137,12 +139,11 @@ function SplashEditor({ existing, onClose, onSaved, onAct }: {
 
   /** A preset carries tracks, not a whole project, so it is mounted on the default rig —
    *  the same construction the editor's own preset chips use to draw themselves. */
-  const pickPreset = (asset: AssetRow) => {
-    const preset = asset.data as Preset;
+  const pickPreset = (preset: Preset, label: string) => {
     // the editor's own preview construction: the preset's layers (shapes, hands, legs, SVG,
     // text, curves, other mascots), its effects and its ranges — not just its tracks, which
     // dropped every one of those from the splash
-    const project: Project = { ...presetPreviewProject(defaultProject(), { ...preset, tracks: preset.tracks ?? [] }), name: asset.name };
+    const project: Project = { ...presetPreviewProject(defaultProject(), { ...preset, tracks: preset.tracks ?? [] }), name: label };
     setData(project);
     setDuration(clampDuration(preset.durationMs || activeTimeline(project).timelineDurationMs));
     setPlayKey((k) => k + 1);
@@ -193,16 +194,35 @@ function SplashEditor({ existing, onClose, onSaved, onAct }: {
         <ChipBar options={SOURCES} value={source} onChange={pickSource} />
       </div>
 
-      {source === 'library' && (
-        <div className="splash-picker">
-          {presets.loading && <p className="state-note">Loading presets…</p>}
-          {presets.error && <p style={{ color: 'var(--hot)', fontSize: 14 }}>{presets.error}</p>}
-          {presets.data?.items.length === 0 && <p className="state-note">No published presets yet.</p>}
-          {presets.data?.items.map((a) => (
-            <button key={a.id} className="splash-pick" onClick={() => pickPreset(a)}>{a.name}</button>
-          ))}
-        </div>
-      )}
+      {source === 'library' && (() => {
+        const all = [...BUILTINS, ...(presets.data?.items ?? []).map(
+          (a) => ({ id: a.id, name: a.name, preset: a.data as Preset, group: 'Published' as const }),
+        )];
+        const q = query.trim().toLowerCase();
+        // filtered here rather than re-fetching per keystroke: one page holds the library
+        const shown = q ? all.filter((p) => p.name.toLowerCase().includes(q)) : all;
+        return (
+          <details className="splash-picker" open>
+            <summary>
+              Preset library
+              <span className="hint">{presets.loading ? 'loading…' : `${shown.length} of ${all.length}`}</span>
+            </summary>
+            <input className="splash-search" type="search" placeholder="Search presets…"
+              value={query} onChange={(e) => setQuery(e.target.value)} />
+            {presets.error && <p style={{ color: 'var(--hot)', fontSize: 14 }}>{presets.error}</p>}
+            {shown.length === 0 && <p className="state-note">Nothing matches “{query}”.</p>}
+            <div className="splash-grid">
+              {shown.map((p) => (
+                <button key={`${p.group}:${p.id}`} type="button" className="splash-pick" title={`${p.name} · ${p.group}`}
+                  onClick={() => pickPreset(p.preset, p.name)}>
+                  <span className="splash-pick-thumb"><AssetThumb preset={p.preset} /></span>
+                  <span className="splash-pick-name">{p.name}</span>
+                </button>
+              ))}
+            </div>
+          </details>
+        );
+      })()}
 
       <div className="field-row">
         <label htmlFor="spname">Name</label>
@@ -230,6 +250,15 @@ function SplashEditor({ existing, onClose, onSaved, onAct }: {
     </Dialog>
   );
 }
+
+/**
+ * The editor's own library, which is where nearly every preset actually lives: the
+ * showcase, the text presets, the app screens, the mascot kit and the cinematics are
+ * compiled into the client and never pass through the assets API. Browsing only what the
+ * API returns showed the handful of *published* ones and hid the ~100 built-ins, which
+ * read as "the list is broken".
+ */
+const BUILTINS = builtinPresets().map((p) => ({ id: p.id, name: p.name, preset: p, group: 'Built-in' as const }));
 
 /** The column has a CHECK constraint; clamping here means a long timeline produces a
  *  sensible splash rather than a 400 from the API. */

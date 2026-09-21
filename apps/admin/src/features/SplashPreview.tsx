@@ -29,19 +29,29 @@ export function SplashPreview({ data, background, durationMs, fadeMs, playKey }:
     return () => cancelAnimationFrame(raf.current);
   }, [durationMs, playKey, data]);
 
+  const view = compOf(data as Project);
   const scene = (() => {
-    try { return data ? sceneAt(data as Project, t, compOf(data as Project)) : null; } catch { return null; }
+    try { return data ? sceneAt(data as Project, t, view) : null; } catch { return null; }
   })();
 
   return (
     <div className="splash-preview" style={{ background }}>
       {scene
         ? (
-          <div style={{ width: '58%', opacity: fading ? 0 : 1, transition: `opacity ${fadeMs}ms ease` }}>
-            <MascotThumb scene={scene} view={compOf(data as Project)} />
+          <div style={{
+            height: '86%', aspectRatio: `${view.width} / ${view.height}`,
+            opacity: fading ? 0 : 1, transition: `opacity ${fadeMs}ms ease`,
+          }}>
+            {/* framed by the composition, never by what is in it: left to fit its own
+             *  bounds the mascot grows and shrinks as particles fly and as you switch
+             *  preset, which is not what ships */}
+            <MascotThumb scene={scene} view={view} box={COMP_BOX(view)} pad={0} />
           </div>
         )
         : <p className="splash-preview-empty">This animation can’t be rendered. Choose another source.</p>}
     </div>
   );
 }
+
+const COMP_BOX = (view: { width: number; height: number }) =>
+  ({ x0: 0, y0: 0, x1: view.width, y1: view.height });
