@@ -4,6 +4,7 @@ import {
   activeTimeline, bakeLottie, buildDotLottie, buildRuntimePack, builtinPresets, CapabilityError, compOf, defaultProject, EditorSession,
   presetData, presetTags, registerCapabilities, searchPresets, type Capability, type JsonSchema, type Preset, type Project,
 } from '@blooby/studio/engine';
+import { env } from '../../config/env.js';
 import { assetsService } from '../assets.service.js';
 import { projectsService } from '../projects.service.js';
 import { putExport } from '../storage.service.js';
@@ -182,6 +183,16 @@ async function findPresetAnywhere(conn: Conn, ref: unknown) {
   return p;
 }
 
+/**
+ * Where a person opens this project.
+ *
+ * An AI client cannot show them the animation moving: it renders single frames, and GIF
+ * and MP4 are encoded in the browser, not here. So every capability that names a project
+ * hands back the link too — "here it is: <url>" is the one thing an assistant can say that
+ * puts the running animation, the export menu and the timeline in front of them.
+ */
+export const editorUrl = (projectId: string) => `${env.appUrl}/projects/${projectId}`;
+
 // ---------------------------------------------------------------------------
 // the capabilities
 
@@ -194,11 +205,11 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
   // --- projects ---------------------------------------------------------------------
   {
     id: 'project_list', title: 'List projects', category: 'project', mutates: false, scope: 'project:read',
-    description: 'Your projects, newest first: id, name, visibility, last update. q filters by name. Page with cursor.',
+    description: 'Your projects, newest first: id, name, visibility, last update, and the link to open each one in Blooby. q filters by name. Page with cursor.',
     inputSchema: obj({ q: str, limit: num, cursor: str }), examples: [{ q: 'intro' }],
     handler: async (conn, a) => {
       const page = await projectsService.list(conn.principal.userId, { limit: Math.min(50, Number(a.limit) || 20), cursor: a.cursor as string | undefined, q: a.q as string | undefined, sort: 'recent' });
-      return { summary: `${page.items.length} project(s)`, data: { projects: page.items.map((p) => ({ id: p.id, name: p.name, visibility: p.visibility, updatedAt: p.updatedAt, open: p.id === conn.projectId })), nextCursor: page.nextCursor } };
+      return { summary: `${page.items.length} project(s)`, data: { projects: page.items.map((p) => ({ id: p.id, name: p.name, visibility: p.visibility, updatedAt: p.updatedAt, open: p.id === conn.projectId, url: editorUrl(p.id) })), nextCursor: page.nextCursor } };
     },
   },
   {
@@ -217,12 +228,12 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       const o = await workspace.open(conn.principal.userId, id).catch(asCapabilityError);
       setProject(conn, id);
       const state = (await o.session.invoke('editor_get_state', { level: 'standard' })).result;
-      return { summary: `Opened “${o.name}”`, data: { projectId: id, name: o.name, canEdit: o.canEdit, state, next: 'render_frame to see it; guide_get { topic: "workflow" } for how to work.' } };
+      return { summary: `Opened “${o.name}”`, data: { projectId: id, name: o.name, url: editorUrl(id), canEdit: o.canEdit, state, next: 'render_frame to see it; guide_get { topic: "workflow" } for how to work. `url` is where the person opens it — give it to them when they want to watch it play or export a GIF.' } };
     },
   },
   {
     id: 'project_create', title: 'Create a project', category: 'project', mutates: true, scope: 'project:write',
-    description: 'A new cloud project with the default mascot, opened on this connection. It appears on the person\'s dashboard straight away.',
+    description: 'A new cloud project with the default mascot, opened on this connection. It appears on the person\'s dashboard straight away, and `url` in the result is the link to give them.',
     inputSchema: obj({ name: str }, ['name']), examples: [{ name: 'Happy entrance' }],
     handler: async (conn, a) => {
       const twin = await projectsService.list(conn.principal.userId, { limit: 5, q: String(a.name), sort: 'recent' })
@@ -233,7 +244,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       workspace.scheduleSave(o);   // write the full default document, not the `{}` seed
       return {
         summary: `Created “${row.name}”`,
-        data: { projectId: row.id, name: row.name, state: (await o.session.invoke('editor_get_state', { level: 'standard' })).result },
+        data: { projectId: row.id, name: row.name, url: editorUrl(row.id), state: (await o.session.invoke('editor_get_state', { level: 'standard' })).result },
         warnings: twin ? [`You already had a project called “${twin.name}” (${twin.id}); this is a second one. project_delete removes either.`] : [],
       };
     },
@@ -245,7 +256,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     handler: async (conn) => {
       if (!conn.projectId) return { summary: 'No project open', data: { projectId: null, next: 'project_open or project_create' } };
       const { o, warning } = await current(conn);
-      return { summary: o.name, data: { projectId: o.projectId, name: o.name, canEdit: o.canEdit, storedVersion: o.baseVersion, ...o.session.status(), lastSaveError: o.lastSaveError ?? null }, warnings: warning ? [warning] : [] };
+      return { summary: o.name, data: { projectId: o.projectId, name: o.name, url: editorUrl(o.projectId), canEdit: o.canEdit, storedVersion: o.baseVersion, ...o.session.status(), lastSaveError: o.lastSaveError ?? null }, warnings: warning ? [warning] : [] };
     },
   },
   {
@@ -294,7 +305,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       const copy = await projectsService.duplicate(source, conn.principal.userId, a.name as string | undefined).catch(asCapabilityError);
       await workspace.open(conn.principal.userId, copy.id);
       setProject(conn, copy.id);
-      return { summary: `Duplicated as “${copy.name}” and opened it`, data: { projectId: copy.id, name: copy.name } };
+      return { summary: `Duplicated as “${copy.name}” and opened it`, data: { projectId: copy.id, name: copy.name, url: editorUrl(copy.id) } };
     },
   },
   {
@@ -506,7 +517,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
   // --- export -------------------------------------------------------------------------
   {
     id: 'export_formats', title: 'Export formats', category: 'export', mutates: false, scope: 'export:write',
-    description: 'What export_start can produce.',
+    description: 'What export_start can produce here, and what only the editor can — GIF and MP4 render on the person\'s own device, so those are a link, not a file.',
     inputSchema: obj({}),
     handler: async () => ({
       summary: '5 formats', data: {
@@ -515,7 +526,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
         runtime: 'React Native pack (zip): the .lottie, machine config, a generated Mascot.tsx and a README',
         png: 'one frame (atMs) as a PNG at 2× the composition',
         svg: 'one frame (atMs) as SVG',
-        notSupportedHere: 'GIF and MP4 render in the browser — use the editor\'s Export menu',
+        notSupportedHere: 'GIF and MP4 are encoded in the browser, not here. project_current gives the project\'s `url`: send the person there and the editor\'s Export menu makes them.',
       },
     }),
   },

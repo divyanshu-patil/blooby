@@ -5,6 +5,17 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/projects/:id",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Twitterbot|Slackbot|Slack-ImgProxy|Discordbot|LinkedInBot|WhatsApp|TelegramBot|Pinterest|redditbot|Applebot|Googlebot|bingbot|DuckDuckBot|SkypeUriPreview|vkShare|embedly|Iframely|quora link preview|nuzzel|Bitrix|XING-contenttabreceiver|Mastodon|Bluesky).*"
+        }
+      ],
+      "destination": "https://blooby-l35k.onrender.com/og/projects/:id"
+    },
+    {
       "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }

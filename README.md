@@ -1,7 +1,12 @@
+<img src="brand/exports/mark-dark-160.png#gh-light-mode-only" alt="" width="80" align="left" />
+<img src="brand/exports/mark-light-160.png#gh-dark-mode-only" alt="" width="80" align="left" />
+
 # Blooby
 
 A browser studio for building and animating mascot characters, and shipping them as
 Lottie, dotLottie (with a real state machine), GIF, MP4, PNG or a React Native component.
+
+<br clear="left" />
 
 [![CI](https://github.com/divyanshu-patil/blooby/actions/workflows/ci.yml/badge.svg)](https://github.com/divyanshu-patil/blooby/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-black.svg)](./LICENSE)
@@ -83,9 +88,10 @@ values are shipped in the browser bundle, so put only publishable keys in them.*
 | `apps/api` | `NODE_ENV`, `PORT` | yes | Runtime mode and port (default `3000`) |
 | | `APP_URL`, `ADMIN_URL` | yes | Web and admin origins (CORS) |
 | | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_JWKS_URL` | yes | Auth and data. The secret key is server-only |
-| | `DATABASE_URL` | yes | Prisma connection. Use the Supabase **transaction** pooler (`:6543`, `pgbouncer=true&connection_limit=1`) |
+| | `DATABASE_URL` | yes | Prisma connection. Use the Supabase **transaction** pooler (`:6543`, `pgbouncer=true&connection_limit=10`). Not `connection_limit=1` — that serialises every query in the process onto one connection |
 | | `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | yes | Project JSON storage (private bucket) |
 | | `ALLOWED_MEDIA_TYPES`, `MAX_PROJECT_BYTES` | yes | Upload limits |
+| | `REDIS_URL` | no | Shared rate limits and cache invalidation across instances. Unset is a supported way to run it — see `docker compose up -d redis` |
 | | `OLLAMA_URL` | no | Upstream for cloud Copilot requests |
 
 \* Leave all three unset in `apps/web` to run the editor offline on the bundled presets.
@@ -129,10 +135,40 @@ apps/web/           user-facing shell: auth, dashboard, community, cloud editor
 apps/admin/         overview, moderation, users, projects, official presets, splashscreens
 apps/api/           Express + Prisma + Supabase (routes → controllers → services → repositories)
 supabase/           database migrations
+brand/              the icon: vector masters, and what every favicon is generated from
 ```
 
 `packages/studio/src/index.ts` is the package's only public surface; the apps import from
 `@blooby/studio`.
+
+## The icon
+
+`brand/` is the source of truth. The mark is a circle and two tilted pills — the same
+three shapes the editor draws — and it comes in two colourways:
+
+| File | Body | For |
+|---|---|---|
+| `blooby-icon-dark.svg` | near-black | **light** backgrounds |
+| `blooby-icon-light.svg` | paper | **dark** backgrounds |
+| `blooby-icon-maskable.svg` | near-black on an opaque plate | Android launchers, which crop to their own shape |
+| `apple-touch-icon.svg` | near-black on an opaque plate | iOS home screens, which do not composite transparency |
+| `favicon.svg` | **both** | the tab strip — it carries its own `prefers-color-scheme` |
+| `blooby-icon.icon/` | — | the Apple Icon Composer project the rest came from |
+
+`brand/geometry.txt` has the three shapes' exact numbers. Nothing redraws them by eye: the
+21° tilt and the two different eye sizes are what make the mark recognisable at 16px, and
+they are the first thing an approximation loses. Every SVG here wraps the same source
+geometry in one transform, `BloobyMark` in `packages/studio/src/kit` uses it in the app,
+and the API's share cards (`services/og.service.ts`) use it too.
+
+`apps/web/public` and `apps/admin/public` are **generated** from `brand/` — favicon.svg,
+favicon.ico (16/32/48), favicon-96.png, apple-touch-icon.png, icon-192.png, icon-512.png and
+a web manifest, for both apps. They share one mark, so an installed admin panel is told
+apart from the app by its name and not by its icon. Regenerate after changing the masters:
+
+```bash
+pnpm icons
+```
 
 ## Using the editor
 

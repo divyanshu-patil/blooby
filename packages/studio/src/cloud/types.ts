@@ -26,6 +26,12 @@ export interface ProjectRow {
   owner?: string | null;
   /** the owner's avatar — set on admin listings */
   ownerAvatarUrl?: string | null;
+  /**
+   * A short-lived link to the project's JSON in the bucket, on every listing and on
+   * `getData`. A card fetches it DIRECTLY: the API never carries the payload, and a page
+   * of cards costs no requests to it at all.
+   */
+  dataUrl?: string;
 }
 
 /** What the community page shows in the open: most-used items and the most active creators. */
@@ -76,4 +82,44 @@ export interface Analytics {
     topAssets: { id: string; name: string; kind: AssetKind; source: AssetSource; downloadCount: number }[];
     topCreators: { userId: string; username: string | null; projects: number }[];
   };
+}
+
+// --- admin analytics -----------------------------------------------------------------
+
+/** A dense per-day series: a quiet day is a zero, never a missing point. */
+export interface DayPoint { date: string }
+
+/**
+ * Page analytics, the shape Vercel's Web Analytics answers: how much traffic, from where,
+ * to which pages, and how people move between them. `visitors` is a daily-rotating salted
+ * hash — it counts people within a day and cannot follow one across days.
+ */
+export interface Traffic {
+  days: number;
+  app: 'web' | 'admin';
+  totals: { views: number; visitors: number; signedInVisitors: number; entries: number; viewsPerVisitor: number };
+  deltas: { views: number | null; visitors: number | null };
+  series: (DayPoint & { views: number; visitors: number })[];
+  topPages: { path: string; views: number; visitors: number; signedIn: number }[];
+  referrers: { source: string; views: number; visitors: number }[];
+  devices: { device: string; views: number }[];
+  /** the page people were on, and the one they opened next */
+  flows: { from: string; to: string; views: number }[];
+}
+
+/** MCP usage, from the audit trail every capability call already writes. */
+export interface McpUsage {
+  days: number;
+  totals: {
+    calls: number; people: number; projects: number; failed: number; errorRate: number;
+    p50Ms: number; p95Ms: number;
+    connectedPeople: number; oauthGrants: number; personalTokens: number;
+  };
+  deltas: { calls: number | null; people: number | null };
+  series: (DayPoint & { calls: number; people: number; failed: number })[];
+  /** grouped by the app's name: one app that registered twice is one row (`installs`) */
+  clients: { name: string; installs: number; calls: number; people: number; failed: number; lastUsedAt: string }[];
+  capabilities: { capability: string; calls: number; people: number; failed: number; avgMs: number }[];
+  errors: { code: string; calls: number }[];
+  recent: { capability: string; ok: boolean; error: string | null; durationMs: number | null; client: string; at: string }[];
 }

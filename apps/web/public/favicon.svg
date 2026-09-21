@@ -1,5 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <circle cx="16" cy="16" r="15" fill="#17161b"/>
-  <rect x="9.6" y="10" width="4.2" height="9" rx="2.1" fill="#e4dfd5"/>
-  <rect x="18.2" y="10" width="4.2" height="9" rx="2.1" fill="#e4dfd5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    One file for both themes.
+
+    A tab strip is light in light mode and dark in dark mode, so a single-colour mark is
+    invisible in one of them. An SVG favicon carries its own stylesheet and Chrome, Firefox
+    and Safari all honour prefers-color-scheme inside it — which is why this is one file
+    and not two links the browser has to choose between.
+
+    Light theme (light tab strip) gets the DARK mark; dark theme gets the light one.
+    Geometry: brand/geometry.txt — never redraw it by eye.
+  -->
+  <style>
+    .body { fill: #0E0E0E }
+    .eye  { fill: #FFFFFF }
+    @media (prefers-color-scheme: dark) {
+      .body { fill: #D9D9D9 }
+      .eye  { fill: #000000 }
+    }
+  </style>
+  <g transform="translate(-7.62989 -14.87126) scale(0.11494252873563218)">
+    <circle cx="2293.58" cy="2356.58" r="2088" class="body"/>
+    <rect x="2293.68" y="1094" width="722" height="1486" rx="361" transform="rotate(21.0472 2293.68 1094)" class="eye"/>
+    <rect x="3602.03" y="1689.49" width="574.157" height="1346.14" rx="287.079" transform="rotate(21.0472 3602.03 1689.49)" class="eye"/>
+  </g>
 </svg>

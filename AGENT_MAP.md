@@ -123,6 +123,36 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
   caps), `workspace.ts` (session per user+project, autosave 2.5s, `sync` vs stored version, proposals), `auth.service.ts`.
 - Editor: `useMcpLive` polls `/api/mcp/live`; CloudEditor adopts a newer AI save via `useAutosave().adoptRemote`.
 
+## Latency (why the API is shaped this way)
+- One round trip to the Supabase pooler measures ~580ms from the deployment; an S3 GET ~270ms;
+  the median project is 320KB. Request time = the COUNT of serial hops, so the rule is: add a
+  hop only if the answer can change.
+- `utils/ttlCache.ts` = read-through cache holding the PROMISE (a burst shares one load).
+  `utils/invalidate.ts shared(name, forget)` publishes the eviction over Redis so every instance
+  drops it; `listenForInvalidations()` in index.ts subscribes. No Redis → local forget + the TTL.
+- Cached: the profile behind `req.user` (30s, evicted by every profile write), a project's OWNER
+  (10min — a project never changes hands, so it cannot go stale), auth identities (60s).
+  Visibility/access are NEVER cached: the owner flips them at will.
+- Project JSON never passes through the API. `/data` and every listing carry a presigned
+  `dataUrl`; the browser fetches S3 directly. Objects are stored gzipped with `ContentEncoding`,
+  so the browser inflates them and a card moves ~7× less; the reader sniffs gzip's magic bytes,
+  so pre-compression objects still open. `cloud/client.ts` gzips request bodies too (Express
+  inflates them with no server change).
+- An owner's autosave is ONE query: `writeAndBump` puts the object, then compare-and-sets the
+  version. Order is load-bearing — a failed upload must leave the row on the whole object.
+- `config/redis.ts` is optional everywhere. It backs the HTTP rate limiters (so "60 a minute"
+  is not 60 per instance) and the invalidation channel. The MCP throttle stays in memory.
+
+## Sharing (Open Graph)
+- `/og/card.png` and `/og/projects/:id.png` (api `routes/og.routes.ts` + `services/og.service.ts`)
+  render a 1200×630 card with the SAME renderer as the stage (`sceneAt` → `sceneToSvg` → resvg),
+  cropped to `sceneBounds` rather than the composition or the mascot is a dot. PUBLIC projects only —
+  a private one gets the generic card and generic words, because an unfurl is done by a stranger's server.
+- The app is an SPA, so crawlers can't see per-project tags. `apps/web/vercel.json` rewrites
+  `/projects/:id` to `/og/projects/:id` on the API **for known bot user-agents only**; humans get the app.
+  That rewrite is the one place the API origin is hardcoded — change it if the API moves.
+- `apps/web/index.html` holds the site-wide tags; `%VITE_API_URL%` is substituted by Vite at build.
+
 ## Admin
 - `apps/admin/src/features/Splashscreens.tsx` builds splash data; `SplashPreview.tsx` renders
   via `sceneAt` + `MascotThumb` (same renderer as the editor).

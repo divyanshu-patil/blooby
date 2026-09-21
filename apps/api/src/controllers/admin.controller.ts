@@ -1,9 +1,10 @@
 import type { Request, Response } from 'express';
 import { analyticsService } from '../services/analytics.service.js';
+import { trafficService } from '../services/traffic.service.js';
 import { usersService } from '../services/users.service.js';
 import { assetsService } from '../services/assets.service.js';
 import { prisma } from '../config/prisma.js';
-import type { AnalyticsRangeDto, ListUsersDto, UpdateUserRoleDto } from '../dtos/admin/index.js';
+import type { AnalyticsRangeDto, ListUsersDto, TrafficRangeDto, UpdateUserRoleDto } from '../dtos/admin/index.js';
 import type { ListAssetsDto, ModerateAssetDto } from '../dtos/assets/index.js';
 
 export const adminController = {
@@ -16,6 +17,16 @@ export const adminController = {
     ]);
     res.json({ overview, growth, insights, days });
   },
+
+  /** Page analytics — the only numbers in the panel that come from an event table. */
+  traffic: (req: Request, res: Response) => {
+    const { days, app } = req.query as unknown as TrafficRangeDto;
+    return trafficService.pages(days, app).then((r) => res.json(r));
+  },
+
+  /** MCP usage: who has connected an AI app, which apps, and what they do with it. */
+  mcp: (req: Request, res: Response) =>
+    trafficService.mcp((req.query as unknown as AnalyticsRangeDto).days).then((r) => res.json(r)),
 
   listUsers: (req: Request, res: Response) =>
     usersService.list(req.query as unknown as ListUsersDto).then((r) => res.json(r)),

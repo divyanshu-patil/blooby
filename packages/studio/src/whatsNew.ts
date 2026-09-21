@@ -38,6 +38,43 @@ const step = (element: string, title: string, description: string): DriveStep =>
 
 export const RELEASES: Release[] = [
   {
+    version: '2026.09.21',
+    date: '21 September 2026',
+    title: 'The cloud got quick',
+    items: [
+      {
+        id: 'faster-everything', surface: 'dashboard',
+        title: 'Saving, opening and loading are much faster',
+        body: 'Every request used to look your account up in the database first, and every project travelled through our server twice on its way to you. Now it does neither: your projects come straight from storage, compressed, and the server is out of the way. Dashboards fill in at once and saves land in a fraction of the time.',
+      },
+      {
+        id: 'new-icon', surface: 'dashboard',
+        title: 'Blooby has its icon',
+        body: 'The real mark is in the browser tab now, on your home screen if you add it there, and on every link you share. It follows your system theme: dark on a light tab strip, light on a dark one.',
+      },
+      {
+        id: 'share-cards', surface: 'dashboard',
+        title: 'A shared project shows the mascot',
+        body: 'Paste a link to one of your public projects into Slack, Discord, X or anywhere else and the preview is the mascot itself, with the project’s name — rendered by the same engine as the editor, so it can never be out of date. Private projects show the plain blooby card and nothing about them at all.',
+      },
+      {
+        id: 'admin-traffic-mcp', surface: 'dashboard',
+        title: 'For admins: Traffic and MCP',
+        body: 'Two new tabs in the admin panel. Traffic shows which pages people open, where they arrived from and where they go next — cookieless, so a “visitor” is a hash that rotates daily and can never follow anyone across days. MCP shows who has connected an AI app, which apps, what they call and why calls fail.',
+      },
+      {
+        id: 'mcp-project-link', surface: 'editor',
+        title: 'Your AI app can send you straight to the project',
+        body: 'Ask Claude or ChatGPT to make you something and it now hands back a link that opens it right here — which is where GIF and MP4 are made, since those render on your own machine.',
+      },
+      {
+        id: 'faster-saves', surface: 'editor',
+        title: 'Saves are a sixth of the size',
+        body: 'The editor compresses your project before sending it, so autosave over a slow connection finishes in about a seventh of the time it took. Nothing changes about what is saved — only how much of it goes up the wire.',
+      },
+    ],
+  },
+  {
     version: '2026.09.20',
     date: '20 September 2026',
     title: 'Animate with Claude, ChatGPT and Cursor — and your picture in the sidebar',

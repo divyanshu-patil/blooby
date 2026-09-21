@@ -89,7 +89,7 @@ export function Community({ onAdded }: { onAdded?: (asset: AssetRow) => void }) 
         ) : (
           <div className="card-grid">
             {(data.items as ProjectRow[]).map((p) => (
-              <ProjectCard key={p.id} project={p} load={() => projectsApi.getData(p.id).then((r) => r.data)}
+              <ProjectCard key={p.id} project={p} load={() => projectsApi.projectData(p)}
                 footer={`${p.owner ? `by ${p.owner} · ` : ''}${p.viewCount ?? 0} views · ${p.duplicateCount ?? 0} copies${p.access === 'edit' ? ' · open to edit' : ''}`}
                 onOpen={() => navigate(`/projects/${p.id}`)}
                 menu={[

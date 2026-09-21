@@ -27,6 +27,8 @@ beforeEach(() => {
   for (const m of [db.project, db.asset, db.profile]) for (const fn of Object.values(m)) fn.mockReset();
   listUsers.mockResolvedValue({ data: { users: [] }, error: null });
   db.project.groupBy.mockResolvedValue([]);
+  // identities are cached for a minute in the process; every case starts cold
+  usersService.forgetIdentity();
 });
 
 const status = async (p: Promise<unknown>) => {
@@ -145,6 +147,28 @@ it('pages the identity provider until it finds every account it asked about', as
   const map = await usersService.identitiesFor(['late']);
   expect(listUsers).toHaveBeenCalledTimes(2);
   expect(map.get('late')?.avatarUrl).toBe('p');
+});
+
+/**
+ * The Admin API only lists, so one unknown id pages the whole directory — a network round
+ * trip on a page that has already paid for its own queries. A community browse asks for
+ * the same dozen names on every scroll and sort.
+ */
+it('asks the identity provider once for a batch, and not again within the ttl', async () => {
+  listUsers.mockResolvedValue({ data: { users: [{ id: 'u1' }, { id: 'u2' }] }, error: null });
+  await usersService.identitiesFor(['u1', 'u2']);
+  expect(listUsers).toHaveBeenCalledTimes(1);
+  await usersService.identitiesFor(['u1', 'u2']);
+  await usersService.identitiesFor(['u2']);
+  expect(listUsers).toHaveBeenCalledTimes(1);
+});
+
+/** An id with no auth account behind it would otherwise re-page the directory forever. */
+it('remembers that an account was not found, rather than looking again every time', async () => {
+  listUsers.mockResolvedValue({ data: { users: [] }, error: null });
+  expect((await usersService.identitiesFor(['gone'])).size).toBe(0);
+  expect((await usersService.identitiesFor(['gone'])).size).toBe(0);
+  expect(listUsers).toHaveBeenCalledTimes(1);
 });
 
 it('prefers the chosen username and uploaded avatar over the provider’s', async () => {

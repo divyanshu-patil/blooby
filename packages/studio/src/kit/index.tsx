@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { GITHUB_URL, GithubMark } from './TourMenu';
 
 /**
@@ -14,15 +14,43 @@ import { GITHUB_URL, GithubMark } from './TourMenu';
 export interface NavItem { id: string; label: string; glyph: string; count?: number }
 export interface NavGroup { title?: string; items: NavItem[] }
 
-/** The mascot reduced to its silhouette: body, two eyes. Same shapes the editor draws,
- *  so the mark and the product are literally the same thing. */
-export const BloobyMark = ({ size = 20 }: { size?: number }) => (
-  <svg className="brand-mark" width={size} height={size} viewBox="0 0 20 20" aria-hidden>
-    <circle cx="10" cy="10" r="9" fill="currentColor" />
-    <circle cx="6.8" cy="8.6" r="1.9" fill="var(--panel)" />
-    <circle cx="13.2" cy="8.6" r="1.9" fill="var(--panel)" />
-  </svg>
-);
+/**
+ * The official mark, in the app.
+ *
+ * These three shapes are the icon's own geometry, scaled — not an approximation of it.
+ * The 21° tilt and the two DIFFERENT eye sizes are what make it recognisable at 20px, and
+ * they are the first thing lost when somebody redraws it by eye, which is what the two
+ * upright circles this replaced had done. The masters are in brand/; brand/geometry.txt
+ * has the numbers and where they came from.
+ *
+ * The body is `currentColor` so the mark takes the colour of whatever it sits in, and the
+ * eyes are knocked out of it — a hole reads correctly on paper and on ink, where a fixed
+ * eye colour is invisible on one of them.
+ */
+export function BloobyMark({ size = 20 }: { size?: number }) {
+  // One mask per instance: the mark renders in the sidebar, the sign-in screen and the
+  // admin header at once, and a hard-coded id would be three elements sharing one.
+  // The colons useId puts in its ids are stripped — they are legal in an id and have a
+  // history of tripping up url(#…) references in SVG.
+  const eyes = `blooby-eyes-${useId().replace(/:/g, '')}`;
+  return (
+    <svg className="brand-mark" width={size} height={size} viewBox="0 0 512 512" aria-hidden>
+      <mask id={eyes}>
+        <rect width="512" height="512" fill="#fff" />
+        <g transform={MARK}>
+          <rect x="2293.68" y="1094" width="722" height="1486" rx="361" transform="rotate(21.0472 2293.68 1094)" fill="#000" />
+          <rect x="3602.03" y="1689.49" width="574.157" height="1346.14" rx="287.079" transform="rotate(21.0472 3602.03 1689.49)" fill="#000" />
+        </g>
+      </mask>
+      <g mask={`url(#${eyes})`}>
+        <circle cx="2293.58" cy="2356.58" r="2088" fill="currentColor" transform={MARK} />
+      </g>
+    </svg>
+  );
+}
+
+/** Puts the icon's own 4587-unit geometry into a 512 box. See brand/geometry.txt. */
+const MARK = 'translate(-7.62989 -14.87126) scale(0.11494252873563218)';
 
 export function Shell({ nav, active, onNavigate, footer, brand, children }: {
   nav: NavGroup[];

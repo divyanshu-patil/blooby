@@ -206,11 +206,22 @@ it('runs a whole agent workflow through MCP alone', async () => {
   const tools = (await c.listTools()).tools.map((t) => t.name);
   expect(tools).toEqual(expect.arrayContaining(['project_create', 'add_keyframe', 'render_frame', 'invoke', 'export_start', 'preset_save']));
   expect(c.getInstructions()).toContain('guide_get');
+  // the ceilings are told at connect, not discovered by being refused
+  expect(c.getInstructions()).toMatch(/300 renders|6000 calls/);
+  expect(c.getInstructions()).toContain('batch_execute');
 
   // 2. create a project
   const created = await call(c, 'project_create', { name: 'Happy entrance' });
   expect(created.body.ok).toBe(true);
   const projectId = created.body.result.projectId as string;
+  /**
+   * GIF and MP4 are encoded in the person's browser, and an AI client cannot show them the
+   * animation moving at all. The link is the one thing it can hand over that does.
+   */
+  expect(created.body.result.url).toContain(`/projects/${projectId}`);
+  expect((await call(c, 'project_current', {})).body.result.url).toContain(projectId);
+  expect((await call(c, 'project_list', {})).body.result.projects[0].url).toContain('/projects/');
+  expect((await call(c, 'export_formats', {})).body.result.notSupportedHere).toMatch(/url|editor/i);
 
   // 3. composition
   expect((await call(c, 'set_composition', { width: 1080, height: 1080 })).body.ok).toBe(true);

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import {
-  Avatar, EmptyState, Shell, Splashscreen, WhatsNewButton, auth, authApi, configureWhatsNew, startTour, startTourWhenReady, useSession,
+  Avatar, EmptyState, Shell, Splashscreen, WhatsNewButton, auth, authApi, configureWhatsNew, startTour, startTourWhenReady,
+  usePageViews, useSession,
   type DriveStep, type NavGroup, type SessionUser,
 } from '@blooby/studio';
 import { AuthScreen } from './features/auth/AuthScreen';
@@ -33,6 +34,11 @@ const WEB_TOUR: DriveStep[] = [
 export function App() {
   const { user, ready } = useSession();
   const [splashDone, setSplashDone] = useState(false);
+
+  // which pages people open, cookielessly — one report per navigation, for the admin
+  // panel's traffic tab. Here rather than per screen so the page they came FROM travels
+  // with it, which is what turns a list of pages into how people move between them.
+  usePageViews(useLocation().pathname, 'web');
 
   // What's New reads and writes what this person has seen on their profile, in the dashboard and the editor alike
   useEffect(() => {

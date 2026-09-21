@@ -16,7 +16,11 @@ vi.mock('jsonwebtoken', () => ({
 }));
 
 const { authenticate, optionalAuth } = await import('./authenticate.js');
+const { profilesRepository } = await import('../repositories/profiles.repository.js');
 const { HttpError } = await import('../utils/httpError.js');
+
+/** The profile lookup is cached for 30s, so every case has to start from a cold entry. */
+const SUBJECTS = ['u1', 'u-from-token'];
 
 const req = (auth?: string) =>
   ({ headers: auth ? { authorization: auth } : {} }) as unknown as Request;
@@ -27,7 +31,7 @@ const run = async (fn: typeof authenticate, r: Request) => {
   return passed;
 };
 
-beforeEach(() => { findUnique.mockReset(); verifyImpl.mockReset(); });
+beforeEach(() => { findUnique.mockReset(); verifyImpl.mockReset(); SUBJECTS.forEach(profilesRepository.forget); });
 
 it('rejects a request with no bearer token', async () => {
   expect(await run(authenticate, req())).toBeInstanceOf(HttpError);
@@ -75,6 +79,27 @@ it('looks the profile up by the token subject, not by anything the caller sent',
   findUnique.mockResolvedValue({ id: 'u-from-token', role: 'user' });
   await run(authenticate, req('Bearer x'));
   expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u-from-token' } });
+});
+
+/**
+ * One round trip to the pooler is ~580ms from the deployment, and this ran on every
+ * authenticated request. The cache is what took that off every save and every list.
+ */
+it('reads the profile once for a burst of requests from the same person', async () => {
+  verifyImpl.mockReturnValue({ sub: 'u1' });
+  findUnique.mockResolvedValue({ id: 'u1', role: 'user' });
+  await Promise.all(Array.from({ length: 12 }, () => run(authenticate, req('Bearer x'))));
+  expect(findUnique).toHaveBeenCalledTimes(1);
+});
+
+it('does not remember a missing profile — a new account\'s row arrives moments later', async () => {
+  verifyImpl.mockReturnValue({ sub: 'u1' });
+  findUnique.mockResolvedValue(null);
+  expect((await run(authenticate, req('Bearer x')) as HttpErrorType).status).toBe(401);
+  findUnique.mockResolvedValue({ id: 'u1', role: 'user' });
+  const r = req('Bearer x');
+  expect(await run(authenticate, r)).toBeUndefined();
+  expect(r.user?.id).toBe('u1');
 });
 
 it('carries a null email when the token has none', async () => {

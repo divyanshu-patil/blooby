@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import jwt, { type JwtHeader, type SigningKeyCallback } from 'jsonwebtoken';
 import { JwksClient } from 'jwks-rsa';
 import { env } from '../config/env.js';
-import { prisma } from '../config/prisma.js';
+import { profilesRepository } from '../repositories/profiles.repository.js';
 import { HttpError } from '../utils/httpError.js';
 
 /**
@@ -40,6 +40,12 @@ const bearer = (req: Request) => {
  * The role deliberately comes from the database and not from a JWT claim: app_metadata
  * is only as trustworthy as every code path that can write it, whereas public.profiles
  * has no insert/update policy for anon or authenticated at all.
+ *
+ * That lookup is CACHED (profilesRepository.findCached). It used to be a round trip on
+ * every authenticated request — ~580ms to the pooler from this deployment — which put a
+ * floor under every save, list and poll in the app, and multiplied by the forty-odd
+ * requests a dashboard fires. Every write to a profile evicts it, so nothing here goes
+ * stale except a row edited outside this server.
  */
 export async function authenticate(req: Request, _res: Response, next: NextFunction) {
   try {
@@ -49,8 +55,13 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     const claims = await verify(token);
     if (!claims.sub) throw HttpError.unauthorized('Token has no subject');
 
-    const profile = await prisma.profile.findUnique({ where: { id: claims.sub } });
-    if (!profile) throw HttpError.unauthorized('No profile for this account');
+    const profile = await profilesRepository.findCached(claims.sub);
+    if (!profile) {
+      // a brand-new account's profile is written by a database trigger; remembering the
+      // miss for the whole TTL would lock them out of their first half-minute
+      profilesRepository.forget(claims.sub);
+      throw HttpError.unauthorized('No profile for this account');
+    }
 
     // name and avatar for the shell: the profile's own first, else what the sign-in provider put
     // in the token — no extra Admin API round-trip per request

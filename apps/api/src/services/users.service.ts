@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { prisma } from '../config/prisma.js';
 import { profilesRepository } from '../repositories/profiles.repository.js';
 import { HttpError } from '../utils/httpError.js';
+import { shared } from '../utils/invalidate.js';
 import type { ListUsersDto } from '../dtos/admin/index.js';
 
 /**
@@ -14,6 +15,25 @@ import type { ListUsersDto } from '../dtos/admin/index.js';
  */
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const PER_PAGE = 1000;
+
+export interface Identity { email: string | null; name: string | null; avatarUrl: string | null; lastSignInAt: string | null }
+
+/**
+ * How long an auth identity is reused.
+ *
+ * The Admin API only LISTS, so resolving even one unknown id pages through accounts — a
+ * network round trip to Supabase, on a page that already paid for its own queries. A
+ * community browse or an admin project list asks for a dozen names at a time and asks
+ * again on every page, scroll and sort, so without this the same listing was fetched over
+ * and over. What it can be stale by is a display name or an avatar someone changed at
+ * their identity provider, for at most a minute.
+ */
+const IDENTITY_TTL_MS = 60_000;
+/** id → what the Admin API said, or null for "listed and not there". Misses are cached
+ *  too: an id with no auth account would otherwise re-page the whole directory forever. */
+const directory = new Map<string, { at: number; identity: Identity | null }>();
+const stale = (id: string) => (directory.get(id)?.at ?? 0) < Date.now() - IDENTITY_TTL_MS;
+const evictIdentity = shared('identity', (id: string) => { directory.delete(id); });
 
 /** A profile plus its auth identity. The chosen username and uploaded avatar win over the provider's. */
 const joined = <P extends { username: string | null; avatarUrl: string | null }>(
@@ -31,6 +51,21 @@ async function accounts(wanted: Set<string>) {
   }
 }
 
+/** One paged Admin API listing, mapped to what this app shows of a person. */
+async function fetchIdentities(ids: string[]) {
+  const out = new Map<string, Identity>();
+  for (const u of await accounts(new Set(ids))) {
+    const m = (u.user_metadata ?? {}) as Record<string, unknown>;
+    out.set(u.id, {
+      email: u.email ?? null,
+      name: str(m.full_name) ?? str(m.name),
+      avatarUrl: str(m.avatar_url) ?? str(m.picture),
+      lastSignInAt: u.last_sign_in_at ?? null,
+    });
+  }
+  return out;
+}
+
 export const usersService = {
   async list(dto: ListUsersDto) {
     const { items, nextCursor } = await profilesRepository.list(
@@ -38,12 +73,15 @@ export const usersService = {
       { limit: dto.limit, cursor: dto.cursor },
     );
 
-    const identities = await usersService.identitiesFor(items.map((p) => p.id));
-    const counts = await prisma.project.groupBy({
-      by: ['userId'],
-      where: { userId: { in: items.map((p) => p.id) } },
-      _count: { _all: true },
-    });
+    // concurrently: two independent round trips, and one of them leaves this network
+    const [identities, counts] = await Promise.all([
+      usersService.identitiesFor(items.map((p) => p.id)),
+      prisma.project.groupBy({
+        by: ['userId'],
+        where: { userId: { in: items.map((p) => p.id) } },
+        _count: { _all: true },
+      }),
+    ]);
     const projectCount = new Map(counts.map((c) => [c.userId, c._count._all]));
 
     const users = items
@@ -59,24 +97,31 @@ export const usersService = {
   },
 
   /**
-   * Batched identity lookup. The Admin API only lists, so it is paged until every wanted
-   * account is found — a single fixed page silently dropped everyone past the 200th signup.
+   * Batched identity lookup, cached per account (see IDENTITY_TTL_MS). Only the ids that
+   * are not already known are fetched, in ONE paged listing — so a repeat view of the same
+   * community page or user list costs nothing, and a page that is mostly familiar faces
+   * pays only for the new ones.
    */
   async identitiesFor(ids: string[]) {
-    const out = new Map<string, { email: string | null; name: string | null; avatarUrl: string | null; lastSignInAt: string | null }>();
+    const out = new Map<string, Identity>();
     if (!ids.length) return out;
-    const wanted = new Set(ids);
-    for (const u of await accounts(wanted)) {
-      const m = (u.user_metadata ?? {}) as Record<string, unknown>;
-      out.set(u.id, {
-        email: u.email ?? null,
-        name: str(m.full_name) ?? str(m.name),
-        avatarUrl: str(m.avatar_url) ?? str(m.picture),
-        lastSignInAt: u.last_sign_in_at ?? null,
-      });
+
+    const unknown = [...new Set(ids)].filter(stale);
+    // one listing for the whole batch, which is what the Admin API is good at
+    if (unknown.length) {
+      const found = await fetchIdentities(unknown);
+      const at = Date.now();
+      for (const id of unknown) directory.set(id, { at, identity: found.get(id) ?? null });
+    }
+    for (const id of new Set(ids)) {
+      const hit = directory.get(id)?.identity;
+      if (hit) out.set(id, hit);
     }
     return out;
   },
+
+  /** Forget a cached identity so the next read re-asks the provider. No id: forget all. */
+  forgetIdentity: (id?: string) => { if (id) evictIdentity(id); else directory.clear(); },
 
   /**
    * What the public may know about people: a name and an avatar, never an email. The name is

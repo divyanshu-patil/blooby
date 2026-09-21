@@ -1,0 +1,32 @@
+# Everything Blooby needs locally that is not Node.
+#
+#   docker compose up -d
+#
+# Postgres and S3 are NOT here on purpose: this project talks to the real Supabase project
+# and the real bucket, and a local stand-in for either would be a second schema to keep in
+# step (see apps/api/prisma/schema.prisma on why migrations live in supabase/migrations).
+#
+# Redis is optional. Without it the API runs exactly as it always has — one process, its
+# caches and rate limits in memory. With it, more than one instance agrees on both.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: blooby-redis
+    # 6380 on the host, not 6379: a developer machine usually already has a Redis on the
+    # default port from some other project's stack, and two of them fighting over it is a
+    # confusing first five minutes. Inside the container it is the normal 6379.
+    ports:
+      - '6380:6379'
+    # keep what is in memory across a restart, so a `docker compose restart` does not
+    # silently hand everyone a fresh rate-limit budget while testing exactly that
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

@@ -47,6 +47,23 @@ export const envSchema = z.object({
         + '("1" behind one load balancer), or the addresses to trust.',
     }),
 
+  /**
+   * Redis, if there is one. OPTIONAL: every use of it falls back to a single-process
+   * equivalent that is already correct (see config/redis.ts), so leaving this unset is a
+   * supported way to run the server, not a degraded one.
+   *
+   * Locally: `docker compose up -d redis` → redis://localhost:6379
+   * On Render: a Key Value instance's INTERNAL url (redis://, private network, no TLS).
+   * Its external url is rediss://, which works too — ioredis reads TLS off the scheme.
+   */
+  REDIS_URL: z
+    .string()
+    .default("")
+    .refine((v) => !v || /^rediss?:\/\//.test(v), {
+      message: 'must be a redis:// or rediss:// url (Render\'s Key Value instance gives you both; '
+        + 'prefer the internal redis:// one, which does not leave the private network)',
+    }),
+
   SUPABASE_URL: z.string().url(),
   /** Bypasses RLS. Server only — never reaches a browser bundle. */
   SUPABASE_SECRET_KEY: z.string().min(1),

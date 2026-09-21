@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChipBar, ErrorState, PageHeader, StatCard, adminApi, useAsync } from '@blooby/studio';
+import { BarChart, Ranked } from './charts';
 
 const RANGES = [
   { id: '7' as const, label: '7 days' },
@@ -48,63 +49,26 @@ export function Overview({ onGoTo }: { onGoTo: (view: string) => void }) {
 
             <section className="panel-block">
               <h2 className="block-title">Projects created</h2>
-              <Sparkline series={data.growth.projects} label="projects" />
+              <BarChart series={data.growth.projects} bars={[{ key: 'count', name: 'projects' }]} label="projects" />
             </section>
 
             <div className="two-col">
               <section className="panel-block">
                 <h2 className="block-title">New users</h2>
-                <Sparkline series={data.growth.users} label="users" />
+                <BarChart series={data.growth.users} bars={[{ key: 'count', name: 'users' }]} label="users" />
               </section>
 
               <section className="panel-block">
                 <h2 className="block-title">Most used assets</h2>
-                {data.insights.topAssets.length === 0
-                  ? <p className="state-note" style={{ padding: '10px 0' }}>Nothing has been used yet.</p>
-                  : (
-                    <ol className="ranked">
-                      {data.insights.topAssets.map((a) => (
-                        <li key={a.id}>
-                          <span className="ranked-name">{a.name}</span>
-                          <span className="tag">{a.source}</span>
-                          <span className="ranked-num">{a.downloadCount}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  )}
+                <Ranked empty="Nothing has been used yet."
+                  rows={data.insights.topAssets.map((a) => ({
+                    key: a.id, name: a.name, tags: <span className="tag">{a.source}</span>, value: a.downloadCount,
+                  }))} />
               </section>
             </div>
           </>
         )}
       </div>
     </>
-  );
-}
-
-/**
- * A bar chart drawn as plain SVG. No chart library for one series — the whole thing is
- * a max, a scale and a map.
- */
-function Sparkline({ series, label }: { series: { date: string; count: number }[]; label: string }) {
-  const max = Math.max(1, ...series.map((d) => d.count));
-  const total = series.reduce((a, b) => a + b.count, 0);
-
-  return (
-    <div>
-      <div className="chart-total">
-        <span className="chart-num">{total.toLocaleString()}</span> {label} in this period
-      </div>
-      <div className="chart" role="img" aria-label={`${total} ${label} over ${series.length} days`}>
-        {series.map((d) => (
-          <div key={d.date} className="chart-bar" title={`${d.date}: ${d.count}`}>
-            <div className="chart-fill" style={{ height: `${(d.count / max) * 100}%` }} />
-          </div>
-        ))}
-      </div>
-      <div className="chart-axis">
-        <span>{series[0]?.date}</span>
-        <span>{series[series.length - 1]?.date}</span>
-      </div>
-    </div>
   );
 }

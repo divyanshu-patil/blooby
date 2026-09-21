@@ -9,6 +9,7 @@ vi.mock('../repositories/projects.repository.js', () => ({
 vi.mock('../repositories/assets.repository.js', () => ({ assetsRepository: { findById: vi.fn() } }));
 vi.mock('./storage.service.js', () => ({
   putProjectJson: vi.fn(), getProjectJson: vi.fn(), deleteProjectJson: vi.fn(),
+  deleteProjectObjects: vi.fn(), presignedReadUrl: vi.fn(async (k: string) => `https://s3.test/${k}?sig`),
 }));
 
 const { projectsRepository } = await import('../repositories/projects.repository.js');
@@ -26,6 +27,9 @@ const project = (over: Record<string, unknown> = {}) =>
 
 beforeEach(() => {
   for (const m of [repo, assets, store]) for (const fn of Object.values(m)) fn.mockReset();
+  store.presignedReadUrl.mockImplementation(async (k: string) => `https://s3.test/${k}?sig`);
+  // a project's owner is remembered between saves; every case starts without one
+  projectsService.forgetOwner('p1');
 });
 
 const status = async (p: Promise<unknown>) => {
@@ -105,6 +109,70 @@ it('lets a stranger save only to a public project with edit access', async () =>
   expect(await status(projectsService.save('p1', 'u1', { project: {} }))).toBe(403);
   repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'private', access: 'edit', currentVersion: 1 }));
   expect(await status(projectsService.save('p1', 'u1', { project: {} }))).toBe(404);
+});
+
+/**
+ * A project never changes hands, so who owns it is the one thing about it that cannot go
+ * stale. Answering an autosave from that instead of re-reading the row is what took the
+ * second ~580ms round trip out of every save.
+ */
+it('an owner saving a version they name touches the database once', async () => {
+  saved();
+  repo.findById.mockResolvedValue(project({ userId: 'u1', currentVersion: 4 }));
+  expect(await projectsService.save('p1', 'u1', { project: {}, expectedVersion: 4 } as never))
+    .toMatchObject({ version: 5 });
+  repo.findById.mockClear();
+
+  const again = await projectsService.save('p1', 'u1', { project: {}, expectedVersion: 5 } as never);
+  expect(again).toMatchObject({ version: 6 });
+  expect(repo.findById, 'the row is not read again').not.toHaveBeenCalled();
+  expect(repo.bumpVersionIfCurrent).toHaveBeenLastCalledWith('p1', 5, expect.objectContaining({ currentVersion: 6 }));
+});
+
+/** Public and access are the owner's to flip at any moment: never answered from memory. */
+it('still reads the live row for anyone who is not the owner', async () => {
+  saved();
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', access: 'edit', currentVersion: 1 }));
+  expect(await status(projectsService.save('p1', 'u1', { project: {}, expectedVersion: 1 } as never))).toBe(0);
+
+  repo.findById.mockResolvedValue(project({ userId: 'owner', visibility: 'public', access: 'view', currentVersion: 1 }));
+  expect(await status(projectsService.save('p1', 'u1', { project: {}, expectedVersion: 1 } as never))).toBe(403);
+});
+
+/** The object is written FIRST: a failed upload must leave the row pointing at the copy
+ *  that is still whole, so the retry works instead of being told it has a conflict. */
+it('does not claim a version when the upload failed', async () => {
+  repo.findById.mockResolvedValue(project({ userId: 'u1', currentVersion: 2 }));
+  store.putProjectJson.mockRejectedValue(new Error('S3 is down'));
+  await expect(projectsService.save('p1', 'u1', { project: {}, expectedVersion: 2 } as never)).rejects.toThrow('S3 is down');
+  expect(repo.bumpVersionIfCurrent).not.toHaveBeenCalled();
+});
+
+/** Deletion is the one thing a remembered owner can misreport, and it is caught here. */
+it('says a deleted project is gone, not that it has a conflict', async () => {
+  saved();
+  repo.findById.mockResolvedValue(project({ userId: 'u1', currentVersion: 1 }));
+  await projectsService.save('p1', 'u1', { project: {}, expectedVersion: 1 } as never);
+
+  repo.bumpVersionIfCurrent.mockResolvedValue(0);
+  repo.findById.mockResolvedValue(null);
+  expect(await status(projectsService.save('p1', 'u1', { project: {}, expectedVersion: 2 } as never))).toBe(404);
+
+  repo.findById.mockResolvedValue(project({ userId: 'u1', currentVersion: 9 }));
+  expect(await status(projectsService.save('p1', 'u1', { project: {}, expectedVersion: 2 } as never))).toBe(409);
+});
+
+/** A card draws itself from the project's own JSON. Handing out a link means the page
+ *  fetches the bucket directly — no request to this server per card at all. */
+it('puts a read link on every listed project, and never the key it came from', async () => {
+  repo.listByUser.mockResolvedValue({ items: [project({ s3Key: 'users/u1/projects/p1.json' })], nextCursor: null });
+  const mine = await projectsService.list('u1', { limit: 10, sort: 'recent' } as never);
+  expect(mine.items[0].dataUrl).toBe('https://s3.test/users/u1/projects/p1.json?sig');
+
+  repo.findById.mockResolvedValue(project({ userId: 'u1', s3Key: 'users/u1/projects/p1.json' }));
+  const one = await projectsService.getDataUrl('p1', 'u1');
+  expect(one.dataUrl).toContain('?sig');
+  expect(one, 'the payload never travels through this server').not.toHaveProperty('data');
 });
 
 it('only the owner changes name, visibility or access', async () => {

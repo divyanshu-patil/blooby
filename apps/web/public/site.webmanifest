@@ -1,0 +1,15 @@
+{
+  "name": "blooby — mascot studio",
+  "short_name": "blooby",
+  "description": "Design a circle-and-pill mascot, animate it on a timeline, and export Lottie, GIF and MP4.",
+  "start_url": "/projects",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#fafafa",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" }
+  ]
+}
