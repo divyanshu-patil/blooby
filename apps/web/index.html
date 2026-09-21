@@ -4,8 +4,33 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="blooby — design a circle-and-pill mascot, animate it on a timeline, export Lottie, GIF and MP4." />
-    <title>blooby — mascot studio</title>
+    <meta name="theme-color" content="#fafafa" />
+
+    <title>blooby — animated mascots you can export as Lottie</title>
+    <meta name="description" content="Design a circle-and-pill mascot, animate it on a timeline, and export Lottie, dotLottie, GIF, MP4 or a React Native pack. Free, in the browser." />
+
+    <!--
+      What a link to blooby unfurls with.
+
+      %VITE_API_URL% is substituted at build time by Vite, so the card is rendered by the
+      API with the same renderer as the editor's stage rather than being a PNG in this
+      repo that goes stale the day the mascot changes. A SHARED PROJECT gets its own card
+      and its own words — the app is a single-page build, so crawlers are sent to
+      /og/projects/:id on the API for that (see vercel.json); everybody else gets this.
+    -->
+    <link rel="canonical" href="https://blooby.app/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="blooby" />
+    <meta property="og:title" content="blooby — animated mascots you can export as Lottie" />
+    <meta property="og:description" content="Design a circle-and-pill mascot, animate it on a timeline, and export Lottie, dotLottie, GIF, MP4 or a React Native pack." />
+    <meta property="og:image" content="%VITE_API_URL%/og/card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A blooby mascot mid-animation" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="blooby — animated mascots you can export as Lottie" />
+    <meta name="twitter:description" content="Design a mascot, animate it on a timeline, export Lottie, GIF and MP4." />
+    <meta name="twitter:image" content="%VITE_API_URL%/og/card.png" />
   </head>
   <body>
     <div id="root"></div>

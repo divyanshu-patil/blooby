@@ -9,6 +9,10 @@ export * from './engine/registry';
 export * from './engine/diff';
 export { EditorSession, CapabilityError, MCP_WORKFLOW, GUIDE_TOPICS, guide, type OpResult, type OpLog, type Checkpoint, type SessionEvent } from './engine/session';
 export { frameSvg, contactSheetSvg, sceneToSvg, type FrameWindow } from './export/frame';
+export { sceneAt, type SceneItem } from './core/scene';
+/** bounds of what a scene actually draws — how a card or a thumbnail frames the mascot
+ *  rather than the whole composition it sits in */
+export { sceneBounds, unionBounds, type Bounds } from './ui/Mascot';
 export { bakeLottie, type BakeResult } from './export/lottie';
 export { buildDotLottie } from './export/dotlottie';
 export { buildRuntimePack } from './export/runtime';

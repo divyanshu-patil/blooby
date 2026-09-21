@@ -143,6 +143,16 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
 - `config/redis.ts` is optional everywhere. It backs the HTTP rate limiters (so "60 a minute"
   is not 60 per instance) and the invalidation channel. The MCP throttle stays in memory.
 
+## Sharing (Open Graph)
+- `/og/card.png` and `/og/projects/:id.png` (api `routes/og.routes.ts` + `services/og.service.ts`)
+  render a 1200×630 card with the SAME renderer as the stage (`sceneAt` → `sceneToSvg` → resvg),
+  cropped to `sceneBounds` rather than the composition or the mascot is a dot. PUBLIC projects only —
+  a private one gets the generic card and generic words, because an unfurl is done by a stranger's server.
+- The app is an SPA, so crawlers can't see per-project tags. `apps/web/vercel.json` rewrites
+  `/projects/:id` to `/og/projects/:id` on the API **for known bot user-agents only**; humans get the app.
+  That rewrite is the one place the API origin is hardcoded — change it if the API moves.
+- `apps/web/index.html` holds the site-wide tags; `%VITE_API_URL%` is substituted by Vite at build.
+
 ## Admin
 - `apps/admin/src/features/Splashscreens.tsx` builds splash data; `SplashPreview.tsx` renders
   via `sceneAt` + `MascotThumb` (same renderer as the editor).

@@ -6,6 +6,7 @@ import { generalLimiter } from './middlewares/rateLimiter.js';
 import { requestLogger } from './middlewares/requestLogger.js';
 import { routes } from './routes/index.js';
 import { mcpRoutes, oauthRoutes } from './routes/mcp.routes.js';
+import { ogRoutes } from './routes/og.routes.js';
 
 export function createApp() {
   const app = express();
@@ -35,6 +36,9 @@ export function createApp() {
   app.use(generalLimiter);
 
   app.get('/health', (_req, res) => res.json({ ok: true, env: env.NODE_ENV }));
+  // link previews: asked for by unfurlers and crawlers from anywhere, never authenticated,
+  // and outside /api because the URL itself ends up pasted into chat windows
+  app.use('/og', ogRoutes);
   app.use('/api', routes);
 
   // order matters: unmatched paths become a 404 error, then everything lands in one handler
