@@ -15,6 +15,7 @@
     "check:copilot": "tsx scripts/check-copilot-keys.ts",
     "collapse:versions": "tsx scripts/collapse-project-versions.ts",
     "check:storage": "tsx scripts/check-project-storage.ts",
+    "s3:cors": "tsx scripts/s3-cors.ts",
     "test": "vitest run",
     "lint": "oxlint src",
     "typecheck": "tsc -p tsconfig.json",
