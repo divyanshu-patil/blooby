@@ -26,9 +26,19 @@ export const projectsController = {
   duplicate: (req: Request, res: Response) =>
     projectsService.duplicate(req.params.id!, req.user!.id, (req.body as { name?: string }).name).then((p) => res.status(201).json(p)),
 
-  // the row and a presigned link, never the payload — see projectsService.getDataUrl
+  /**
+   * The row and a presigned link — the browser fetches the document from the bucket
+   * itself, so the payload never passes through here (projectsService.getDataUrl).
+   *
+   * `?inline=1` serves the document instead. It is the client's fallback for when the
+   * direct fetch cannot happen: a bucket without CORS on it, or a link that has outlived
+   * its hour in a tab left open. Slower, and the whole point is that it still works.
+   */
   getData: (req: Request, res: Response) =>
-    projectsService.getDataUrl(req.params.id!, req.user?.id ?? null).then((r) => res.json(r)),
+    (req.query.inline === '1'
+      ? projectsService.getData(req.params.id!, req.user?.id ?? null)
+      : projectsService.getDataUrl(req.params.id!, req.user?.id ?? null)
+    ).then((r) => res.json(r)),
 
   save: (req: Request, res: Response) =>
     projectsService.save(req.params.id!, req.user!.id, req.body as SaveProjectDataDto).then((r) => res.json(r)),

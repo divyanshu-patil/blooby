@@ -90,6 +90,7 @@ values are shipped in the browser bundle, so put only publishable keys in them.*
 | | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_JWKS_URL` | yes | Auth and data. The secret key is server-only |
 | | `DATABASE_URL` | yes | Prisma connection. Use the Supabase **transaction** pooler (`:6543`, `pgbouncer=true&connection_limit=10`). Not `connection_limit=1` — that serialises every query in the process onto one connection |
 | | `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | yes | Project JSON storage (private bucket) |
+| | `S3_CORS_ORIGINS` | no | Extra origins for the bucket's CORS rules, beyond `APP_URL` / `ADMIN_URL`. **The bucket needs them** — see below |
 | | `ALLOWED_MEDIA_TYPES`, `MAX_PROJECT_BYTES` | yes | Upload limits |
 | | `REDIS_URL` | no | Shared rate limits and cache invalidation across instances. Unset is a supported way to run it — see `docker compose up -d redis` |
 | | `OLLAMA_URL` | no | Upstream for cloud Copilot requests |
@@ -98,6 +99,28 @@ values are shipped in the browser bundle, so put only publishable keys in them.*
 `apps/api` validates its environment at boot (`src/config/env.ts`) and exits with a
 specific message when a value is missing. Copilot API keys are not environment
 variables; they are managed from the admin dashboard.
+
+### The bucket needs CORS rules
+
+The browser reads a project's JSON straight from S3 through a presigned link, instead of
+having it proxied through the API — that is what takes two round trips and a median 320KB
+off every card on the dashboard. A bucket refuses a cross-origin read by default, so on a
+fresh bucket every project fails to open with *"No 'Access-Control-Allow-Origin' header is
+present"* until you run:
+
+```bash
+pnpm --filter @blooby/api s3:cors            # show what is there, and what would change
+pnpm --filter @blooby/api s3:cors --apply    # write it
+```
+
+It allows `GET` and `HEAD` from `APP_URL` and `ADMIN_URL`, plus anything in
+`S3_CORS_ORIGINS`. CORS is not the access control here — the presigned signature is, and it
+names one object and expires within the hour — so listing an origin grants nothing to
+anyone who does not already hold a link the API handed them.
+
+(The app survives a bucket without them: it notices, warns in the console, and reads the
+document through the API instead. That is several times slower, and it is a fallback, not
+the arrangement.)
 
 ### Running the project
 

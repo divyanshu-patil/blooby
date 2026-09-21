@@ -6,6 +6,23 @@ import type {
 
 /** Feature-level API modules. UI components call these, never fetch directly. */
 
+/**
+ * The document, through the API, after a direct fetch from the bucket did not work.
+ *
+ * Loud on purpose. This path is correct and it is several times slower, so it should read
+ * as a misconfiguration to whoever opens the console — most likely CORS rules missing from
+ * the bucket (`pnpm --filter @blooby/api s3:cors`).
+ */
+async function viaApi(id: string, cause: unknown) {
+  console.warn(
+    `[blooby] could not read project ${id} from storage directly, falling back to the API. `
+    + 'If this is every project, the bucket is probably missing its CORS rules.',
+    cause,
+  );
+  const r = await api.get<{ data: unknown }>(`/api/projects/${id}/data`, { inline: 1 });
+  return r.data;
+}
+
 export const projectsApi = {
   list: (params: { limit?: number; cursor?: string; q?: string; sort?: 'recent' | 'created' | 'name' }) =>
     api.get<Page<ProjectRow>>('/api/projects', params),
@@ -25,17 +42,35 @@ export const projectsApi = {
    * inside a request. A card on a listing already HAS that link (`row.dataUrl`) and should
    * use `projectData` instead of calling here at all.
    *
+   * If that fetch cannot happen the API serves the document itself. Not a nicety — the
+   * first deploy of the direct fetch went to a bucket with no CORS rules on it and every
+   * project in the app failed to open, when the honest answer was "this is slower than it
+   * should be". A presigned link also expires after an hour, so a tab left open overnight
+   * lands here too.
+   *
    * `canEdit`: whether this caller may save to it — the owner, or anyone while it is
    * public with edit access.
    */
   async getData(id: string) {
-    const r = await api.get<{ project: ProjectRow; dataUrl: string; canEdit?: boolean; isOwner?: boolean }>(`/api/projects/${id}/data`);
-    return { ...r, data: await fetchDataUrl<unknown>(r.dataUrl) };
+    const r = await api.get<{ project: ProjectRow; dataUrl?: string; data?: unknown; canEdit?: boolean; isOwner?: boolean }>(`/api/projects/${id}/data`);
+    if (!r.dataUrl) return { ...r, data: r.data };
+    try {
+      return { ...r, data: await fetchDataUrl<unknown>(r.dataUrl) };
+    } catch (e) {
+      return { ...r, data: await viaApi(id, e) };
+    }
   },
 
-  /** A listed project's document, straight from the bucket. No request to the API. */
-  projectData: (row: ProjectRow) =>
-    row.dataUrl ? fetchDataUrl<unknown>(row.dataUrl) : projectsApi.getData(row.id).then((r) => r.data),
+  /** A listed project's document, straight from the bucket — no request to the API at all,
+   *  which is what makes a page of forty cards cost forty fetches and nothing else. */
+  async projectData(row: ProjectRow) {
+    if (!row.dataUrl) return projectsApi.getData(row.id).then((r) => r.data);
+    try {
+      return await fetchDataUrl<unknown>(row.dataUrl);
+    } catch (e) {
+      return viaApi(row.id, e);
+    }
+  },
   save: (id: string, body: { project: unknown; thumbnailUrl?: string | null; expectedVersion?: number }) =>
     api.put<{ version: number; sizeBytes: number; checksum: string; savedAt: string }>(`/api/projects/${id}/data`, body),
 };
