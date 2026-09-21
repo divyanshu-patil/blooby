@@ -4,8 +4,13 @@ The mark, straight from blooby-icon.icon/Assets, in its own 4587 coordinate spac
   eye 1   rect x 2293.68   y 1094     w 722      h 1486     rx 361      rotate 21.0472° about (2293.68, 1094)
   eye 2   rect x 3602.03   y 1689.49  w 574.157  h 1346.14  rx 287.079  rotate 21.0472° about (3602.03, 1689.49)
 
-Every SVG in this folder wraps exactly those three shapes in one transform rather than
-re-typing them at a new size — the 21° tilt and the two different eye sizes are what make
+The ICON itself is a raster: blooby-icon.icon exports it with a gradient, a sheen and a
+soft shadow, and those are a rendering rather than a shape. scripts/icons.mjs resizes
+those exports and everything shipped comes from them.
+
+What the two SVGs here are for is the opposite case — somewhere that needs the SHAPE:
+a single colour, a print, a cut, a size no export covers. They wrap exactly the three
+shapes above in one transform rather than re-typing them at a new size — the 21° tilt and the two different eye sizes are what make
 the mark recognisable, and they are the first thing lost when somebody eyeballs a redraw.
 
   scale 1/8.7 puts the circle at r 240 in a 512 box:  translate(-7.62989 -14.87126) scale(0.11494252873563218)

@@ -5,13 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <!--
-      The same mark as the app, from the same masters in brand/ — an admin who installs
-      this to a home screen gets an icon identical to the app's, distinguished only by its
-      name. Worth knowing before you pin both.
+      Icons. The masters are Icon Composer's own exports in brand/exports — the real
+      thing, gradient and sheen and shadow — and apps/*/public is generated from them with
+      `pnpm icons`, never drawn by hand.
+
+      Identical to the app's: an installed admin panel is told apart by its name, not its icon.
+
+      A PNG cannot answer prefers-color-scheme the way an SVG favicon can, so the two
+      colourways are two links and the browser picks: the DARK mark on a light tab strip,
+      the light one on a dark strip. Safari ignores `media` here and takes the first, which
+      is why the dark mark is first — and /favicon.ico is what everything else falls back
+      to, dark for the same reason.
     -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96.png" />
-    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-dark-96.png" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-dark-32.png" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-light-96.png" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-light-32.png" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48 32x32 16x16" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#fafafa" />

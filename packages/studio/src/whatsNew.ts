@@ -50,7 +50,7 @@ export const RELEASES: Release[] = [
       {
         id: 'new-icon', surface: 'dashboard',
         title: 'Blooby has its icon',
-        body: 'The real mark is in the browser tab now, on your home screen if you add it there, and on every link you share. It follows your system theme: dark on a light tab strip, light on a dark one.',
+        body: 'The real icon — the one with the gradient and the sheen, not a flat stand-in — is in the browser tab now, in the sidebar, on your home screen if you add it there, and on every link you share. The tab icon follows your system theme: dark on a light tab strip, light on a dark one.',
       },
       {
         id: 'share-cards', surface: 'dashboard',
