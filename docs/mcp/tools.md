@@ -402,7 +402,7 @@ Arguments: `nodeId` (string) · `kind` — one of `glow`, `blur`, `shadow`, `rgb
 
 **Export formats** · `export:write` · read-only · source: server
 
-What export_start can produce.
+What export_start can produce here, and what only the editor can — GIF and MP4 render on the person's own device, so those are a link, not a file.
 
 Arguments: _no arguments_
 
@@ -1564,7 +1564,7 @@ Arguments: _no arguments_
 
 **Create a project** · `project:write` · changes the project · source: server
 
-A new cloud project with the default mascot, opened on this connection. It appears on the person's dashboard straight away.
+A new cloud project with the default mascot, opened on this connection. It appears on the person's dashboard straight away, and `url` in the result is the link to give them.
 
 Arguments: `name` (string)
 
@@ -1602,7 +1602,7 @@ Arguments: `projectId`? (string) · `name`? (string)
 
 **List projects** · `project:read` · read-only · source: server
 
-Your projects, newest first: id, name, visibility, last update. q filters by name. Page with cursor.
+Your projects, newest first: id, name, visibility, last update, and the link to open each one in Blooby. q filters by name. Page with cursor.
 
 Arguments: `q`? (string) · `limit`? (number) · `cursor`? (string)
 

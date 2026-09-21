@@ -46,11 +46,75 @@ const INVOKE: Tool = {
   annotations: { title: 'Run any capability', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 };
 
+// ---------------------------------------------------------------------------
+// limits: generous for editing, tighter for the expensive paths
+
+const windows = new Map<string, number[]>();
+const inFlight = new Map<string, number>();
+
+/**
+ * The per-minute ceilings, and the advice that goes with each.
+ *
+ * Generous on purpose: an agent building an animation makes hundreds of small edits, and
+ * being throttled mid-run is worse than the load. These are an abuse ceiling, not a budget.
+ * The buckets do not stack — the FIRST pattern that matches is the only one a call counts
+ * against, so a render spends renders and nothing else.
+ *
+ * This table is the single source for the numbers. They reach clients three ways and are
+ * written down nowhere else: in the server's instructions at connect (LIMIT_NOTE), as a
+ * warning once a bucket is most of the way spent, and in the refusal itself.
+ */
+const LIMITS: { re: RegExp; max: number; what: string; advice: string }[] = [
+  { re: /^render_/, max: 300, what: 'renders', advice: 'render at quality "preview" while iterating, and render_sequence to see several moments in one image instead of one call per frame.' },
+  { re: /^export_start$/, max: 120, what: 'exports', advice: 'export once the animation is finished, not after each change; render_frame is the cheap way to check your work.' },
+  { re: /.*/, max: 6000, what: 'calls', advice: 'batch_execute runs many edits in one call, and a transaction commits them together.' },
+];
+
+/** The ceilings, as a paragraph — so a client is told before it is refused. */
+export const LIMIT_NOTE = `Limits, per account per minute: ${LIMITS.map((l) => `${l.max} ${l.what}`).join(', ')}. `
+  + 'Twelve calls may run at once. A refusal carries retryAfterMs — wait it out rather than retrying immediately, and '
+  + `${LIMITS[2].advice} ${LIMITS[0].advice}`;
+
+/** How much of a call's bucket is spent, without spending any of it. */
+function budget(userId: string, id: string) {
+  const l = LIMITS.find((x) => x.re.test(id))!;
+  const now = Date.now();
+  return { ...l, used: (windows.get(`${userId}:${l.re.source}`) ?? []).filter((t) => now - t < 60_000).length };
+}
+
+function throttle(userId: string, id: string) {
+  const l = LIMITS.find((x) => x.re.test(id))!;
+  const k = `${userId}:${l.re.source}`;
+  const now = Date.now();
+  const w = (windows.get(k) ?? []).filter((t) => now - t < 60_000);
+  if (w.length >= l.max) {
+    throw new CapabilityError('RATE_LIMITED', `Too many ${l.what} — at most ${l.max} a minute.`, {
+      retryAfterMs: 60_000 - (now - w[0]),
+      suggestion: l.advice,
+    });
+  }
+  w.push(now);
+  windows.set(k, w);
+}
+
+// A window that has gone quiet for a minute is empty and its key is dead weight; without
+// this the map keeps one entry per bucket per account that ever connected, for the life of
+// the process.
+setInterval(() => {
+  const cutoff = Date.now() - 60_000;
+  for (const [k, w] of windows) if (!w.some((t) => t > cutoff)) windows.delete(k);
+  for (const [k, n] of inFlight) if (n <= 0) inFlight.delete(k);
+}, 60_000).unref();
+
 const INSTRUCTIONS = `Blooby is a motion-design editor for mascot animation that exports Lottie. You are operating it as the signed-in person.
 Start with project_list / project_open (or project_create), then editor_get_state and render_frame to SEE the project.
 Before animating, read guide_get { topic: "craft" } and study a similar preset (preset_search → preset_get): match its timing and easing.
 Edits autosave to the person's cloud project and appear in their editor; every edit is undoable (history_undo).
 Check your work visually with render_frame / render_sequence and with critique, then export_start for Lottie or dotLottie.
+Every project capability returns a "url" — where the person opens it in Blooby. Give it to them when they want to watch
+it play, or export a GIF or MP4, which are encoded in their browser rather than here.
+
+${LIMIT_NOTE}
 
 ${MCP_WORKFLOW}`;
 
@@ -73,24 +137,6 @@ function toTool(c: Capability): Tool {
 export function toolsFor(conn: Conn, profile: Profile): Tool[] {
   const list = capabilities().filter((c) => allowed(conn, c) && (profile === 'full' || CORE.has(c.id))).map(toTool);
   return profile === 'full' ? list : [...list, INVOKE];
-}
-
-// ---------------------------------------------------------------------------
-// limits: generous for editing, tighter for the expensive paths
-
-const windows = new Map<string, number[]>();
-const inFlight = new Map<string, number>();
-// Generous on purpose: an agent building an animation makes hundreds of small edits, and being
-// throttled mid-run is worse than the load. These are an abuse ceiling, not a budget.
-const LIMITS: [RegExp, number][] = [[/^render_/, 300], [/^export_start$/, 120], [/.*/, 6000]];
-function throttle(userId: string, id: string) {
-  const [re, max] = LIMITS.find(([r]) => r.test(id))!;
-  const k = `${userId}:${re.source}`;
-  const now = Date.now();
-  const w = (windows.get(k) ?? []).filter((t) => now - t < 60_000);
-  if (w.length >= max) throw new CapabilityError('RATE_LIMITED', `Too many ${re.source === '.*' ? 'calls' : id} calls — at most ${max} a minute.`, { retryAfterMs: 60_000 - (now - w[0]), suggestion: 'Batch edits with batch_execute; render at quality "preview".' });
-  w.push(now);
-  windows.set(k, w);
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +193,14 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
 
     projectId = conn.projectId;
     record(conn, id, true, out.summary, Date.now() - started, projectId);
-    const payload = { ok: true, summary: out.summary, ...out.meta, ...(out.data !== undefined ? { result: out.data } : {}), ...(out.warnings?.length ? { warnings: out.warnings } : {}) };
+    // told while it can still act on it: a client that only learns the limit by hitting it
+    // has already lost the call it cared about
+    const b = budget(userId, id);
+    const warnings = [
+      ...(out.warnings ?? []),
+      ...(b.used >= b.max * 0.8 ? [`${b.used} of ${b.max} ${b.what} used this minute — ${b.advice}`] : []),
+    ];
+    const payload = { ok: true, summary: out.summary, ...out.meta, ...(out.data !== undefined ? { result: out.data } : {}), ...(warnings.length ? { warnings } : {}) };
     return {
       content: [
         ...(out.images ?? []).map((i) => ({ type: 'image' as const, data: i.data, mimeType: i.mimeType })),
