@@ -18,3 +18,9 @@ export const analyticsRangeDto = z.object({
   days: z.coerce.number().int().min(1).max(365).default(30),
 });
 export type AnalyticsRangeDto = z.infer<typeof analyticsRangeDto>;
+
+/** Traffic is asked per app: the same paths exist in both and mean different things. */
+export const trafficRangeDto = analyticsRangeDto.extend({
+  app: z.enum(['web', 'admin']).default('web'),
+});
+export type TrafficRangeDto = z.infer<typeof trafficRangeDto>;

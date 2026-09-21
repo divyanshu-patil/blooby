@@ -29,6 +29,7 @@ export { McpPanel } from './ui/McpPanel';
 export type { CopilotAdminView, CopilotConfig, CopilotKeyRow } from './cloud/api';
 export { useSession, auth, consumeAuthError } from './cloud/auth';
 export { useAsync } from './cloud/useAsync';
+export { usePageViews, routeOf } from './cloud/usePageViews';
 export { useAutosave } from './cloud/useAutosave';
 export { Splashscreen } from './cloud/Splashscreen';
 export { ProjectThumb, AssetThumb } from './cloud/Thumb';

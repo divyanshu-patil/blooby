@@ -7,6 +7,7 @@ import { splashscreensRoutes } from './splashscreens.routes.js';
 import { adminRoutes } from './admin.routes.js';
 import { copilotRoutes } from './copilot.routes.js';
 import { mcpManageRoutes } from './mcp.routes.js';
+import { eventsRoutes } from './events.routes.js';
 
 export const routes = Router();
 
@@ -18,3 +19,4 @@ routes.use('/splashscreen', splashscreensRoutes);
 routes.use('/admin', adminRoutes);
 routes.use('/copilot', copilotRoutes);
 routes.use('/mcp', mcpManageRoutes);
+routes.use('/events', eventsRoutes);

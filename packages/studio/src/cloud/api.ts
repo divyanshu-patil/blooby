@@ -1,5 +1,8 @@
 import { api, fetchDataUrl } from './client';
-import type { AdminUser, Analytics, AssetKind, AssetRow, AssetSource, Page, ProjectRow, PublicInsights, SplashscreenRow } from './types';
+import type {
+  AdminUser, Analytics, AssetKind, AssetRow, AssetSource, McpUsage, Page, ProjectRow, PublicInsights,
+  SplashscreenRow, Traffic,
+} from './types';
 
 /** Feature-level API modules. UI components call these, never fetch directly. */
 
@@ -76,6 +79,10 @@ export const splashApi = {
 
 export const adminApi = {
   analytics: (days: number) => api.get<Analytics>('/api/admin/analytics', { days }),
+  /** page analytics — views, visitors, top pages, referrers and the navigation flow */
+  traffic: (days: number, app: 'web' | 'admin' = 'web') => api.get<Traffic>('/api/admin/traffic', { days, app }),
+  /** MCP usage — connections, clients, capabilities and errors, from the audit trail */
+  mcpUsage: (days: number) => api.get<McpUsage>('/api/admin/mcp', { days }),
   users: (params: { q?: string; role?: 'user' | 'admin'; limit?: number; cursor?: string }) =>
     api.get<Page<AdminUser>>('/api/admin/users', params),
   user: (id: string) => api.get<AdminUser & { recentProjects: ProjectRow[]; publishedAssets: number; pendingAssets: number }>(`/api/admin/users/${id}`),

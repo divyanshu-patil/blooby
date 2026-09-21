@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
 import {
-  Avatar, BloobyMark, EmptyState, Shell, auth, startTour, startTourWhenReady, useSession,
+  Avatar, BloobyMark, EmptyState, Shell, auth, startTour, startTourWhenReady, usePageViews, useSession,
   type DriveStep, type NavGroup, type SessionUser,
 } from '@blooby/studio';
 import { Overview } from './features/Overview';
+import { Traffic } from './features/Traffic';
+import { Mcp } from './features/Mcp';
 import { Users } from './features/Users';
 import { Projects } from './features/Projects';
 import { Moderation } from './features/Moderation';
@@ -13,7 +15,11 @@ import { Splashscreens } from './features/Splashscreens';
 import { Copilot } from './features/Copilot';
 
 const NAV: NavGroup[] = [
-  { items: [{ id: '/dashboard', label: 'Dashboard', glyph: '▤' }] },
+  { items: [
+    { id: '/dashboard', label: 'Dashboard', glyph: '▤' },
+    { id: '/traffic', label: 'Traffic', glyph: '◫' },
+    { id: '/mcp', label: 'MCP', glyph: '✳' },
+  ] },
   { title: 'People', items: [
     { id: '/users', label: 'Users', glyph: '◍' },
     { id: '/projects', label: 'Projects', glyph: '◳' },
@@ -31,6 +37,8 @@ const NAV: NavGroup[] = [
 const ADMIN_TOUR: DriveStep[] = [
   { popover: { title: 'The admin panel', description: 'A short tour of what you can do here. Skip it with Escape at any time.' } },
   { element: '[data-tour="/dashboard"]', popover: { title: 'Dashboard', description: 'Usage at a glance, with a growth chart and the assets people actually use. When something is waiting for review, a banner appears here linking straight to it.' } },
+  { element: '[data-tour="/traffic"]', popover: { title: 'Traffic', description: 'Which pages people open, where they arrived from and where they go next. Cookieless — a “visitor” is a hash that rotates every day, so it counts people within a day and can never follow one across days.' } },
+  { element: '[data-tour="/mcp"]', popover: { title: 'MCP', description: 'Claude, ChatGPT and Cursor working on people’s projects: who has connected one, which apps, what they actually call and why calls fail. All of it from the audit trail those calls already write.' } },
   { element: '[data-tour="/users"]', popover: { title: 'Users', description: 'Every account, with project counts and last activity. Open one to see their stats and grant or revoke admin access.' } },
   { element: '[data-tour="/community"]', popover: { title: 'Community review', description: 'Submissions from users. Approve to publish, or reject with a reason the creator sees. Nothing is deleted — statuses keep the history.' } },
   { element: '[data-tour="/editor"]', popover: { title: 'Editor', description: 'The same editor users have. Build an animation, then publish it as official content or save it as a splashscreen.' } },
@@ -40,6 +48,7 @@ const ADMIN_TOUR: DriveStep[] = [
 
 export function App() {
   const { user, ready, isAdmin } = useSession();
+  usePageViews(useLocation().pathname, 'admin');
 
   if (!ready) return <main className="auth"><p className="state-note">Loading…</p></main>;
 
@@ -55,6 +64,8 @@ export function App() {
         <Route element={<AdminShell user={user!} />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardRoute />} />
+          <Route path="/traffic" element={<Traffic />} />
+          <Route path="/mcp" element={<Mcp />} />
           <Route path="/users" element={<Users />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/community" element={<Moderation />} />

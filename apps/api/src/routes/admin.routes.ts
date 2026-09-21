@@ -7,7 +7,7 @@ import { assetsController } from '../controllers/assets.controller.js';
 import { splashscreensController } from '../controllers/splashscreens.controller.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { uuidParam } from '../dtos/common.js';
-import { analyticsRangeDto, listAdminProjectsDto, listUsersDto, updateUserRoleDto } from '../dtos/admin/index.js';
+import { analyticsRangeDto, listAdminProjectsDto, listUsersDto, trafficRangeDto, updateUserRoleDto } from '../dtos/admin/index.js';
 import { createAssetDto, listModerationDto, moderateAssetDto } from '../dtos/assets/index.js';
 import { createSplashscreenDto, updateSplashscreenDto } from '../dtos/splashscreens/index.js';
 import { copilotSettingsDto, createCopilotKeyDto } from '../dtos/copilot/index.js';
@@ -24,6 +24,8 @@ adminRoutes.use(authenticate, requireAdmin);
 const id = validate(uuidParam('id'), 'params');
 
 adminRoutes.get('/analytics', validate(analyticsRangeDto, 'query'), asyncHandler(adminController.analytics));
+adminRoutes.get('/traffic', validate(trafficRangeDto, 'query'), asyncHandler(adminController.traffic));
+adminRoutes.get('/mcp', validate(analyticsRangeDto, 'query'), asyncHandler(adminController.mcp));
 
 adminRoutes.get('/users', validate(listUsersDto, 'query'), asyncHandler(adminController.listUsers));
 adminRoutes.get('/users/:id', id, asyncHandler(adminController.getUser));

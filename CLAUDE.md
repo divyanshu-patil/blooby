@@ -131,6 +131,17 @@ Standard layering, one file per resource at each level:
 `routes/ → controllers/ → services/ → repositories/ → prisma`.
 DTOs in `dtos/`, cross-cutting concerns in `middlewares/`.
 
+**One round trip to the pooler is ~580ms**, so the count of serial hops IS the latency —
+see AGENT_MAP → Latency before adding one. `utils/ttlCache.ts` + `utils/invalidate.ts`
+(Redis pub/sub, optional) are how a read is answered without one.
+
+Analytics: `services/analytics.service.ts` derives everything it can from timestamps on
+rows that exist anyway. `public.page_views` is the ONE event table, because nothing else
+records that a page was opened — cookieless, `visitor` is a daily-rotating salted hash
+(`services/pageViews.service.ts`, buffered and flushed in batches).
+`services/traffic.service.ts` answers both admin tabs; MCP's numbers come from
+`mcp_audit`, which capability calls already write.
+
 Sharing: a project is `private` or `public`, and while public its `access` is `view` (open and
 duplicate) or `edit` (any signed-in user saves to it, under the owner's storage key). Both are
 checked once, in `services/projects.service.ts`. Public projects, the trending sort and the public
