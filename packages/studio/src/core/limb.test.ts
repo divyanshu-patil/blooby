@@ -124,3 +124,31 @@ const bulge = (pts: Vec2[]) => Math.max(...pts.map((p) => Math.abs(p.y)));
   sceneAt(p, 380, view); sceneAt(p, 10, view);
   it('and scrubbing to the same time in any order gives the same limb', check(JSON.stringify(sceneAt(p, 200, view)) === mid));
 }
+
+// --- pins, awkward inputs ---------------------------------------------------------------------------
+import { heldPin, hoseInputOf, pinWeight, storedPin } from './limb';
+{
+  const l = { type: 'leg', a: { x: 0, y: 0 }, b: { x: 5, y: 5 }, hose: 1, thickness: 4, bend: 0, roundness: 1, taper: 0, length: 1, foot: { angle: 0, length: 5, width: 3 }, pin: { x: 1, y: 1 }, pins: { a: { x: 2, y: 2 } }, pinOff: { b: 1 } } as never;
+  it('the end point\'s pin is limb.pin, the others\' are in pins', check(storedPin(l, 'b')!.x === 1 && storedPin(l, 'a')!.x === 2));
+  it('a pin holds fully, or not at all once switched off; unpinned is 0', check(pinWeight(l, 'a') === 1 && pinWeight(l, 'b') === 0 && pinWeight({ ...(l as object), pin: undefined, pinOff: undefined } as never, 'b') === 0));
+  it('only a held pin is handed back', check(heldPin(l, 'a')!.x === 2 && heldPin(l, 'b') === undefined));
+  it('a leg at the middle line gets an outward foot', check(hoseInputOf(l, (p) => p, 1).foot!.side === 1 && hoseInputOf({ ...(l as object), a: { x: -3, y: 0 } } as never, (p) => p, 1).foot!.side === -1));
+}
+{
+  // a deterministic fuzz: coincident points, zero lengths, mirrored feet. Every outline must
+  // be finite, whatever the input — the editor lets people drag limbs anywhere.
+  let s = 12345; const rnd = () => (s = (s * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
+  let finiteAll = true;
+  for (let i = 0; i < 4000; i++) {
+    const P = () => ({ x: pick([0, 0, 10, -10, rnd() * 100 - 50]), y: pick([0, 0, 10, rnd() * 100 - 50]) });
+    const pts = rnd() < 0.6 ? [P(), P(), P()] : [P(), P()];
+    const r = rubberHose({
+      points: pts, thickness: pick([0, 1, 10, 30]), bend: pick([0, 1, -1, 0.5, -0.3]), roundness: pick([0, 1, 0.5]), taper: pick([0, 0.5, 1]),
+      hose: pick([0, 1, 0.5]), length: pick([0, 1, 20, 50, 100, 300, rnd() * 200]),
+      foot: rnd() < 0.3 ? { angle: pick([0, 20, -20]), length: pick([0, 10, 20]), width: pick([0, 10]), side: pick([1, -1, 0]) } : undefined,
+    });
+    if (r && /NaN|Infinity/.test(r.d)) finiteAll = false;
+  }
+  it('no input draws a NaN', check(finiteAll));
+}

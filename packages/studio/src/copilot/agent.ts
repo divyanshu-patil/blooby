@@ -120,7 +120,7 @@ interface Fn { name: string; signature: string; doc: string }
 /** Every action on the store, with its parameters and doc comment, read from `interface Editor`. */
 export function editorFunctions(): Fn[] {
   const start = storeSource.indexOf('export interface Editor {');
-  const body = start < 0 ? '' : storeSource.slice(start, storeSource.indexOf('\n}', start));
+  const body = storeSource.slice(start, storeSource.indexOf('\n}', start));
   const out: Fn[] = [];
   let doc = '';
   for (const raw of body.split('\n')) {

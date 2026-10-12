@@ -56,3 +56,21 @@ it('names the owner instead of a raw id', async () => {
   expect(screen.queryByText('u1')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: /next/i })).toBeEnabled();
 });
+
+it('pages forward with a cursor, shows public projects, and an owner-less one by id', async () => {
+  projects.mockResolvedValueOnce({ items: [row({ visibility: 'public', owner: null })], nextCursor: 'c2' })
+    .mockResolvedValue({ items: [row({ name: 'Page two' })], nextCursor: null });
+  render(<Projects />);
+  expect(await screen.findByText('Public')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: /next/i }));
+  expect(await screen.findByText('Page two')).toBeInTheDocument();
+  expect(projects).toHaveBeenLastCalledWith({ q: undefined, limit: 50, cursor: 'c2' });
+});
+
+it('says what a search matched nothing for', async () => {
+  projects.mockResolvedValue({ items: [], nextCursor: null });
+  render(<Projects />);
+  await screen.findByText(/nobody has created/i);
+  await userEvent.type(screen.getByPlaceholderText(/search/i), 'zz');
+  expect(await screen.findByText(/nothing matches/i)).toBeInTheDocument();
+});

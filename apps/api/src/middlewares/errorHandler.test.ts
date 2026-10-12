@@ -66,3 +66,13 @@ it('notFound hands a 404 to the error handler rather than answering itself', () 
   expect(passed instanceof HttpError).toBeTruthy();
   expect((passed as HttpError).status).toBe(404);
 });
+
+it('hides the debug detail in production and stringifies a non-Error otherwise', async () => {
+  const { env } = await import('../config/env.js');
+  const log = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
+  expect(handle('plain string').body?.debug).toBe('plain string');
+  env.isProd = true;
+  expect(handle(new Error('secret')).body).not.toHaveProperty('debug');
+  env.isProd = false;
+  log.mockRestore();
+});

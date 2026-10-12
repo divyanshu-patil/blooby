@@ -65,3 +65,9 @@ it('offers a retry when analytics fail', async () => {
   await userEvent.click(screen.getByRole('button', { name: /try again/i }));
   expect(await screen.findByText('12')).toBeInTheDocument();
 });
+
+it('ranks the most used assets', async () => {
+  analytics.mockResolvedValue({ ...data(), insights: { topAssets: [{ id: 'a1', name: 'Wave', source: 'community', downloadCount: 4 }], topCreators: [] } });
+  render(<Overview onGoTo={() => {}} />);
+  expect(await screen.findByText('Wave')).toBeInTheDocument();
+});

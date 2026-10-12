@@ -55,3 +55,11 @@ it('says a document with nothing to draw is not drawable, rather than throwing',
   expect(readable(42)).toBeNull();
   expect(readable(project())).not.toBeNull();
 });
+
+it('draws the generic card, and a project with nothing in the scene', () => {
+  expect(pngSize(ogService.generic())).toEqual({ width: OG_WIDTH, height: OG_HEIGHT });
+  const p = project();
+  const empty = { ...p, rig: { ...p.rig, nodes: {} }, timelines: p.timelines.map((t) => ({ ...t, rig: { ...t.rig, nodes: {} } })) };
+  expect(ogService.projectSvg(empty as never, 'x', 'y')).toContain('<svg');
+});
+

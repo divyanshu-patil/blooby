@@ -425,7 +425,7 @@ function settled(p: Preset): Preset {
     const rest = REST[t.property];
     const first = t.keyframes[0];
     if (!MASCOT_PARTS.has(t.nodeId) || rest === undefined || !first || first.value === rest) continue;
-    if (first.time === 0) first.time = 1;
+    first.time = Math.max(first.time, 1);
     t.keyframes.unshift(k(0, rest, 'hold'));
   }
   return looped(p);

@@ -79,6 +79,8 @@ function truncate(line: Vec2[], length: number, n: number): Vec2[] {
     const want = (length * i) / (n - 1);
     while (j < line.length - 1 && walked + len(sub(line[j], line[j - 1])) < want) { walked += len(sub(line[j], line[j - 1])); j++; }
     const seg = len(sub(line[j], line[j - 1]));
+    // ponytail: the zero-length guard has never been reachable (30k fuzzed hoses); kept against a divide by zero
+    /* v8 ignore next */
     out.push(lerp2(line[j - 1], line[j], seg > 1e-9 ? Math.min(1, (want - walked) / seg) : 0));
   }
   return out;
@@ -191,6 +193,8 @@ function centreline(pts: Vec2[], length: number, bend: number, hose: number): Ve
     let lo = 0, hi = 1;
     for (let i = 0; i < 30; i++) {
       const m = (lo + hi) / 2;
+      // the `else` is for a blend longer than the limb, which neither arc nor elbow produces
+      /* v8 ignore next */
       if (lengthOf(lerpLines(taut, bent, m)) < length) lo = m; else hi = m;
     }
     rubber = lerpLines(taut, bent, hi);

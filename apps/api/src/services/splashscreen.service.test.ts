@@ -78,3 +78,11 @@ it('publishes through the repository transaction, not as two service calls', asy
   expect(repo.publish).toHaveBeenCalledWith('s1');
   expect(repo.update).not.toHaveBeenCalled();
 });
+
+it('lists them all, and converts the payload when an update carries one', async () => {
+  repo.listAll.mockResolvedValue([{ id: 's1' }]);
+  expect(await splashscreenService.list()).toEqual([{ id: 's1' }]);
+  repo.findById.mockResolvedValue({ id: 's1', status: 'draft' });
+  await splashscreenService.update('s1', { data: { a: 1 } } as never);
+  expect(repo.update.mock.calls.at(-1)![1]).toHaveProperty('data');
+});

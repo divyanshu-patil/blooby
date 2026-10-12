@@ -256,5 +256,4 @@ export function glyphBounds(glyphs: Glyph[], size: number): { x0: number; y0: nu
   return { x0, y0, x1, y1 };
 }
 
-export const isText = (v: { text?: unknown }): v is { text: TextStyle } => !!v.text;
 export type { Vec2 };

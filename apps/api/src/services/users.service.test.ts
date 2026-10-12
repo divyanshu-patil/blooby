@@ -180,3 +180,27 @@ it('prefers the chosen username and uploaded avatar over the provider’s', asyn
   const { items } = await usersService.list({ limit: 10 } as never);
   expect(items.map((u) => [u.name, u.avatarUrl])).toEqual([['Ana Real', 'g1'], ['bo', 'mine']]);
 });
+
+it('filters by role, and a search copes with users who have neither email nor name', async () => {
+  profiles.list.mockResolvedValue({ items: [{ id: 'u1', username: null, avatarUrl: null }], nextCursor: null });
+  const r = await usersService.list({ role: 'admin', q: 'x', limit: 10 } as never);
+  expect(profiles.list.mock.calls[0][0]).toEqual({ role: 'admin' });
+  expect(r.items).toEqual([]);
+});
+
+it('answers an empty batch of names, survives a failing identity provider, forgets one id, and records a login', async () => {
+  expect((await usersService.publicNames([])).size).toBe(0);
+  db.profile.findMany.mockResolvedValue([{ id: 'u1', username: 'ana', avatarUrl: null }]);
+  listUsers.mockResolvedValue({ data: null, error: { message: 'down' } });
+  expect((await usersService.publicNames(['u1'])).get('u1')).toEqual({ name: 'ana', avatarUrl: null });
+  usersService.forgetIdentity('u1');
+  profiles.touchLogin.mockResolvedValue({ ok: 1 });
+  expect(await usersService.touchLogin('u1')).toEqual({ ok: 1 });
+});
+
+it('reports each user\'s own project count', async () => {
+  profiles.list.mockResolvedValue({ items: [{ id: 'u1' }, { id: 'u2' }], nextCursor: null });
+  db.project.groupBy.mockResolvedValue([{ userId: 'u1', _count: { _all: 3 } }]);
+  const { items } = await usersService.list({ limit: 10 } as never);
+  expect(items.map((u) => u.projectCount)).toEqual([3, 0]);
+});

@@ -170,3 +170,27 @@ const c: Curve = { points: wave, closed: false };
   it('undo gives the curve back', check(!!ed().project.rig.nodes[n.id].curve));
   ed().loadProject(defaultProject());
 }
+
+// --- the guards and the arms the editor rarely takes ---------------------------------------------
+{
+  const tri: Curve = { closed: true, points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] };
+  const one: Curve = { closed: false, points: [{ x: 0, y: 0 }] };
+  const hand: Curve = { closed: false, points: [{ x: 0, y: 0, hout: { x: 3, y: 0 } }, { x: 10, y: 0 }] };
+  it('no path, or a path with nothing in it, is no curve', check(curveFromPath(undefined) === null && curveFromPath('zz') === null));
+  it('hand-edited handles bake to themselves; a polyline and a smooth curve bake to what they draw', check(
+    bakeHandles(hand, 'bezier') === hand && bakeHandles(tri, 'polyline').points[0].hout === undefined && bakeHandles(tri, 'smooth').points[0].hout !== undefined,
+  ));
+  it('a missing handle draws as none', check(curveToPath(hand, 'bezier').startsWith('M 0 0 C 3 0 10 0 10 0')));
+  it('a single point is not near anything', check(nearestOnCurve(one, 'bezier', { x: 1, y: 1 }) === null));
+  it('a polyline and a bezier have a nearest point too', check(nearestOnCurve(tri, 'polyline', { x: 5, y: -1 })!.seg === 0 && nearestOnCurve(hand, 'bezier', { x: 5, y: 1 })!.seg === 0));
+  it('removing from a small closed curve opens it', check(removePoint(tri, 0)!.closed && !removePoint({ ...tri, points: tri.points.slice(0, 3) }, 0)!.closed));
+  it('dragging the in handle moves it and turns the out one; a missing partner takes the same length', check(
+    (() => {
+      const a = moveHandle(tri, 1, 'in', { x: 8, y: 0 });
+      const b = moveHandle({ ...tri, points: tri.points.map((p, k) => (k === 1 ? { ...p, hout: { x: 2, y: 0 } } : p)) }, 1, 'in', { x: 10, y: -4 });
+      return a.points[1].hin!.x === -2 && a.points[1].hout!.x === 2 && b.points[1].hout!.y === 2;
+    })(),
+  ));
+  it('and a free drag leaves the other alone', check(moveHandle(tri, 1, 'out', { x: 12, y: 0 }, true).points[1].hin === undefined));
+}
+{ it('a bezier with no handles at all is straight', check(curveToPath({ closed: false, points: [{ x: 0, y: 0 }, { x: 4, y: 4 }] }, 'bezier') === 'M 0 0 C 0 0 4 4 4 4')); }

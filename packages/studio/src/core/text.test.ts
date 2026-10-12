@@ -187,3 +187,24 @@ const world = (t: SceneItem) => t.glyphs!.map((g) => ({ x: t.cx + g.x, y: t.cy +
   const t = itemOf(p, 't')!;
   it('text can wrap round a mascot', check(world(t).every((g) => Math.abs(Math.hypot(g.x - body.cx, g.y - body.cy) - (body.w / 2 + 12)) < 3)));
 }
+
+// --- blank lines, whitespace runs, odd widths, unknown effects, aligned on a path ------------------
+{
+  const blankLines = layoutLines(style({ content: 'a\n\nb' }), m);
+  it('a blank line is a line of no width', check(blankLines.length === 3 && blankLines[1].width === 0 && blankLines[1].chars.length === 0));
+  const adv = m.advance('\t');
+  const tabs = layoutLines(style({ content: '\t\t\t\tx', width: adv * 2.5 }), m);
+  it('a run of whitespace wraps character by character', check(tabs.length > 1));
+  const sized = (width: number) => placeGlyphs(style({ width, align: 'center' }), m).glyphs.map((g) => g.x);
+  it('a box of any width lays out: set, zero or negative', check(sized(300).length === 5 && sized(0).length === 5 && sized(-5).length === 5));
+  const odd = placeGlyphs(style({ chars: { kind: 'bogus' as never, progress: 0.5, stagger: 0.3 } }), m).glyphs;
+  it('an effect it does not know leaves the letters where they are', check(odd.length === 5));
+
+  const line = pathSampler('M0 0 L500 0')!;
+  const on = (over: Partial<TextStyle>) => placeGlyphs(style({ path: { mode: 'path', baseline: 0 } as never, ...over }), m, line).glyphs;
+  const first = (g: { x: number }[]) => g[0].x;
+  it('along a path, left starts at its start, centre in the middle, right at its end', check(
+    first(on({ align: 'left' })) < first(on({ align: 'center' })) && first(on({ align: 'center' })) < first(on({ align: 'right' })),
+  ));
+  it('and a path can leave the letters upright', check(on({ path: { mode: 'path', baseline: 0, rotate: false } as never }).every((g) => g.rot === 0)));
+}

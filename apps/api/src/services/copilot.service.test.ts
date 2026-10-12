@@ -145,3 +145,50 @@ it('sends the key as a bearer token and never streams', async () => {
   expect(init.headers.Authorization).toBe('Bearer sekrit');
   expect(JSON.parse(init.body).stream).toBe(false);
 });
+
+it('shows an admin the settings and keys, toggles user keys, and removes a key', async () => {
+  repo.listForAdmin.mockResolvedValue([{ id: 'k' }]);
+  expect(await copilotService.adminView()).toEqual({ allowUserKeys: true, keys: [{ id: 'k' }] });
+  repo.setAllowUserKeys.mockResolvedValue({ allowUserKeys: false });
+  expect(await copilotService.setAllowUserKeys(false)).toEqual({ allowUserKeys: false });
+  expect(await copilotService.removeKey('k')).toBeUndefined();
+  expect(repo.delete).toHaveBeenCalledWith('k');
+});
+
+it('asks for a key when user keys are allowed but none were sent', async () => {
+  const r = await chat({ model: 'm', messages: [] });
+  expect((r as { e: HttpErrorType }).e.message).toMatch(/Add an Ollama/);
+});
+
+it('a caller\'s own keys are never marked, and a rejected one says so', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(401)));
+  const r = await chat({ model: 'm', messages: [], keys: ['mine'] });
+  expect((r as { e: HttpErrorType }).e.message).toMatch(/rejected that API key/);
+  expect(repo.mark).not.toHaveBeenCalled();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(200)));
+  expect(((await chat({ model: 'm', messages: [], keys: ['mine'] })) as { v: unknown }).v).toEqual({ done: true });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(429)));
+  await chat({ model: 'm', messages: [], keys: ['mine'] });
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue('plain'));
+  expect(((await chat({ model: 'm', messages: [], keys: ['mine'] })) as { e: HttpErrorType }).e.message).toBe('plain');
+  expect(repo.mark).not.toHaveBeenCalled();
+});
+
+it('names a rejected server key, and uses the status when a 400 has no body', async () => {
+  repo.pool.mockResolvedValue([{ id: 'k1', secret: 'a' }]);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(403)));
+  expect(((await chat({ model: 'm', messages: [] })) as { e: HttpErrorType }).e.message).toMatch(/configured on this server/);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(400)));
+  expect(((await chat({ model: 'm', messages: [] })) as { e: HttpErrorType }).e.message).toMatch(/^400/);
+});
+
+it('a failing bookkeeping write never fails or delays a chat', async () => {
+  repo.mark.mockRejectedValue(new Error('db'));
+  repo.pool.mockResolvedValue([{ id: 'k1', secret: 'a' }]);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(reply(200)));
+  expect(((await chat({ model: 'm', messages: [] })) as { v: unknown }).v).toEqual({ done: true });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => { throw new Error('body'); } }));
+  expect(((await chat({ model: 'm', messages: [] })) as { e: HttpErrorType }).e.status).toBe(502);
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('net')));
+  expect(((await chat({ model: 'm', messages: [] })) as { e: HttpErrorType }).e.status).toBe(502);
+});

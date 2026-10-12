@@ -41,4 +41,16 @@ describe('ttlCache', () => {
     get.forget('a');
     expect(await get('a')).toBe(2);
   });
+
+  it('sweeps expired entries once it holds more than 2000', async () => {
+    const get = ttlCache(0, async (k) => k);
+    for (let i = 0; i < 2002; i++) await get(`k${i}`);
+    expect(get.size()).toBeLessThan(2002);
+  });
+
+  it('keeps live entries when it sweeps', async () => {
+    const get = ttlCache(60_000, async (k) => k);
+    for (let i = 0; i < 2002; i++) await get(`k${i}`);
+    expect(get.size()).toBe(2002);
+  });
 });

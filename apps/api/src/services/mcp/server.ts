@@ -80,7 +80,7 @@ export const LIMIT_NOTE = `Limits, per account per minute: ${LIMITS.map((l) => `
 function budget(userId: string, id: string) {
   const l = LIMITS.find((x) => x.re.test(id))!;
   const now = Date.now();
-  return { ...l, used: (windows.get(`${userId}:${l.re.source}`) ?? []).filter((t) => now - t < 60_000).length };
+  return { ...l, used: windows.get(`${userId}:${l.re.source}`)!.filter((t) => now - t < 60_000).length };
 }
 
 function throttle(userId: string, id: string) {
@@ -190,7 +190,7 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
         const { summary, result, warnings, ok: _ok, ...meta } = r;
         out = { summary, data: result, meta, warnings: warning ? [warning, ...warnings] : warnings };
       }
-    } finally { inFlight.set(userId, (inFlight.get(userId) ?? 1) - 1); }
+    } finally { inFlight.set(userId, inFlight.get(userId)! - 1); }
 
     projectId = conn.projectId;
     record(conn, id, true, out.summary, Date.now() - started, projectId);

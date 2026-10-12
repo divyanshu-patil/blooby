@@ -2,6 +2,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const send = vi.fn();
+vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: vi.fn(async (_c: unknown, cmd: { input: { Key: string } }, o: { expiresIn: number }) => `https://s3/${cmd.input.Key}?e=${o.expiresIn}`) }));
 vi.mock('../config/aws.js', () => ({ BUCKET: 'test-bucket', s3: { send } }));
 
 const storage = await import('./storage.service.js');
@@ -90,4 +91,36 @@ it('names the real size in the refusal, so the limit is actionable', async () =>
     expect((e as Error).message).toMatch(/9\.0MB/);
     expect((e as Error).message).toMatch(/8MB limit/);
   }
+});
+
+it('reports an empty or unreadable object as an upstream failure', async () => {
+  send.mockResolvedValueOnce({ Body: { transformToByteArray: async () => new Uint8Array() } });
+  await expect(storage.getProjectJson('k')).rejects.toMatchObject({ status: 502 });
+  send.mockResolvedValueOnce({});
+  await expect(storage.getProjectJson('k')).rejects.toThrow(/empty object/);
+  send.mockRejectedValueOnce('plain');
+  await expect(storage.getProjectJson('k')).rejects.toThrow(/plain/);
+});
+
+it('lists a project\'s objects across pages, ignoring a neighbour with the same prefix', async () => {
+  send.mockResolvedValueOnce({ Contents: [{ Key: 'users/u/projects/p.json' }, { Key: 'users/u/projects/p/old' }, { Key: 'users/u/projects/pp.json' }, {}], NextContinuationToken: 't' })
+    .mockResolvedValueOnce({});
+  expect(await storage.listProjectObjects('u', 'p')).toEqual(['users/u/projects/p.json', 'users/u/projects/p/old']);
+});
+
+it('deletes a project\'s other objects in batches of 1000, and shrugs off a failed delete', async () => {
+  const keys = Array.from({ length: 1001 }, (_, i) => ({ Key: `users/u/projects/p/${i}` }));
+  send.mockResolvedValueOnce({ Contents: keys }).mockRejectedValueOnce(new Error('x')).mockResolvedValueOnce({});
+  expect(await storage.deleteProjectObjects('u', 'p', 'users/u/projects/p/0')).toBe(1000);
+  expect(send).toHaveBeenCalledTimes(2); // list + one batch (the list was a single page of 1000 kept)
+  send.mockReset();
+  send.mockRejectedValueOnce(new Error('list failed'));
+  expect(await storage.deleteProjectObjects('u', 'p')).toBe(0);
+});
+
+it('signs a read link and files an export under the person\'s prefix', async () => {
+  expect(await storage.presignedReadUrl('k')).toBe('https://s3/k?e=300');
+  const r = await storage.putExport('u1', 'job', 'my file.json', '{}', 'application/json');
+  expect(r.key).toBe('users/u1/exports/job/my-file.json');
+  expect(r.url).toContain('e=3600');
 });

@@ -23,8 +23,6 @@ const LEGACY = new Set<string>(MASCOT_PARTS);
 /** Which part a node plays. The first mascot of an older file has no roles — its ids are. */
 export const roleOf = (n: RigNode): string | undefined => n.role ?? (LEGACY.has(n.id) ? n.id : undefined);
 
-export const isMascot = (n: RigNode | undefined): n is RigNode => n?.kind === 'body';
-
 /** Every mascot, back to front. */
 export const mascotsOf = (rig: Rig): RigNode[] =>
   Object.values(rig.nodes).filter((n) => n.kind === 'body').sort((a, b) => a.zIndex - b.zIndex);

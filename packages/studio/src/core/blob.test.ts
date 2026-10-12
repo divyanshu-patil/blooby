@@ -151,3 +151,8 @@ const worstGap = (a: { x: number; y: number }[], b: { x: number; y: number }[]) 
   for (let f = 1; f <= 60; f++) worst = Math.max(worst, worstGap(ringAt(f), ringAt(f - 1)));
   it('no outline point ever jumps between frames', check(worst < 8, `${worst.toFixed(2)}px in one frame`));
 }
+
+{
+  it('no blob, or a dial at nothing, is an ellipse', check(blobOf(undefined) === undefined && blobOf({ amount: 0 }) === undefined && blobOf({}) === undefined));
+  it('a blob with no seed uses seed 1', check(blobOf({ amount: 0.3 }) === blobPath(0.3, 1)));
+}

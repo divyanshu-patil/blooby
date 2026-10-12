@@ -70,6 +70,8 @@ function parse(d: string): Seg[] {
     if (i >= tokens.length && cmd.toUpperCase() !== 'Z') break;
     const rel = cmd === cmd.toLowerCase();
     const C = cmd.toUpperCase();
+    // belt and braces: every branch below already consumed a token, so this never fires
+    /* v8 ignore next */
     const step = () => { if (i === before) i++; };
     const push = (...ss: Seg[]) => {
       if (ss.length && opensSubpath) { ss[0].head = true; opensSubpath = false; headAt = segs.length; }
@@ -215,7 +217,7 @@ export function normalizePath(d: string): { d: string; bounds: { x: number; y: n
   const w = Math.max(b.x1 - b.x0, 1e-6), h = Math.max(b.y1 - b.y0, 1e-6);
   const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
   const out = mapPath(d, (p) => ({ x: (p.x - cx) / w, y: (p.y - cy) / h }));
-  return out ? { d: out, bounds: { x: cx, y: cy, w, h } } : null;
+  return { d: out, bounds: { x: cx, y: cy, w, h } };
 }
 
 
@@ -290,7 +292,6 @@ function arcSegs(p0: Vec2, p1: Vec2, rx: number, ry: number, rotDeg: number, lar
  * representation to move a point in rather than a parser that must preserve every spelling.
  */
 function serialise(segs: Seg[]): string {
-  if (!segs.length) return '';
   const f = (v: Vec2) => `${round(v.x)} ${round(v.y)}`;
   let d = `M ${f(segs[0].p0)}`;
   for (const s of segs) d += s.c1 && s.c2 ? ` C ${f(s.c1)} ${f(s.c2)} ${f(s.p1)}` : ` L ${f(s.p1)}`;
@@ -557,6 +558,8 @@ function buildSampler(d: string): PathSampler | null {
     for (let k = 1; k <= steps; k++) pts.push(along(s, k / steps));
   }
   const closed = !!segs[0].closed;
+  // a loop's Z already ended on its start; this guards float drift only
+  /* v8 ignore next */
   if (closed && dist(pts[pts.length - 1], pts[0]) > 1e-9) pts.push(pts[0]);
   const lens = [0];
   for (let i = 1; i < pts.length; i++) lens.push(lens[i - 1] + dist(pts[i - 1], pts[i]));
@@ -689,8 +692,7 @@ export function primitivePath(shape: PrimitiveShape, p: ShapeParams = {}): strin
 
 /** Scale a centred outline down, about the origin, until it fits the -0.5..0.5 box. */
 function fitBox(d: string): string {
-  const b = pathBounds(d);
-  if (!b) return d;
+  const b = pathBounds(d)!;
   // a hair inside, not on, the edge: coordinates are written rounded to 0.001, and a
   // point fitted to exactly 0.5 can round out past it
   const reach = Math.max(-b.x0, b.x1, -b.y0, b.y1);

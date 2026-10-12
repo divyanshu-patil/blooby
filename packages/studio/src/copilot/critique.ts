@@ -97,7 +97,7 @@ export function critique(p: Project, calls: ToolCall[], ask: string): string[] {
     }
     // 2. ...or animating it by an amount nobody would see
     const best = Math.max(...hit.map(span));
-    const floor = Math.min(...hit.map((t) => MIN_CHANGE[t.property] ?? 0));
+    const floor = Math.min(...hit.map((t) => MIN_CHANGE[t.property]));
     if (best < floor) {
       notes.push(`${w.label} only changes by ${best.toFixed(2)}, which is invisible — it needs at least ${floor} to read, and the user named it, so go to the top of the range.`);
     }

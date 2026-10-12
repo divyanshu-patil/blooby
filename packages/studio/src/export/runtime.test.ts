@@ -99,3 +99,41 @@ function project(): Project {
   it('an empty machine yields an empty inputs type, not a syntax error', check(src.includes('Record<string, never>')));
   it('and an empty setter table', check(src.includes('// no settable inputs configured')));
 }
+
+// --- the pack and its README, in every shape a machine can take -------------------------------
+{
+  const { buildRuntimePack } = await import('./runtime');
+  const { unzip } = await import('./zip');
+  const readme = async (p: Project) => {
+    const { blob } = await buildRuntimePack(p, { background: null });
+    const files = await unzip(new Uint8Array(await blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
+    return { names: [...files.keys()], text: new TextDecoder().decode(files.get('README.md')!) };
+  };
+
+  const full = project();
+  full.name = 'My  Mascot';
+  full.timelines[0].loop = true;
+  full.stateMachine!.inputs.push({ name: 'is-weird', type: 'Boolean', value: true, description: 'hyphenated' });
+  full.stateMachine!.transitions.push(
+    { id: 'bare', from: full.timelines[0].id, to: full.timelines[1].id, conditions: [{ input: 'poke', operator: 'Fired' }] } as never,
+    { id: 'orphan', from: full.timelines[0].id, to: 'nowhere', conditions: [{ input: 'poke', operator: 'Fired' }] } as never,
+  );
+  const a = await readme(full);
+  it('the pack is named for the project', check(a.names.includes('my-mascot.lottie') && a.names.includes('README.md') && a.names.includes('Mascot.tsx')));
+  it('the README lists states, inputs, transitions and the event', check(a.text.includes('(loops)') && a.text.includes('is-weird') && a.text.includes('hyphenated') && a.text.includes('## Events') && a.text.includes('mascot.current?.fire("poke")')));
+  it('a transition to nothing is left out, a bare one kept', check(!a.text.includes('nowhere') && a.text.includes('(0s, easeInOut)')));
+  it('a hyphenated input is quoted in the example', check(a.text.includes('"is-weird": true,')));
+  it('the config says what the default blend is', check(machineConfig(full).stateMachine.states.every((s) => typeof s.enterMs === 'number') && machineConfig(full).stateMachine.inputs.some((i) => (i as { description?: string }).description === 'hyphenated')));
+
+  const empty = defaultProject();
+  empty.name = '';
+  empty.stateMachine = { id: 'e', inputs: [], transitions: [] } as never;
+  const b = await readme(empty);
+  it('with nothing configured the README says so', check(b.names.includes('mascot.lottie') && b.text.includes('(none)') && b.text.includes('_None configured._') && b.text.includes('no inputs configured yet') && !b.text.includes('## Events')));
+  it('the source for a machine with no inputs types them as never', check(mascotSource(empty).includes('Record<string, never>')));
+
+  const imported = defaultProject();
+  imported.importedAnimations = { x: { v: 1, layers: [] } as never };
+  imported.timelines[0].animationId = 'x';
+  it('an all-imported project names its animation as imported', check((await readme(imported)).text.includes('(imported)')));
+}

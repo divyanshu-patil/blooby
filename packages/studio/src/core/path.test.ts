@@ -139,3 +139,53 @@ import { PROPS } from './props';
   const mid = morphPath(pulled, star, 0.5);
   it('a hand-edited outline still morphs', check(mid !== pulled && mid !== star && flattenPath(mid, 32).length === 32));
 }
+
+// --- every corner of the parser, the caches and the samplers ---------------------------------
+import { flattenPath as flat, isOpenPath, lerpPath, mapPath, morphPath as morph, movePathAnchor as move, normalizePath, pathAnchors as anchors, pathBounds, pathFromPoints, pathSampler, pathToBezier, splitSubpaths } from './path';
+{
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  it('a non-string path is nothing', check(flat(5 as never).length === 0));
+  it('relative moves, smooth curves with and without a predecessor', check(
+    mapPath('m 1 1 2 2', (p) => p) === 'M 1 1 L 3 3'
+    && mapPath('M0 0 C 1 1 2 2 3 0 S 5 5 10 0', (p) => p).includes('C 4 -2')
+    && mapPath('M0 0 S 5 5 10 0', (p) => p).includes('C 0 0 5 5 10 0'),
+  ));
+  it('smooth quadratics with and without a predecessor', check(
+    mapPath('M0 0 Q 5 5 10 0 T 20 0', (p) => p).split('C').length === 3 && mapPath('M0 0 T 10 0', (p) => p).includes('C 0 0'),
+  ));
+  it('two outlines split in two', check(splitSubpaths('M0 0 L5 5 M10 10 L20 20').length === 2));
+  it('the parse cache survives being filled', check((() => { for (let i = 0; i < 2100; i++) mapPath(`M0 0 L${i} 1`, (p) => p); return true; })()));
+
+  const sq = 'M0 0 L10 0 L10 10 L0 10 Z';
+  const b = pathToBezier(sq)!;
+  it('a closed path is bezier data that closes on itself', check(b.c && b.v.length === 4));
+  it('nothing, or only infinities, has no bezier, no bounds, no anchors', check(pathToBezier('zz') === null && pathBounds('M 1e999 0 L 5 5') === null && pathBounds('zz') === null && anchors('zz').length === 0 && normalizePath('zz') === null));
+  it('an open path keeps its last point', check(pathToBezier('M0 0 L5 5')!.v.length === 2));
+  it('a degenerate arc is a line', check(mapPath('M0 0 A 0 0 0 0 0 5 5', (p) => p) === 'M 0 0 L 5 5' && mapPath('M5 5 A 3 3 0 0 0 5 5', (p) => p) === 'M 5 5 L 5 5'));
+  it('moving an anchor of a polygon, and of nothing', check(move(sq, 1, { x: 12, y: 1 }).includes('M 0 0 L 12 1') && move('zz', 0, { x: 1, y: 1 }) === 'zz'));
+
+  it('a zero-length path flattens to its one point', check(flat('M5 5 L5 5', 4).length === 4 && flat('M5 5 L5 5', 4).every((p) => p.x === 5)));
+  it('the flatten cache survives being filled', check((() => { for (let i = 0; i < 650; i++) flat(`M0 0 L${i} 1`, 8); return true; })()));
+  it('no points, no path', check(pathFromPoints([]) === ''));
+
+  it('an infinite line is not open, a finite one is', check(isOpenPath('M0 0 L5 5') && !isOpenPath('zz')));
+  it('open lines with nothing to flatten snap to the nearer end', check(morph('M0 0 L 1e999 0', 'M0 0 L9 0', 0.2) === 'M0 0 L 1e999 0' && morph('M0 0 L9 0', 'M0 0 L 1e999 0', 0.8) === 'M0 0 L 1e999 0'));
+  it('open lines run the way that matches', check(morph('M0 0 L10 0', 'M10 0 L0 0', 0.5, 4).startsWith('M 0 0')));
+  it('a loop against nothing snaps too', check(morph(sq, 'zz', 0.2) === sq && morph(sq, 'zz', 0.8) === 'zz'));
+  it('the alignment cache survives being filled', check((() => { for (let i = 0; i < 650; i++) morph(sq, `M0 0 L${i + 20} 0 L10 10 Z`, 0.5, 8); return true; })()));
+  it('lerping ends and mismatched writings', check(lerpPath('M0 0', 'M5 5', 1) === 'M5 5' && typeof lerpPath('', 'x', 0.5) === 'string' && lerpPath('M 0 0 L 10 0', 'M 0 0 L 20 0', 0.5) === 'M 0 0 L 15 0'));
+
+  it('a zero-length line cannot be sampled', check(pathSampler('M5 5 L5 5') === null));
+  const line = pathSampler('M0 0 L10 0 L10 0')!;
+  it('a path is sampled along its length, a trailing duplicate included', check(line.at(10).x === 10 && line.at(NaN).x === 0));
+  const open = pathSampler('M0 0 L10 0')!;
+  it('and carries straight on past either end', check(open.at(-5).x === -5 && open.at(15).x === 15 && same(open.at(-5).angle, 0)));
+  it('the sampler cache survives being filled', check((() => { for (let i = 0; i < 650; i++) pathSampler(`M0 0 L${i + 1} 0`); return true; })()));
+
+  it('a turned star and a turned pebble', check(primitivePath('star', { rotation: 30 }).length > 0 && primitivePath('pebble', { rotation: 30 }) !== primitivePath('pebble')));
+}
+{
+  const { naturalShape: ns } = await import('./path');
+  it('a circle primitive is a circle, anything else a pill', check(ns('x', { shape: 'circle' }) === 'circle' && ns('x') === 'pill' && ns('body') === 'circle'));
+}
+{ it('lerping against an empty path morphs', check(typeof lerpPath('M0 0 L5 5', '', 0.5) === 'string')); }

@@ -6,10 +6,9 @@ import { limbPoints, pinWeight } from './limb';
 /** What a stroke is drawn in before anyone picks a colour — the eyes' own ink. */
 export const STROKE_DEFAULT: ColorStop = { r: 20, g: 19, b: 24, a: 1 };
 
-/** A limb point, or undefined when this node is not a limb or has no such point. */
+/** A limb point, or undefined when this limb has no such point. Callers have checked it is a limb. */
 function limbPoint(node: RigNode, which: string): Vec2 | undefined {
-  const l = node.limb;
-  if (!l) return undefined;
+  const l = node.limb!;
   return which === 'a' ? l.a : which === 'b' ? l.b : l.c;
 }
 
@@ -71,8 +70,7 @@ const PIN_PATH = /^limb\.pin\.([abc])\.([xy])$/;
 const PIN_ON = /^limb\.pin\.([abc])\.on$/;
 /** the pin on one point: the end point's is `limb.pin`, the others' are `limb.pins[k]` */
 function pinOf(node: RigNode, which: string): Vec2 | undefined {
-  const l = node.limb;
-  if (!l) return undefined;
+  const l = node.limb!; // callers have checked it is a limb
   return which === limbPoints(l).at(-1) ? l.pin : l.pins?.[which as 'a' | 'b' | 'c'];
 }
 

@@ -589,14 +589,12 @@ export const useEditor = create<Editor>((set, get) => ({
     if (!track || !here) { get().addKeyframeNow(nodeId, property); return; }
 
     get().commit((p) => {
-      const t = at(p).tracks.find((x) => x.id === track.id);
-      if (!t) return;
+      const t = at(p).tracks.find((x) => x.id === track.id)!; // p is a copy of the project `track` came from
       t.keyframes = t.keyframes.filter((k) => k.id !== here.id);
       if (t.keyframes.length) return;
       // the last one: bake the value back down so removing a keyframe never moves the
       // mascot, then drop the empty track rather than leave a blank lane on the strip
-      const v = sampleTrack(track, playhead);
-      if (v !== undefined) write(p, nodeId, property, v);
+      write(p, nodeId, property, sampleTrack(track, playhead)!); // it has the key `here`
       at(p).tracks = at(p).tracks.filter((x) => x.id !== t.id);
     });
   },
@@ -957,9 +955,7 @@ export const useEditor = create<Editor>((set, get) => ({
     // into Bézier, the handles it draws with become handles you can drag — nothing moves
     const kept = type === 'bezier' && from !== 'bezier' ? bakeHandles(c, from) : c;
     get().commit((p) => {
-      const n = p.rig.nodes[nodeId];
-      if (!n) return;
-      n.curve = { type };
+      p.rig.nodes[nodeId].curve = { type }; // p is a copy of the project `node` came from
       writeValue(p, nodeId, 'shape.path', curveToPath(kept, type), playhead);
     }, `curvetype.${nodeId}`);
   },

@@ -1,7 +1,7 @@
 import { it } from 'vitest';
 import { check } from './testkit';
 import {
-  catalogEntry, fontCatalog, fontData, fontError, fontStatus, fontWeightUsed, glyphOutline, loadFont, metricsFor,
+  catalogEntry, cssFamily, fontCatalog, fontData, fontError, fontStatus, fontWeightUsed, glyphOutline, loadFont, metricsFor,
   missingFonts, projectFonts, searchFonts, weightsOf,
 } from './fonts';
 import { fallbackMetrics } from './text';
@@ -116,3 +116,5 @@ function withText(family: string): Project {
 }
 
 globalThis.fetch = realFetch;
+
+it('cssFamily strips quotes and falls back to system fonts', check(cssFamily({ family: 'A"b' } as never) === '"Ab", ui-sans-serif, system-ui, sans-serif'));

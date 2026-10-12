@@ -202,3 +202,53 @@ const ed = () => useEditor.getState();
     names.includes('Mascot 2') && names.includes('Mascot 2 / Left eye') && names.includes('Body / Left eye'), names.join(' | ')));
   ed().loadProject(defaultProject());
 }
+
+// --- labels, retargeting, templates and the odd shapes of a rig ------------------------------------
+import { baseRig, ensureFaces, instantiateTemplate, makeMascot, mascotLabel, nextMascotName, retargetId } from './mascot';
+import type { RigNode, Timeline } from './types';
+{
+  const rig = defaultProject().rig;
+  const two = (extra: RigNode[]) => ({ ...rig, nodes: { ...rig.nodes, ...Object.fromEntries(extra.map((n) => [n.id, n])) } });
+  const m2 = makeMascot('cute', { name: 'Mascot 2', id: 'm2', x: 30, y: 40 });
+  const rig2 = two(m2);
+  const root = rig.nodes[rig.rootId];
+  it('a lone first mascot is "Mascot", beside others "Mascot 1", renamed it keeps its name, others theirs', check(
+    mascotLabel(rig, root) === 'Mascot' && mascotLabel(rig2, root) === 'Mascot 1' && mascotLabel(rig, { ...root, name: 'Ada' }) === 'Ada' && mascotLabel(rig2, rig2.nodes.m2) === 'Mascot 2',
+  ));
+  it('a new mascot takes the first free number', check(nextMascotName(rig) === 'Mascot 2' && nextMascotName(rig2) === 'Mascot 3'));
+  it('a mascot made at a spot sits there', check(m2[0].surface.flatOffset!.x === 30 && makeMascot('default', { name: 'x' })[0].surface.flatOffset!.y === 0));
+
+  const tl = { blocks: [{ id: 'b1', mascotId: 'm9' }, { id: 'b2' }], tracks: [] } as unknown as Timeline;
+  const tracks = [{ nodeId: 'x', blockId: 'zz' }, { nodeId: 'y' }, { nodeId: 'x', blockId: 'b1' }, { nodeId: 'q', blockId: 'b2' }] as never;
+  it('a loose layer plays in the lane of the clip that animates it, whoever the clip belongs to', check(laneOf(undefined, tl, 'x', tracks) === 'm9' && laneOf(undefined, tl, 'q', tracks) === '' && laneOf(undefined, tl, 'nobody', tracks) === ''));
+  it('a body is only its own body part', check(partOf(rig, 'body', 'body') === 'body' && partOf(rig, 'eyeL', 'body') === undefined));
+  it('a preset\'s own layer is kept apart per mascot, a plain id is left alone', check(retargetId(rig2, 'm2', 'sticker', true) === 'm2:sticker' && retargetId(rig2, 'm2', 'sticker') === 'sticker' && retargetId(rig2, 'm2', 'eyeL') === 'm2.eyeL'));
+
+  // faces made for bodies that have none
+  const eye = (id: string, parent: string, z?: number): RigNode => ({ ...makeMascot('default', { name: 'n', id: 'tmp' })[2], id, parentId: parent, zIndex: z as number, role: undefined });
+  const lone = (): Record<string, RigNode> => ({ b: { ...makeMascot('default', { name: 'n', id: 'b' })[0] }, e1: eye('e1', 'b'), e2: eye('e2', 'b', 3) });
+  const a = lone(); ensureFaces(a, 'b');
+  it('a body with eyes and no face gets one, the eyes move into it', check(a.face?.role === 'face' && a.e1.parentId === 'face' && a.face.zIndex === 0));
+  const b = lone(); ensureFaces(b);
+  it('not the root: the face is named for its body', check(!!b['b.face'] && b.e2.parentId === 'b.face'));
+  const c = lone(); c['b.face'] = eye('b.face', 'zzz'); ensureFaces(c);
+  it('a taken id is left alone', check(c.e1.parentId === 'b'));
+  const d = lone(); d.face = eye('face', 'zzz'); ensureFaces(d, 'b');
+  it('and the root falls back to a prefixed id when "face" is taken', check(!!d['b.face']));
+
+  // saved mascots as templates
+  const tpl = makeMascot('default', { name: 'T', id: 'src' });
+  tpl[2].eye!.linkedToId = 'src.eyeR'; tpl[3].eye!.linkedToId = 'gone'; delete tpl[3].role;
+  const inst = instantiateTemplate(tpl, { name: 'Copy', x: 5, y: 6 });
+  it('a template becomes new nodes wired to each other, links to nothing cleared, no role gets a made-up one', check(
+    inst[0].name === 'Copy' && inst[0].surface.flatOffset!.x === 5 && inst[2].eye!.linkedToId === inst[3].id && inst[3].eye!.linkedToId === null && inst[3].id.startsWith(inst[0].id + '.p'),
+  ));
+  it('at the origin by default; without a body it is nothing', check(instantiateTemplate(tpl, { name: 'x' })[0].surface.flatOffset!.y === 0 && instantiateTemplate([tpl[1]], { name: 'x' }).length === 0));
+  it('a rig whose root is not a body has nothing to start from', check(baseRig({ ...rig, rootId: 'eyeL' }).rootId === '' && Object.keys(baseRig({ ...rig, rootId: 'eyeL' }).nodes).length === 0));
+}
+{
+  const rig = defaultProject().rig;
+  const m = [...makeMascot('cute', { name: 'Mascot 3', id: 'x' })];
+  const crowded = { ...rig, nodes: { ...rig.nodes, ...Object.fromEntries(m.map((n) => [n.id, n])) } };
+  it('a taken number is skipped', check(nextMascotName(crowded) === 'Mascot 4'));
+}

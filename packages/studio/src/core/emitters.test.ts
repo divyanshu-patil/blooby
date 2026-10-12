@@ -333,3 +333,23 @@ import { activeTimeline } from './types';
 
   ed().loadProject(defaultProject());
 }
+
+// --- artwork markup, the resolver, and shapes that cannot be outlines ----------------------------------
+import { libraryOutline, outlinesOf, shapeForGlyph, shapeIdOf } from './emitters';
+{
+  it('a group\'s fill is inherited; a stray close is ignored; a bare group inherits from its parent', check(
+    outlinesOf('</g><g fill="red"><g><path d="M0 0 L1 1 Z"/></g></g></g><g><path d="M0 0 L2 2 Z"/></g>').map((o) => o.fill).join() === 'red,',
+  ));
+  it('an unknown shape has no outline, and none has no id', check(libraryOutline('no-such-shape') === undefined && shapeIdOf(undefined) === undefined));
+  SHAPE_LIBRARY.push({ id: 'zz-open', label: 'open', group: 'symbols', viewBox: '0 0 10 10', markup: '<path d="M0 0 L5 5" fill="none" stroke="red"/>', tint: false } as never);
+  it('artwork with nothing to fill has no outline', check(libraryOutline('zz-open') === undefined));
+  SHAPE_LIBRARY.pop();
+  it('a library shape is known by its outline', check(shapeIdOf(libraryOutline(SHAPE_LIBRARY[0].id)) === SHAPE_LIBRARY[0].id));
+
+  const assets = [{ id: 'a', markup: '<path/>', viewBox: '0 0 1 1' }];
+  it('the resolver finds the library, then the project\'s assets, then a typed glyph', check(
+    shapeResolver()('nope') === undefined && shapeResolver(assets)(undefined, 'a')!.viewBox === '0 0 1 1' && shapeResolver(assets)(undefined, 'missing') === undefined
+    && shapeResolver()(undefined, 'a') === undefined && shapeResolver()(undefined, undefined, '') === undefined,
+  ));
+  it('a glyph with a drawing resolves; a blank one does not', check((() => { const g = SHAPE_LIBRARY.find((s) => s.glyphs?.length); return !g || (shapeForGlyph(g.glyphs![0]) === g && shapeForGlyph('  ') === undefined && !!shapeResolver()(undefined, undefined, g.glyphs![0])); })()));
+}

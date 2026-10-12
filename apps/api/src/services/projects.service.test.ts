@@ -3,9 +3,10 @@ import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('../repositories/projects.repository.js', () => ({
   projectsRepository: {
     findById: vi.fn(), listByUser: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(),
-    bumpVersionIfCurrent: vi.fn(), countView: vi.fn(), countDuplicate: vi.fn(),
+    bumpVersionIfCurrent: vi.fn(), countView: vi.fn(), countDuplicate: vi.fn(), listPublic: vi.fn(),
   },
 }));
+vi.mock('./users.service.js', () => ({ usersService: { publicNames: vi.fn(async () => new Map([['u1', { name: 'Ada' }]])) } }));
 vi.mock('../repositories/assets.repository.js', () => ({ assetsRepository: { findById: vi.fn() } }));
 vi.mock('./storage.service.js', () => ({
   putProjectJson: vi.fn(), getProjectJson: vi.fn(), deleteProjectJson: vi.fn(),
@@ -216,4 +217,39 @@ it('opening someone else’s public project counts a view; your own records when
   await projectsService.touchOpened('p1', 'u1');
   expect(repo.update).toHaveBeenCalledWith('p1', expect.objectContaining({ lastOpenedAt: expect.any(Date) }));
   expect(repo.countView).toHaveBeenCalledTimes(1);
+});
+
+it('lists public projects with the owner\'s name, or none when unknown', async () => {
+  repo.listPublic.mockResolvedValue({ items: [project({ s3Key: 'a' }), project({ userId: 'ghost', s3Key: 'b' })], nextCursor: null });
+  const r = await projectsService.listPublic({ limit: 2, sort: 'newest' } as never);
+  expect(r.items.map((i) => i.owner)).toEqual(['Ada', null]);
+  expect(r.items[0]).not.toHaveProperty('s3Key');
+});
+
+it('404s a missing project, and saves without a named version or with a thumbnail', async () => {
+  repo.findById.mockResolvedValue(null);
+  expect(await status(projectsService.remove('p1', 'u1'))).toBe(404);
+  saved();
+  repo.findById.mockResolvedValue(project({ userId: 'u1', currentVersion: 3 }));
+  await projectsService.save('p1', 'u1', { project: {}, thumbnailUrl: 'https://t/x.png' } as never);
+  expect(repo.bumpVersionIfCurrent).toHaveBeenLastCalledWith('p1', 3, expect.objectContaining({ thumbnailUrl: 'https://t/x.png' }));
+});
+
+it('still reports the upload failure when cleaning up the row fails too', async () => {
+  repo.create.mockResolvedValue(project());
+  store.putProjectJson.mockRejectedValue(new Error('s3 down'));
+  repo.delete.mockRejectedValue(new Error('db down'));
+  await expect(projectsService.create('u1', { name: 'n' } as never)).rejects.toThrow('s3 down');
+});
+
+it('bookkeeping that fails does not fail a duplicate or an open', async () => {
+  repo.findById.mockResolvedValue(project({ userId: 'other', visibility: 'public', s3Key: 'k', name: 'Src' }));
+  store.getProjectJson.mockResolvedValue({});
+  repo.create.mockResolvedValue(project({ id: 'p2' }));
+  store.putProjectJson.mockResolvedValue({ key: 'k', bucket: 'b', sizeBytes: 1, checksum: 'c' });
+  repo.update.mockResolvedValue(project({ id: 'p2' }));
+  repo.countDuplicate.mockRejectedValue(new Error('x'));
+  repo.countView.mockRejectedValue(new Error('x'));
+  await projectsService.duplicate('p1', 'u1');
+  expect((await projectsService.touchOpened('p1', 'u1')).id).toBe('p1');
 });

@@ -149,7 +149,6 @@ export function makeSvgLayer(text: string, name?: string): { node: RigNode; warn
         ...base, kind: 'primitive', primitive: { shape: 'pill' }, shapePath: only.d,
         color: only.fill ?? color,
         ...(only.fill === null ? { fill: { enabled: false } } : {}),
-        ...(only.stroke ? { stroke: { enabled: true, color: only.stroke, width: Math.round((only.strokeWidth ?? 0.02) * mean * 10) / 10, lineCap: 'round', lineJoin: 'round' } } : {}),
       },
     };
   }
@@ -209,7 +208,6 @@ export function makeCurveLayer(pts: CurvePoint[], opts: {
   }));
   const type = opts.type ?? (clean.some((p) => p.hin || p.hout) ? 'bezier' : 'smooth');
   const d = curveToPath({ points: unit, closed: !!opts.closed && clean.length > 2 }, type);
-  if (!d) return null;
   return {
     id: uid('curve'), name: opts.name ?? 'Curve', kind: 'primitive', parentId: opts.parentId ?? null,
     surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: r2(cx), y: r2(cy) } },
@@ -817,8 +815,7 @@ export function pinLimbPoint(p: Project, id: string, key: 'a' | 'b' | 'c', on: b
   // (or off) PIN_BLEND_MS later, so the point eases onto its pin or off it. The pin stays stored.
   const onPath = `limb.pin.${key}.on`;
   if (storedPin(node.limb, key) && activeTimeline(p).tracks.some((t) => t.nodeId === id && t.property === onPath)) {
-    const now = valueAt(p, id, onPath, atMs);
-    writeValue(p, id, onPath, typeof now === 'number' ? now : on ? 0 : 1, atMs);
+    writeValue(p, id, onPath, valueAt(p, id, onPath, atMs) as number, atMs); // a hold is a number
     writeValue(p, id, onPath, on ? 1 : 0, atMs + PIN_BLEND_MS);
     return true;
   }
@@ -873,7 +870,7 @@ export function applyScaleAsBase(p: Project, bodyId: string, atMs: number): bool
   const body = p.rig.nodes[bodyId];
   if (body?.kind !== 'body') return false;
   const ev = evaluateRig(p, atMs).nodes[bodyId];
-  const sx = ev?.transform.scale.x ?? 1, sy = ev?.transform.scale.y ?? 1;
+  const sx = ev.transform.scale.x, sy = ev.transform.scale.y;
   if (Math.abs(sx - 1) < 1e-4 && Math.abs(sy - 1) < 1e-4) return false;
   if (sx <= 0 || sy <= 0) return false;
   const k = Math.sqrt(sx * sy);
@@ -881,7 +878,7 @@ export function applyScaleAsBase(p: Project, bodyId: string, atMs: number): bool
 
   // which factor a property takes on a node — undefined when it is not a length at all
   const perAxisFrame = (n: RigNode) => {
-    const parent = n.parentId ? p.rig.nodes[n.parentId] : undefined;
+    const parent = p.rig.nodes[n.parentId!]; // every part but the body itself has one
     return parent?.id === bodyId || (parent?.role === 'face' && parent.kind === 'group' && parent.parentId === bodyId);
   };
   const factor = (n: RigNode, path: string): number | undefined => {
@@ -893,8 +890,7 @@ export function applyScaleAsBase(p: Project, bodyId: string, atMs: number): bool
     const axis = perAxisFrame(n);
     if (path === 'flatOffset.x' || /^limb\.[abc]\.x$/.test(path)) return axis ? sx : k;
     if (path === 'flatOffset.y' || /^limb\.[abc]\.y$/.test(path)) return axis ? sy : k;
-    if (['size.x', 'size.y', 'anchor.x', 'anchor.y', 'limb.length', 'limb.thickness', 'limb.foot.length', 'limb.foot.width', 'text.size'].includes(path)) return k;
-    return undefined;
+    return k; // the rest of `paths`: sizes and lengths, which scale uniformly
   };
   const paths = ['size.x', 'size.y', 'anchor.x', 'anchor.y', 'flatOffset.x', 'flatOffset.y', 'limb.a.x', 'limb.a.y', 'limb.b.x', 'limb.b.y',
     'limb.c.x', 'limb.c.y', 'limb.length', 'limb.thickness', 'limb.foot.length', 'limb.foot.width', 'text.size'];
@@ -1229,10 +1225,9 @@ export function pasteLayers(p: Project, clip: LayerClip, ontoMascot?: string): s
 
   const tl = activeTimeline(p);
   const bmap = new Map((clip.blocks ?? []).map((b) => [b.id, uid('b')]));
-  const rb = (id: string | undefined) => (id ? bmap.get(id) : undefined);
   const scoped = <T extends { blockId?: string }>(x: T): T => {
     const c = { ...structuredClone(x), id: uid('x') } as T;
-    if (x.blockId) c.blockId = rb(x.blockId);
+    if (x.blockId) c.blockId = bmap.get(x.blockId);
     if (!c.blockId) delete c.blockId;
     return c;
   };

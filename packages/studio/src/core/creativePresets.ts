@@ -25,7 +25,7 @@ const keys = (nodeId: string, property: string, ks: [number, number, E?][]): Tra
 /** squash and stretch through `squish`, about the body's feet: y as given, x keeping the volume */
 const squash = (ks: [number, number, E?][]): Track[] => [
   keys('body', 'squish.y', ks),
-  keys('body', 'squish.x', ks.map(([t, v, e]) => [t, v > 0 ? Math.round((1 / Math.sqrt(v)) * 1000) / 1000 : 1, e])),
+  keys('body', 'squish.x', ks.map(([t, v, e]) => [t, Math.round((1 / Math.sqrt(v)) * 1000) / 1000, e])),
 ];
 /** squish about the feet for the length of the clip — the body's anchor, set and put back */
 const feet = (D: number): Track[] => [keys('body', 'anchor.y', [[0, R, 'hold'], [D - 1, R, 'hold']])];

@@ -68,7 +68,6 @@ export function parseTransform(s: string | undefined): M {
   if (!s) return m;
   for (const [, fn, raw] of s.matchAll(/([a-zA-Z]+)\s*\(([^)]*)\)/g)) {
     const a = (raw.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? []).map(Number);
-    if (!a.every(Number.isFinite)) continue;
     const r = ((a[0] ?? 0) * Math.PI) / 180;
     let t: M | null = null;
     switch (fn) {
@@ -199,7 +198,7 @@ export function parseSvgGeometry(text: string): SvgGeometry | null {
   const unsupported = new Set<string>();
   const attrsOf = (s: string) => {
     const out: Record<string, string> = {};
-    for (const [, k, , v1, v2] of s.matchAll(/([\w:-]+)\s*=\s*("([^"]*)"|'([^']*)')/g)) out[k.toLowerCase()] = v1 ?? v2 ?? '';
+    for (const [, k, , v1, v2] of s.matchAll(/([\w:-]+)\s*=\s*("([^"]*)"|'([^']*)')/g)) out[k.toLowerCase()] = v1 ?? v2!;
     // style="fill: red; stroke-width: 2" overrides the attributes, as CSS does
     for (const decl of (out.style ?? '').split(';')) {
       const i = decl.indexOf(':');
@@ -294,11 +293,10 @@ export function importSvg(text: string): ImportedSvg | null {
   const tinted = /currentcolor/i.test(text);
   const drawn = geo.paths.filter((p) => pathBounds(p.d));
   if (!drawn.length) return { paths: [], width: 0, height: 0, tinted, unsupported: geo.unsupported };
-  const all = normalizePath(drawn.map((p) => p.d).join(' '));
-  if (!all) return null;
+  const all = normalizePath(drawn.map((p) => p.d).join(' '))!;
   const { x, y, w, h } = all.bounds;
   const unit = (d: string) => mapPath(d, (p) => ({ x: (p.x - x) / w, y: (p.y - y) / h }));
-  const mean = Math.sqrt(w * h) || 1;
+  const mean = Math.sqrt(w * h);
 
   const same = (cs: (ColorStop | null | undefined)[]) => {
     const [first] = cs;
@@ -311,7 +309,7 @@ export function importSvg(text: string): ImportedSvg | null {
   // are the layer's already
   const sharedStroke = stroked.length ? same(stroked.map((p) => p.stroke)) : undefined;
   const usesLayerStroke = stroked.some((p) => p.stroke === undefined);
-  const widths = stroked.map((p) => (p.strokeWidth ?? 1) / mean);
+  const widths = stroked.map((p) => p.strokeWidth! / mean);
 
   const paths: VectorPath[] = drawn.map((p) => ({
     d: unit(p.d),
@@ -319,7 +317,7 @@ export function importSvg(text: string): ImportedSvg | null {
     fill: p.fill === null ? null : sharedFill ? undefined : p.fill,
     stroke: p.stroke === null ? null : sharedStroke ? undefined : p.stroke,
     // as a fraction of the layer's size, so it scales with the layer like the path does
-    ...(p.stroke !== null ? { strokeWidth: (p.strokeWidth ?? 1) / mean } : {}),
+    ...(p.stroke !== null ? { strokeWidth: p.strokeWidth! / mean } : {}),
     ...(p.evenOdd ? { evenOdd: true } : {}),
   }));
   return {

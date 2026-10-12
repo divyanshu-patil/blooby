@@ -427,7 +427,7 @@ export function puppet(m: Motion, p: Puppet): void {
       const arc = prop(arcId, side < 0 ? 'Left eye (closed)' : 'Right eye (closed)', p.arcs === 'sad' ? (side < 0 ? SAD_ARC_L : SAD_ARC_R) : HAPPY_ARC, side * 56, -12, 50, 29, 2, id('face'));
       // a drawn line keeps its width in screen px whatever the layer's scale — so give it the
       // character's: as heavy as the eyes it stands in for
-      if (arc.stroke) arc.stroke = { ...arc.stroke, width: (p.arcs === 'sad' ? 17 : 20) * s };
+      arc.stroke = { ...arc.stroke!, width: (p.arcs === 'sad' ? 17 : 20) * s };
       m.add(arc);
       m.at(arcId, (t) => V(R_BODY * Math.sin((side * EYE_YAW + yaw(t)) * rad), R_BODY * Math.sin((EYE_PITCH + pitch(t)) * rad) + (p.arcs === 'sad' ? 4 : 0)));
       if (p.arcSY) m.scale(arcId, 1, p.arcSY);
@@ -501,7 +501,7 @@ function castMember(prefix: string, name: string, color: ColorStop, scale: numbe
   const P = (i: string | null) => (i ? `${prefix}${i}` : null);
   const zOf: Record<string, number> = { legL: z - 4, legR: z - 3, armL: z - 2, armR: z - 1, body: z, face: z + 1, eyeL: z + 1, eyeR: z + 2 };
   return Object.values(rig.nodes).map((n) => ({
-    ...structuredClone(n), id: P(n.id)!, parentId: P(n.parentId), ranged: true, zIndex: zOf[n.id] ?? z,
+    ...structuredClone(n), id: P(n.id)!, parentId: P(n.parentId), ranged: true, zIndex: zOf[n.id],
     name: n.id === 'body' ? name : `${name} · ${n.name}`,
     ...(n.id === 'body' ? {
       color, transform: { scale: { x: scale, y: scale }, rotation: 0 },
@@ -526,8 +526,7 @@ function swing(sh: V2, a: V2, b: V2, u: number): V2 {
   const ra = Math.hypot(a.x - sh.x, a.y - sh.y), rb = Math.hypot(b.x - sh.x, b.y - sh.y);
   const ta = Math.atan2(a.y - sh.y, a.x - sh.x);
   let d = Math.atan2(b.y - sh.y, b.x - sh.x) - ta;
-  if (d > Math.PI) d -= TAU;
-  if (d < -Math.PI) d += TAU;
+  d -= TAU * Math.round(d / TAU);   // the short way round
   const r = ra + (rb - ra) * u, th = ta + d * u;
   return V(sh.x + r * Math.cos(th), sh.y + r * Math.sin(th));
 }
@@ -861,7 +860,7 @@ function notReady(): Preset {
 const SC = { scale: 0.7, x: -30, ground: 158 };
 const heartAt = (t: number, breathe: F) => V(0, 76 + 3 * breathe(t));
 /** the cream character holding the cracked heart to its chest */
-function heartHolder(m: Motion, L: number, o: { breathe: F; sway: F; sad?: boolean; look?: F; pitch?: F; open?: F; muted?: boolean; droop?: F; pat?: F;
+function heartHolder(m: Motion, L: number, o: { breathe: F; sway: F; sad?: boolean; look?: F; pitch: F; open?: F; muted?: boolean; droop?: F; pat?: F;
   intact?: boolean; tremble?: F; eyeSY?: F; footR?: Puppet['footR'] }) {
   const d = o.droop ?? zero;
   const hp = (t: number) => heartAt(t, o.breathe);
@@ -875,8 +874,8 @@ function heartHolder(m: Motion, L: number, o: { breathe: F; sway: F; sad?: boole
     footR: o.footR,
     headY: lag((t: number) => 4 * d(t) - 2 * o.breathe(t), 90, L),
     yaw: o.look ?? (() => 0),
-    pitch: o.pitch ?? (() => 6),
-    ...(o.sad ? { arcs: 'sad' as const } : { open: o.open ?? (() => 1), eyeSY: o.eyeSY ?? (() => 1.05) }),
+    pitch: o.pitch,
+    ...(o.sad ? { arcs: 'sad' as const } : { open: o.open!, eyeSY: o.eyeSY ?? (() => 1.05) }),
     front: true,
     handL: (t) => { const c = hp(t); return V(c.x - 46, c.y + 4); },
     handR: (t) => { const c = hp(t); return V(c.x + 44, c.y - 6); },
@@ -1113,7 +1112,7 @@ function expiring(): Preset {
   m.scale('clockRing', (t) => 1 + 0.08 * ring(t) * buzz(t - 25));
   // a bead of sweat runs down the side of its head, twice a loop
   const sweat = prop('sweat', 'Sweat', SWEAT, 104, -96, 22, 32, 7);
-  if (sweat.stroke) sweat.stroke = { ...sweat.stroke, width: 2.5 };
+  sweat.stroke = { ...sweat.stroke!, width: 2.5 };
   m.add(sweat);
   const drip = (t: number) => ((t % 2000) + 2000) % 2000 / 1400;
   m.at('sweat', (t) => V(104 + 6 * io(drip(t)), -96 + 58 * io(drip(t))));
@@ -1150,7 +1149,7 @@ function crying(id: string, name: string, color?: ColorStop): Preset {
     const S = side < 0 ? 'L' : 'R';
     const x = R_BODY * Math.sin((side * EYE_YAW * Math.PI) / 180);
     const brow = prop(`brow${S}`, side < 0 ? 'Left brow' : 'Right brow', side < 0 ? BROW_L : BROW_R, x - side * 2, eyeY - 34, 50, 29, 3);
-    if (brow.stroke) brow.stroke = { ...brow.stroke, width: 16 };
+    brow.stroke = { ...brow.stroke!, width: 16 };
     m.add(brow);
     m.at(`brow${S}`, (t) => V(x - side * 2, eyeY - 34 + 4 * splus(sob(t))));
     m.add(prop(`stream${S}`, 'Tears', TEAR_STREAM, x, eyeY + 52, 30, 132, 1, 'face', { anchor: { x: 0, y: -66 } }));

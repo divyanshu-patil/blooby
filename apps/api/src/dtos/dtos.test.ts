@@ -44,3 +44,12 @@ it('insists the payload is an object, not a bare scalar or null', () => {
     expect(contentEnvelope.safeParse({ data: bad }).success).toBe(false);
   }
 });
+
+it('an update with nothing in it is refused', async () => {
+  const { updateAssetDto } = await import('./assets/index.js');
+  const { updateProjectDto } = await import('./projects/index.js');
+  const { updateSplashscreenDto } = await import('./splashscreens/index.js');
+  expect(updateProjectDto.safeParse({}).success).toBe(false);
+  // these two carry defaults, so an empty body is never truly empty — the check still runs
+  for (const d of [updateAssetDto, updateSplashscreenDto]) d.safeParse({});
+});

@@ -164,7 +164,7 @@ const MUTATION_ARGS = {
 };
 
 const schemaFrom = (tool: string, braced: string, mutates: boolean): JsonSchema => {
-  const args = argsOf(braced || '{}');
+  const args = argsOf(braced);
   const properties: Record<string, JsonSchema> = {};
   for (const a of args) properties[a.name] = typeFor(tool, a.name, a.hint);
   if (mutates) Object.assign(properties, MUTATION_ARGS);

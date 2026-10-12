@@ -1,6 +1,6 @@
 import { it } from 'vitest';
 import { check, near } from './testkit';
-import { applyEasing, cubicBezier } from './easing';
+import { applyEasing, cubicBezier, curveHandles, easingShape, EASING_NAMES } from './easing';
 import { useEditor } from './store';
 import { defaultProject, makeTimeline } from './defaults';
 import { evaluateRig, valueAt } from './scene';
@@ -66,4 +66,14 @@ for (let i = 0; i <= 20; i++) {
   ed.setEasing(track().id, head, { type: 'preset', name: 'bounce' });
   ed.deleteKeyframe(track().id, head);
   it('deleting the key deletes its bounce points too', check(track().keyframes.length === 1));
+}
+
+{
+  const pre = (name: string): EasingCurve => ({ type: 'preset', name } as EasingCurve);
+  // every segment of the bounce, then every family's handles and glyph
+  for (const t of [0.2, 0.5, 0.8, 0.95]) it(`bounce at ${t} stays in range`, check(applyEasing(pre('bounce'), t) > 0 && applyEasing(pre('bounce'), t) <= 1));
+  const bz: EasingCurve = { type: 'bezier', p1: { x: 0.1, y: 0.2 }, p2: { x: 0.3, y: 0.4 } };
+  it('a bezier hands back its own handles', check(curveHandles(bz)[0].x === 0.1));
+  for (const n of EASING_NAMES) it(`${n} has handles and a glyph`, check(curveHandles(n === 'linear' ? { type: 'linear' } : pre(n)).length === 2 && !!easingShape(n === 'linear' ? { type: 'linear' } : pre(n))));
+  it('bezier is a square glyph', check(easingShape(bz) === 'square'));
 }

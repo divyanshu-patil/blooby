@@ -3,7 +3,7 @@ import { check } from '../core/testkit';
 import { defaultProject, makeTimeline } from '../core/defaults';
 import { machineOf } from '../core/stateMachine';
 import { buildDotLottie, importDotLottie } from './dotlottie';
-import { unzip } from './zip';
+import { unzip, writeZip } from './zip';
 import type { Project } from '../core/types';
 
 function twoStateProject(): Project {
@@ -125,4 +125,80 @@ function twoStateProject(): Project {
   const { project, warnings } = await importDotLottie(blob, defaultProject());
   it('a single-state file imports without complaint', check(project.timelines.length >= 1));
   void warnings;
+}
+
+// --- odd files: every way an import can go wrong or be sparse ------------------------------
+{
+  const enc = new TextEncoder();
+  const pack = (files: Record<string, unknown>) => writeZip(Object.entries(files).map(([name, v]) => ({
+    name, data: enc.encode(typeof v === 'string' ? v : JSON.stringify(v)) as Uint8Array<ArrayBuffer>,
+  })));
+  const fail = (blob: Blob, into = defaultProject()) => importDotLottie(blob, into).then(() => null, (e: Error) => e.message);
+  const machine = (extra: object = {}) => ({
+    initial: 'one', inputs: [{ name: 'go', type: 'Boolean', value: false }],
+    states: [
+      { name: 'one', type: 'PlaybackState', animation: 'a', loop: true, segment: 'seg-one', transitions: [{ type: 'Transition', toState: 'two', guards: [{ type: 'Boolean', conditionType: 'Equal', inputName: 'go', compareTo: true }] }] },
+      { name: 'two', type: 'PlaybackState', animation: '', loop: false, transitions: [] },
+    ], ...extra,
+  });
+
+  it('no manifest is not a .lottie', check((await fail(await pack({ 'x.txt': 'hi' })))?.includes('no manifest.json') === true));
+  it('a manifest that is not JSON is the same', check((await fail(await pack({ 'manifest.json': '{nope' })))?.includes('no manifest.json') === true));
+  it('animations and no machine are imported as states, and said so', check((await (async () => {
+    const r = await importDotLottie(await pack({ 'manifest.json': {}, 'a/x.json': { v: 1 }, 'a/y.json': { v: 2 }, 'a/bad.json': '{oops', 'b/ignored.json': '{}' }), defaultProject());
+    return r.states >= 2 && r.inputs === 0 && r.warnings.some((w) => w.includes('not valid JSON')) && r.warnings.some((w) => w.includes('No state machine'));
+  })())));
+  it('nothing at all is refused', check((await fail(await pack({ 'manifest.json': {} })))?.includes('no animations and no state machine') === true));
+  it('a machine file that is not an object is unreadable', check((await fail(await pack({ 'manifest.json': { stateMachines: [{ id: 'm' }] }, 's/m.json': [], 'a/x.json': {} })))?.includes('could not be read') === true));
+
+  // no declared machines: the reader looks under s/ itself, and a non-object entry is skipped
+  const bare = await importDotLottie(await pack({ 'manifest.json': { stateMachines: 'nope' }, 's/m.json': machine(), 'a/a.json': {} }), defaultProject());
+  it('a manifest with no machine list falls back to s/', check(bare.inputs === 1 && !!bare.project.stateMachine!.id));
+  const junk = await importDotLottie(await pack({ 'manifest.json': { stateMachines: [null, 7, { id: 'm' }, {}] }, 's/m.json': machine(), 'a/a.json': {} }), defaultProject());
+  it('malformed manifest entries are skipped', check(junk.inputs === 1));
+  it('the manifest names the machine', check(!!junk.project.stateMachine!.id));
+
+  // an existing machine: its inputs and edges are kept when the file does not redeclare them
+  const mine = defaultProject();
+  mine.stateMachine = { id: 'mine', initialStateId: mine.timelines[0].id, inputs: [{ name: 'go', type: 'Numeric', value: 5 }, { name: 'extra', type: 'Boolean', value: true }], transitions: [] };
+  const merged = await importDotLottie(await pack({ 'manifest.json': { stateMachines: [{ id: 'm' }] }, 's/m.json': machine({ initial: 'nope' }), 'a/a.json': {} }), mine);
+  const mm = machineOf(merged.project);
+  it('the file wins on a shared input, ours survive otherwise', check(mm.inputs.find((i) => i.name === 'go')!.type === 'Boolean' && mm.inputs.some((i) => i.name === 'extra')));
+  it('an initial state the file does not name keeps ours', check(mm.initialStateId === mine.timelines[0].id));
+  it('a transition with no logic still dedupes', check(mm.transitions.length === 1));
+
+  // no machine of ours at all, and one of ours whose edge has no logic written down
+  const blank = defaultProject();
+  blank.stateMachine = undefined;
+  const fromNothing = await importDotLottie(await pack({ 'manifest.json': { stateMachines: [{}] }, 's/m.json': machine(), 'a/a.json': {} }), blank);
+  it('with no machine of ours the file names it', check(fromNothing.project.stateMachine!.id === 'blooby'));
+  const logicless = defaultProject();
+  logicless.stateMachine = { id: 'l', inputs: [], transitions: [{ id: 'e', from: logicless.timelines[0].id, to: logicless.timelines[0].id, conditions: [{ input: 'go', operator: 'Equal', value: true }] }] } as never;
+  const withEdge = await importDotLottie(await pack({ 'manifest.json': { stateMachines: [{ id: 'm' }] }, 's/m.json': machine(), 'a/a.json': {} }), logicless);
+  it('an edge with no logic is kept beside the imported ones', check(withEdge.project.stateMachine!.transitions.length === 2));
+
+  // neither the file nor the project has an initial state
+  const none = defaultProject();
+  none.stateMachine = { id: 'n', inputs: [], transitions: [] } as never;
+  const noInit = await importDotLottie(await pack({ 'manifest.json': { stateMachines: [{}] }, 's/.json': machine({ initial: 'nope' }), 'a/a.json': {} }), none);
+  it('with no initial anywhere the first state opens', check(noInit.project.timelines.length >= 2 && noInit.project.stateMachine!.id === 'n'));
+
+  // a state naming an animation the file does not have
+  const lost = await importDotLottie(await pack({ 'manifest.json': { stateMachines: [{ id: 'm' }] }, 's/m.json': machine({ states: [{ name: 'one', type: 'PlaybackState', animation: 'missing', transitions: [{ toState: 'one', guards: [{ inputName: 'ghost', conditionType: 'Equal', compareTo: 1 }] }] }] }) }), defaultProject());
+  it('a missing animation and a dangling input are warned about', check(lost.warnings.some((w) => w.includes('not in the file')) && lost.warnings.some((w) => w.includes('never declares'))));
+
+  // export with every state imported: no strip, and an initial state that is not there
+  const imp = defaultProject();
+  imp.importedAnimations = { x: { v: 1, layers: [] } as never };
+  imp.timelines[0].animationId = 'x';
+  imp.stateMachine = { id: 'm', initialStateId: 'ghost', inputs: [], transitions: [] };
+  const out = await buildDotLottie(imp, { background: null });
+  const files = await unzip(new Uint8Array(await out.blob.arrayBuffer()) as Uint8Array<ArrayBuffer>);
+  it('an all-imported project writes no strip', check(![...files.keys()].includes('a/mascot.json') && [...files.keys()].some((k) => k.startsWith('a/'))));
+  it('and its manifest falls back to the first state\'s animation', check(JSON.parse(new TextDecoder().decode(files.get('manifest.json')!)).initial.animation === 'x'));
+
+  const unset = defaultProject();
+  unset.stateMachine = { id: 'm', inputs: [], transitions: [] } as never;
+  await buildDotLottie(unset, { background: null });
+  it('a machine with no initial state exports', check(true));
 }

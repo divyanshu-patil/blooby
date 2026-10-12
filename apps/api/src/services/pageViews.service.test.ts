@@ -98,3 +98,40 @@ it('drops a failed batch and keeps accepting views', async () => {
   pageViewsService.record(req(), { path: '/b' }, 'blooby.app');
   expect(await pageViewsService.flush()).toBe(1);
 });
+
+it('rotates the salt each day, copes with a request with no address or agent, and drops a non-Error failure', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2030-01-01T12:00:00Z'));
+  const bare = { headers: {} } as unknown as Request;
+  pageViewsService.record(bare, { path: '/a' }, 'x');
+  vi.setSystemTime(new Date('2030-01-02T12:00:00Z'));
+  pageViewsService.record(bare, { path: '/a' }, 'x');
+  vi.useRealTimers();
+  await pageViewsService.flush();
+  const [a, b] = rowsOf();
+  expect(a!.visitor).not.toBe(b!.visitor);
+
+  createMany.mockRejectedValueOnce('plain');
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  pageViewsService.record(req(), { path: '/a' }, 'x');
+  expect(await pageViewsService.flush()).toBe(0);
+});
+
+it('keeps the admin app, the previous route and a mobile or tablet device', async () => {
+  pageViewsService.record(req(), { path: '/a', app: 'admin', fromPath: '/b/?x=1', device: 'tablet' }, 'x');
+  pageViewsService.record(req(), { path: '/a', device: 'mobile' }, 'x');
+  await pageViewsService.flush();
+  expect(rowsOf()).toMatchObject([{ app: 'admin', fromPath: '/b', device: 'tablet' }, { app: 'web', fromPath: null, device: 'mobile' }]);
+});
+
+it('flushes by itself five seconds after the first view', async () => {
+  // a fresh module: the shared one may already hold a pending real timer from an earlier case
+  vi.resetModules();
+  vi.useFakeTimers();
+  const fresh = (await import('./pageViews.service.js')).pageViewsService;
+  fresh.record(req(), { path: '/a' }, 'x');
+  fresh.record(req(), { path: '/b' }, 'x'); // timer already pending
+  await vi.advanceTimersByTimeAsync(5_000);
+  vi.useRealTimers();
+  expect(createMany).toHaveBeenCalledTimes(1);
+});

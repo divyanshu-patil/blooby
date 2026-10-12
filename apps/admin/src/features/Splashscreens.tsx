@@ -113,7 +113,7 @@ function SplashEditor({ existing, onClose, onSaved, onAct }: {
 }) {
   const editorProject = useEditor((s) => s.project);
 
-  const [source, setSource] = useState<Source>(existing ? 'editor' : 'editor');
+  const [source, setSource] = useState<Source>('editor');
   const [data, setData] = useState<unknown>(existing?.data ?? editorProject);
   const [name, setName] = useState(existing?.name ?? editorProject.name ?? 'Splashscreen');
   const [background, setBackground] = useState(existing?.background ?? '#0a0a0a');

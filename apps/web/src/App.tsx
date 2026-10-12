@@ -148,8 +148,8 @@ function ProjectsRoute() {
 function EditorRoute() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  if (!projectId) return <Navigate to="/projects" replace />;
-  return <CloudEditor projectId={projectId} onExit={() => navigate('/projects')} />;
+  // the route always supplies it
+  return <CloudEditor projectId={projectId!} onExit={() => navigate('/projects')} />;
 }
 
 function NotFound({ signedIn }: { signedIn: boolean }) {

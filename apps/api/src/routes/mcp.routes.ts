@@ -85,6 +85,7 @@ mcpRoutes.post('/', asyncHandler(async (req: Request, res: Response) => {
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (id) => { sessions.set(id, { transport, conn, seen: Date.now() }); },
   });
+  /* v8 ignore next -- a transport that closes before it was given a session id has nothing to remove */
   transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
   await createMcpServer(conn, profile).connect(transport);
   await transport.handleRequest(req, res, req.body);

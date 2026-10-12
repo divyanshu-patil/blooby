@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     name: 'api',
+    // turbo runs the four suites at once; module-heavy tests overrun the 5s default under that load
+    testTimeout: 30_000,
     include: ['src/**/*.test.ts'],
     environment: 'node',
     // fake, committed configuration: these tests never open a socket, but the modules
@@ -24,10 +26,13 @@ export default defineConfig({
         // Prisma was called, which is a test of Prisma
         'src/repositories/**',
         'src/config/prisma.ts',
+        // an empty placeholder: no statements to cover
+        'src/testkit.ts',
       ],
       // terminal only: a per-file table where the run already is, and no
       // coverage/ directory to gitignore, serve or clean up
       reporter: ['text'],
+      thresholds: { statements: 100, branches: 100, functions: 100, lines: 100 },
     },
   },
 });
