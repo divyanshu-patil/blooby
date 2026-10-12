@@ -117,3 +117,66 @@ const box = (d: string) => pathBounds(d)!;
     return half.length === 64 && b.x1 - b.x0 > 0.9;
   })()));
 }
+
+// --- the rest of the parser: odd input, every paint, every element ---------------------------
+import { parsePaint, parseSvg } from './svg';
+{
+  const un = new Set<string>();
+  const p = (v?: string) => parsePaint(v, un);
+  it('a missing, empty or inherited paint is the layer\'s own', check(p() === undefined && p('') === undefined && p('inherit') === undefined));
+  it('currentColor is its own kind, none and transparent are no paint', check(p('currentColor') === 'current' && p('none') === null && p('transparent') === null));
+  it('a gradient is flattened and reported', check(p('url(#g)') === undefined && [...un].some((u) => /gradient/.test(u))));
+  it('named and hex colours parse, with or without alpha', check(
+    JSON.stringify(p('red')) === JSON.stringify({ r: 255, g: 0, b: 0, a: 1 })
+    && (p('#f00') as { r: number }).r === 255 && Math.abs((p('#f008') as { a: number }).a - 0x88 / 255) < 1e-9
+    && Math.abs((p('#ff000080') as { a: number }).a - 128 / 255) < 1e-9 && (p('#ff0000') as { a: number }).a === 1,
+  ));
+  it('rgb() takes numbers, percents and alpha either way', check(
+    JSON.stringify(p('rgb(10, 20, 30)')) === JSON.stringify({ r: 10, g: 20, b: 30, a: 1 })
+    && (p('rgb(100%, 0%, 0%)') as { r: number }).r === 255
+    && (p('rgba(0,0,0,0.5)') as { a: number }).a === 0.5 && Math.abs((p('rgba(0,0,0,51)') as { a: number }).a - 0.2) < 1e-9,
+  ));
+  it('anything else is reported and left to the layer', check(p('rgb(a,b,c)') === undefined && p('hsl(1 2% 3%)') === undefined && [...un].some((u) => /hsl/.test(u))));
+}
+{
+  it('a transform with nothing in it is the identity, and an unknown one is skipped', check(
+    parseTransform('rotate()').join() === '1,0,0,1,0,0' && parseTransform('wobble(3)').join() === '1,0,0,1,0,0'
+    && parseTransform('matrix(1 2 3)').join() === '1,0,0,1,0,0' && parseTransform('matrix(1 2 3 4 5 6)').join() === '1,2,3,4,5,6',
+  ));
+  it('translate and scale default their missing numbers', check(
+    parseTransform('translate()').join() === '1,0,0,1,0,0' && parseTransform('translate(4)').join() === '1,0,0,1,4,0'
+    && parseTransform('scale()').join() === '1,0,0,1,0,0' && parseTransform('scale(2)').join() === '2,0,0,2,0,0' && parseTransform('scale(2 3)').join() === '2,0,0,3,0,0',
+  ));
+  const rot = parseTransform('rotate(90 5 5)');
+  it('rotation about a point, and skews', check(near(rot[4], 10) && near(rot[5], 0) && near(parseTransform('skewX(45)')[2], 1) && near(parseTransform('skewY(45)')[1], 1)));
+}
+{
+  it('not a string is not an svg', check(parseSvg(5 as never) === null && parseSvgGeometry(5 as never) === null));
+  it('no viewBox: the width and height make one, and 100 stands in for either', check(
+    parseSvg('<svg width="20" height="30"><path d="M0 0"/></svg>')!.viewBox === '0 0 20 30' && parseSvg('<svg><path d="M0 0"/></svg>')!.viewBox === '0 0 100 100',
+  ));
+  it('an svg with nothing inside is nothing', check(parseSvg('<svg viewBox="0 0 1 1"> </svg>') === null));
+}
+{
+  const geo = (inner: string, attrs = '') => parseSvgGeometry(`<svg ${attrs}>${inner}</svg>`)!;
+  it('a path without d, an unknown tag, and a rect without size draw nothing', check(geo('<path/><foo/><rect/><circle/><polyline/><polygon points="1 2"/>').paths.length === 0));
+  it('rounded corners: rx alone, ry alone', check(geo('<rect width="10" height="10" rx="2"/>').paths[0].d.startsWith('M 2 0') && geo('<rect width="10" height="10" ry="3"/>').paths[0].d.startsWith('M 3 0')));
+  it('a line, a polyline and an ellipse are drawn; a polyline is not closed', check(geo('<line x2="5"/>').paths[0].closed === false && geo('<polyline points="0 0 5 5 9 1" fill="red"/>').paths[0].fill === null && geo('<ellipse rx="3" ry="2"/>').paths.length === 1));
+  it('single-quoted attributes and malformed style declarations', check(geo("<path d='M0 0 L5 5 Z' style='junk;;fill:red'/>").paths[0].fill !== undefined));
+  it('opacity and fill-rule on an element', check(geo('<path d="M0 0 L5 0 L5 5 Z" opacity="0.5" fill-rule="evenodd"/>').paths[0].evenOdd === true && geo('<path d="M0 0 L5 0 L5 5 Z" fill-rule="nonzero"/>').paths[0].evenOdd === undefined));
+  it('a group can set evenodd for its children', check(geo('<g fill-rule="evenodd"><path d="M0 0 L5 0 L5 5 Z"/></g>').paths[0].evenOdd === true));
+  it('hidden containers swallow their contents, even drawable ones', check(geo('<defs><path d="M0 0 L5 5"/></defs><clipPath><rect width="1" height="1"/></clipPath>').paths.length === 0));
+  it('a self-closing group opens nothing; clip-path is reported', check(
+    geo('<g/><path d="M0 0 L5 5" clip-path="url(#c)"/>').unsupported.some((u) => /clip/.test(u)) && geo('<g/><path d="M0 0 L5 5"/>').paths.length === 1,
+  ));
+  it('a collapsed transform keeps a width', check(geo('<path d="M0 0 L5 5" stroke="red" transform="scale(0 1)"/>').paths[0].strokeWidth === 1));
+}
+{
+  it('artwork nothing of which can be drawn is empty, not null', check(importSvg('<svg><text>hi</text></svg>')!.paths.length === 0));
+  it('a hairline still sizes', check(importSvg('<svg><path d="M0 0 L10 0" stroke="red"/></svg>')!.paths.length === 1));
+  it('no outline from nothing, or from lines alone', check(svgOutline('nope') === null && svgOutline('<svg><path d="M0 0 L5 5"/></svg>') === null));
+}
+{
+  it('no transform is the identity', check(parseTransform(undefined).join() === '1,0,0,1,0,0'));
+  it('even-odd survives the import', check(importSvg('<svg><path d="M0 0 L5 0 L5 5 Z" fill="red" fill-rule="evenodd"/></svg>')!.paths[0].evenOdd === true));
+}

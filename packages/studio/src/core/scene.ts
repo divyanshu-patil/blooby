@@ -51,7 +51,7 @@ export function sampleTrack(track: Track, t: number): KeyValue | undefined {
   while (i < ks.length - 1 && ks[i + 1].time <= t) i++;
   const a = ks[i], b = ks[i + 1];
   const span = b.time - a.time;
-  const raw = span <= 0 ? 1 : (t - a.time) / span;
+  const raw = (t - a.time) / span; // span > 0: b is the first key after t, a is at or before it
   // words and font names switch at the keyframe: there is nothing halfway between them
   if (PROPS[track.property]?.discrete) return a.value;
   const e = applyEasing(a.easingOut, raw);
@@ -153,7 +153,7 @@ function walkCycle(rig: Rig, body: RigNode, m: Modifier, tSec: number, stride: n
   const n = 32, upto = Math.min(tSec, span);
   for (let i = 0; i < n; i++) moved += speedAt(((i + 0.5) / n) * upto) * (upto / n);
   const steps = Math.max(0, m.frequency) * moved;
-  const dir = Math.sign(stride) || 1, len = Math.abs(stride);
+  const dir = Math.sign(stride), len = Math.abs(stride);
   // finished (phase -1): only where it got to remains
   if (m.phase === -1) {
     const off = body.surface.flatOffset ?? { x: 0, y: 0 };
@@ -287,7 +287,7 @@ function followThrough(rig: Rig, node: RigNode, m: Modifier, tSec: number, past:
   }
   // never flung off: the swing is capped
   const cap = (v: number, c: number) => Math.max(-c, Math.min(c, v));
-  dx = cap(dx * gain, 90) / (gain || 1); dy = cap(dy * gain, 90) / (gain || 1); dr = cap(dr * gain, 40) / (gain || 1);
+  dx = cap(dx * gain, 90) / gain; dy = cap(dy * gain, 90) / gain; dr = cap(dr * gain, 40) / gain;
   if (node.limb) {
     const l = node.limb;
     const end = l.c ?? l.b;
@@ -358,8 +358,7 @@ function modifierMotion(rig: Rig, tl: Timeline, nodeId: string, path: string, ms
     };
     const ease = settleOf(tl, m, local);
     applyModifier({ ...rig, nodes: { [nodeId]: node } }, ease < 1 ? { ...m, amount: m.amount * ease } : m, local / 1000);
-    const got = getProp(node, path);
-    d += typeof got === 'number' ? got : 0;
+    d += getProp(node, path) as number; // MOTION_PATHS are all numeric
   }
   return d;
 }
@@ -390,8 +389,8 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number, past?: Past, absSec 
   const node = rig.nodes[m.nodeId];
   if (!node) return;
   if (m.kind === 'walk') { walkCycle(rig, node, m, tSec, gain); return; }
-  if (m.kind === 'follow') { if (past) followThrough(rig, node, m, absSec, past); return; }
-  if (m.kind === 'jelly') { if (past) jellyBody(node, m, absSec, past); return; }
+  if (m.kind === 'follow') { followThrough(rig, node, m, absSec, past!); return; } // past: only modifierMotion omits it, and MOVERS has no follow/jelly
+  if (m.kind === 'jelly') { jellyBody(node, m, absSec, past!); return; }
 
   // stretch pulses one node's own scale.x/y — buildScene's own cascading scale (see
   // `scaleOf`/`cum` there) carries that pulse down to every one of its children for free,
@@ -404,8 +403,7 @@ function applyModifier(rig: Rig, m: Modifier, tSec: number, past?: Past, absSec 
 
   const isRoot = node.id === rig.rootId || !node.surface.mapped;
   const bump = (path: string, d: number) => {
-    const cur = getProp(node, path);
-    if (typeof cur === 'number') setProp(node, path, cur + d);
+    setProp(node, path, (getProp(node, path) as number) + d); // only ever the numeric motion paths
   };
 
   // A pendulum is a sine on ONE chosen axis. Rotation is the one that actually reads as a
@@ -498,7 +496,8 @@ export function resolveTracks(project: Project,
   const keyOf = (nodeId: string, property: string) => `${nodeId} ${property}`;
   const rig = project.rig;
   const at = (nodeId: string, property: string, t: number) =>
-    activeTrackFor(tl, nodeId, property, t, rig, ix.byKey.get(keyOf(nodeId, property)) ?? NONE, ix.byNode.get(nodeId) ?? NONE);
+    // only ever asked about tracks that were indexed
+    activeTrackFor(tl, nodeId, property, t, rig, ix.byKey.get(keyOf(nodeId, property))!, ix.byNode.get(nodeId)!);
 
   // What the viewer actually sees at t=0, per property — the pose the tail must return to.
   const seen = new Set<string>();
@@ -535,7 +534,7 @@ export function resolveTracks(project: Project,
   const starts = blockStarts(tl);
   for (const [key, entry] of startValue) {
     // the closing clip of THIS layer's lane — another mascot's last clip is not its tail
-    const endBlock = blockAt(tl, durationMs, laneOf(rig, tl, entry.nodeId, ix.byNode.get(entry.nodeId) ?? NONE));
+    const endBlock = blockAt(tl, durationMs, laneOf(rig, tl, entry.nodeId, ix.byNode.get(entry.nodeId)!));
     if (!endBlock) continue;
     {
       const endStart = starts[tl.blocks.indexOf(endBlock)];
@@ -631,7 +630,7 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
       // through the tracks this evaluation already resolved, not valueAt: that would resolve the loop again per sample
       const tr = winnerAt(nodeId, path, ms);
       const got = tr ? sampleTrack(tr, tr.blockId ? blockSampleTime(project, tl, tr.blockId, ms) : ms) : readProp(project.rig, nodeId, path);
-      v = (typeof got === 'number' ? got : 0) + (movers.has(nodeId) ? modifierMotion(project.rig, tl, nodeId, path, ms) : 0);
+      v = (got as number) + (movers.has(nodeId) ? modifierMotion(project.rig, tl, nodeId, path, ms) : 0);
       pastCache.set(key, v);
     }
     return v;
@@ -647,12 +646,12 @@ function evaluateRigRaw(project: Project, timeMs: number): Rig {
   // linked eyes mirror their source, after keyframes so a track on the source drives both
   for (const node of Object.values(rig.nodes)) {
     const src = node.eye?.linkedToId ? rig.nodes[node.eye.linkedToId] : null;
-    if (!src?.eye || !node.eye) continue;
+    if (!src?.eye) continue;
     node.transform = { ...src.transform, scale: { ...src.transform.scale } };
     node.size = { ...src.size };
     node.color = { ...src.color };
     node.surface = { ...src.surface, yaw: src.surface.yaw };
-    node.eye = { ...node.eye, openness: src.eye.openness, distanceFromCenter: -src.eye.distanceFromCenter };
+    node.eye = { ...node.eye!, openness: src.eye.openness, distanceFromCenter: -src.eye.distanceFromCenter };
   }
   // letters flying on their own offsets turn to face the way they are going
   for (const node of Object.values(rig.nodes)) {
@@ -947,7 +946,7 @@ function worldSampler(pl: Placement) {
  * between two poses moves the words as one.
  */
 function textItem(node: RigNode, at: { x: number; y: number; rot: number; k: number; alpha: number },
-  placed: Map<string, Placement>): SceneItem | null {
+  placed: Map<string, Placement>): SceneItem {
   const style = node.text!;
   const k = at.k;
   const font: FontRef = { ...style.font, weight: snapWeight(style.font.weight) };
@@ -1167,9 +1166,8 @@ function paintOf(node: RigNode, a: number): Pick<SceneItem, 'color' | 'stroke' |
 }
 
 /** An outline in screen px, as an item: its box, and the outline fitted into that box. */
-function outlineItem(d: string): { cx: number; cy: number; w: number; h: number; path: string } | null {
-  const b = pathBounds(d);
-  if (!b) return null;
+function outlineItem(d: string): { cx: number; cy: number; w: number; h: number; path: string } {
+  const b = pathBounds(d)!; // only ever a hose outline, which always has points
   const w = Math.max(b.x1 - b.x0, 0.01), h = Math.max(b.y1 - b.y0, 0.01);
   const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
   return { cx, cy, w, h, path: mapPath(d, (p) => ({ x: (p.x - cx) / w, y: (p.y - cy) / h })) };
@@ -1399,13 +1397,13 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
       const onSphere = (node.kind === 'group' || roleOfFace(node)) && f.R > 0;
       const head = heads.get(node.id);
       if (head) {
-        const kx = st.x, ky = st.y, a = alpha / (f.alpha || 1);
+        const kx = st.x, ky = st.y, a = alpha / f.alpha; // the head was only filed under a visible body
         out.push({
           ...head, cx: ax, cy: ay, rotation: rot, w: head.w * kx, h: head.h * ky, r: head.r * Math.min(kx, ky),
-          ...(a < 0.999 ? { color: { ...head.color, a: head.color.a * a }, alpha: (head.alpha ?? 1) * a } : {}),
+          ...(a < 0.999 ? { color: { ...head.color, a: head.color.a * a }, alpha: head.alpha! * a } : {}),
         });
-        const pl = placed.get(head.id);
-        if (pl) placed.set(head.id, { ...pl, cx: ax, cy: ay, rot, w: pl.w * kx, h: pl.h * ky });
+        const pl = placed.get(head.id)!; // filed by `mascot` in the same frame
+        placed.set(head.id, { ...pl, cx: ax, cy: ay, rot, w: pl.w * kx, h: pl.h * ky });
       }
       const gooFx = effectOf(node, 'goo');
       const inherit = {
@@ -1434,7 +1432,7 @@ export function buildScene(rig: Rig, view: Viewport, frames?: Map<string, LayerF
   // curves, shapes and mascots are all where they are this frame; now the words
   for (const t of texts) {
     const item = textItem(t.node, t.at, placed);
-    if (item) out.push(t.node.guide ? { ...item, guide: true } : item);
+    out.push(t.node.guide ? { ...item, guide: true } : item);
   }
   // every outline is placed now: a masked layer gets its mask's outline in screen px
   for (const item of out) {
@@ -1704,7 +1702,7 @@ export function emitterItems(
             const g = u * u * (3 - 2 * u);
             // a curved approach: bowed sideways, most in the middle of the flight
             const bow = Math.sin(Math.PI * g) * (hash01(i, seed, 31) - 0.5) * 120 * unit;
-            const dxp = at.x - x, dyp = at.y - y, nl = Math.hypot(dxp, dyp) || 1;
+            const dxp = at.x - x, dyp = at.y - y, nl = Math.max(1e-9, Math.hypot(dxp, dyp));
             x = x + dxp * g - (dyp / nl) * bow;
             y = y + dyp * g + (dxp / nl) * bow;
           }
@@ -1828,7 +1826,7 @@ export function composeScene(project: Project, rig: Rig, timeMs: number, view: V
         for (const item of earlier.get(key)!.filter((i) => ids.has(i.id) && i.id === n.id)) {
           base.push({
             ...item, id: `${item.id}~echo${k}`, zIndex: item.zIndex - 0.001 * k,
-            color: { ...item.color, a: item.color.a * fade }, alpha: (item.alpha ?? 1) * fade,
+            color: { ...item.color, a: item.color.a * fade }, alpha: item.alpha! * fade,
             ...(item.stroke ? { stroke: { ...item.stroke, color: { ...item.stroke.color, a: item.stroke.color.a * fade } } } : {}),
           });
         }

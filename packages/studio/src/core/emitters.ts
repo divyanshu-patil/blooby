@@ -166,7 +166,7 @@ export function libraryOutline(id: string, params?: ShapeParams): string | undef
   const imp = importSvg(`<svg viewBox="${s.viewBox}">${s.markup}</svg>`);
   const closed = imp?.paths.filter((p) => p.fill !== null);
   if (!imp || !closed?.length) return undefined;
-  const k = Math.max(imp.width, imp.height) || 1;
+  const k = Math.max(imp.width, imp.height);
   return mapPath(closed.map((p) => p.d).join(' '), (p) => ({ x: (p.x * imp.width) / k, y: (p.y * imp.height) / k }));
 }
 
@@ -178,7 +178,7 @@ let byOutline: Map<string, string> | null = null;
  */
 export function shapeIdOf(d: string | undefined): string | undefined {
   if (!d) return undefined;
-  byOutline ??= new Map(SHAPE_LIBRARY.map((s) => [libraryOutline(s.id) ?? '', s.id] as const).filter(([k]) => k));
+  byOutline ??= new Map(SHAPE_LIBRARY.map((s) => [libraryOutline(s.id)!, s.id] as const));
   return byOutline.get(d);
 }
 
@@ -193,13 +193,6 @@ export const CONFETTI_COLORS: ColorStop[] = [
 
 /** An emitter particle kind: which shape, and the dials that vary per particle. */
 export type EmitterPart = NonNullable<Emitter['parts']>[number];
-
-/** A part with everything unremarkable filled in, so a caller states only what differs. */
-export const part = (p: Partial<EmitterPart> & { shapeId?: string; glyph?: string }): EmitterPart => ({
-  id: `pt${Math.random().toString(36).slice(2, 8)}`,
-  weight: 1, speed: 1, sizeScale: 1, spin: 0,
-  ...p,
-});
 
 /**
  * Turns a part's shape reference into markup: the built-in library first, then the

@@ -2,7 +2,8 @@ import { it } from 'vitest';
 import { check } from './testkit';
 import { defaultProject, makeTimeline } from './defaults';
 import {
-  animationIds, conditionText, fromDotLottie, nextTransition, OPERATORS, toDotLottie, validateMachine,
+  slug, animationIds, bezierToEasing, conditionHolds, conditionText, defaultValueFor, defaultValues, directTransition,
+  fromDotLottie, initialState, machineOf, nextTransition, opLabel, OPERATORS, toDotLottie, transitionHolds, validateMachine,
 } from './stateMachine';
 import { ANY_STATE, type Project, type SmTransition } from './types';
 
@@ -186,4 +187,159 @@ function machineProject(): Project {
   it('one that leaves it on the defaults is', check(leaves().length === 1 && leaves()[0].message.includes('"observing"') && leaves()[0].message.includes('isTyping = false'), JSON.stringify(leaves())));
   p.stateMachine!.inputs[0].value = true;
   it('and a default that holds it there clears the warning', check(leaves().length === 0));
+}
+
+// --- labels, defaults, helpers --------------------------------------------------
+{
+  const inputs = [
+    { name: 'ev', type: 'Event' as const }, { name: 'b', type: 'Boolean' as const }, { name: 's', type: 'String' as const, value: 'x' },
+  ];
+  it('event reads as fires', check(opLabel('Fired', 'Event') === 'fires' && conditionText({ input: 'ev', operator: 'Fired' }, inputs) === 'ev fires'));
+  it('boolean words', check(opLabel('Equal', 'Boolean', true) === 'is true' && opLabel('NotEqual', 'Boolean', true) === 'is false' && opLabel('Equal', 'Boolean', false) === 'is false'));
+  it('boolean text', check(conditionText({ input: 'b', operator: 'Equal', value: true }, inputs) === 'b is true'));
+  it('string text quotes', check(conditionText({ input: 's', operator: 'Equal', value: 'hi' }, inputs) === 's == "hi"' && conditionText({ input: 's', operator: 'NotEqual' }, inputs) === 's != ""'));
+  it('numeric default input type and value', check(conditionText({ input: 'zz', operator: 'GreaterThan' }, inputs) === 'zz > 0'));
+  it('every numeric operator has a label', check(['Equal', 'NotEqual', 'GreaterThan', 'GreaterThanOrEqual', 'LessThan', 'LessThanOrEqual'].map((o) => opLabel(o as never, 'Numeric')).join(' ') === '== != > >= < <='));
+  it('unknown operator falls through', check(opLabel('Fired', 'Numeric') === 'Fired'));
+  it('defaults per type', check(defaultValueFor('Boolean') === false && defaultValueFor('Numeric') === 0 && defaultValueFor('String') === '' && defaultValueFor('Event') === undefined));
+  const p = defaultProject();
+  p.name = ''; delete p.stateMachine;
+  it('machineOf defaults with a blooby id', check(machineOf(p).id === 'blooby'));
+  p.name = 'My Mascot'; delete p.stateMachine;
+  it('machineOf slugs the name', check(machineOf(p).id === 'my-mascot'));
+  const q = makeTimeline('');
+  const r = defaultProject();
+  r.timelines = [q];
+  it('an unnamed state still gets an animation id', check(animationIds(r).get(q.id) === 'anim'));
+  r.timelines[0].name = 'a'; r.timelines.push(makeTimeline('a'));
+  it('duplicate names are numbered', check(animationIds(r).get(r.timelines[1].id) === 'a-2'));
+  r.stateMachine = { id: '', initialStateId: undefined, inputs: [{ name: 'e', type: 'Event' }, { name: 'n', type: 'Numeric' }], transitions: [] };
+  it('toDotLottie falls back to a blooby id and default values', check(toDotLottie(r).id === 'blooby' && (toDotLottie(r).json.inputs[1] as { value: number }).value === 0));
+  it('defaultValues skips events and fills numerics', check(!('e' in defaultValues(r)) && defaultValues(r).n === 0));
+  it('initialState falls back to the first', check(initialState(r) === r.timelines[0]));
+}
+
+// --- condition / transition evaluation -------------------------------------------
+{
+  const v = { n: 5, ev: true, off: false };
+  const c = (operator: never, value?: number) => ({ input: 'n', operator, value });
+  it('numeric operators', check(conditionHolds(c('NotEqual' as never, 4), v) && conditionHolds(c('GreaterThanOrEqual' as never, 5), v) && conditionHolds(c('LessThan' as never, 6), v) && conditionHolds(c('LessThanOrEqual' as never, 5), v) && !conditionHolds(c('Equal' as never, 4), v)));
+  it('fired passes only on the tick', check(conditionHolds({ input: 'ev', operator: 'Fired' }, v) && !conditionHolds({ input: 'off', operator: 'Fired' }, v)));
+  it('missing value fails; missing compareTo reads as 0', check(!conditionHolds({ input: 'nope', operator: 'Equal', value: 1 }, v) && conditionHolds({ input: 'n', operator: 'GreaterThan' } as never, v)));
+  const t = (logic: 'AND' | 'OR', conditions: never[]) => ({ id: 't', from: 'a', to: 'b', conditions, logic, durationMs: 0 });
+  it('empty never fires; OR vs AND', check(
+    !transitionHolds(t('AND', []), v)
+    && transitionHolds(t('OR', [c('Equal' as never, 1), c('Equal' as never, 5)] as never), v)
+    && !transitionHolds(t('AND', [c('Equal' as never, 1), c('Equal' as never, 5)] as never), v)));
+}
+
+// --- dotLottie in and out ----------------------------------------------------------
+{
+  it('bezierToEasing: garbage → easeInOut, known → name, custom → bezier', check(
+    bezierToEasing('x').type === 'preset' && bezierToEasing([1, 2, 3]).type === 'preset' && bezierToEasing([1, 2, 'a', 4]).type === 'preset'
+    && bezierToEasing([0.25, 0.1, 0.25, 1]).type !== undefined && bezierToEasing([0.11, 0.22, 0.33, 0.44]).type === 'bezier'));
+
+  it('not an object → null', check(fromDotLottie(null, () => 'x') === null && fromDotLottie([], () => 'x') === null && fromDotLottie('s', () => 'x') === null));
+  const ids: Record<string, string> = {};
+  const got = fromDotLottie({
+    initial: 'A',
+    inputs: [
+      null, { type: 'Nope', name: 'q' }, { type: 'Numeric', name: '' },
+      { type: 'Event', name: 'ev' }, { type: 'Numeric', name: 'n' }, { type: 'Boolean', name: 'b', value: true },
+    ],
+    states: [
+      null, { type: 'GlobalState', name: 'G' }, { type: 'PlaybackState', name: '' },
+      {
+        type: 'PlaybackState', name: 'A', animation: 'a', loop: true, segment: 'm', transitions: [
+          null,
+          { toState: 'missing', guards: [] },
+          { toState: 'B', guards: [] },
+          { toState: 'B', guards: [null, { type: 'Numeric', inputName: '' }] },
+          { type: 'Tweened', toState: 'B', duration: 0.5, easing: [0.1, 0.2, 0.3, 0.4], guards: [{ type: 'Event', inputName: 'ev' }, { type: 'Numeric', inputName: 'n' }, { type: 'Numeric', inputName: 'ghost', conditionType: 'GreaterThan', compareTo: 3 }] },
+          { type: 'Tweened', toState: 'B', guards: [{ type: 'Event', inputName: 'ev' }] },
+          { toState: 'B', guards: [{ type: 'Event', inputName: 'ev' }] },
+        ],
+      },
+      { type: 'PlaybackState', name: 'B', animation: 'b' },
+    ],
+  }, (name) => (ids[name] ??= `id-${name}`))!;
+  it('inputs filtered and defaulted', check(got.inputs.length === 3 && got.inputs[1].value === 0 && got.inputs[2].value === true));
+  it('transitions parsed', check(got.transitions.length === 3 && got.transitions[0].durationMs === 500 && got.transitions[0].conditions[1].operator === 'Equal' && got.transitions[1].durationMs === 0 && got.transitions[2].easing === undefined));
+  it('dangling input surfaced; initial resolved', check(got.danglingInputs.join() === 'ghost' && got.initialStateId === 'id-A'));
+  it('segment and loop passed through', check(!!ids.A && !ids['']));
+  const bare = fromDotLottie({}, () => 'x')!;
+  it('empty file parses', check(bare.inputs.length === 0 && bare.initialStateId === undefined));
+}
+
+// --- directTransition ----------------------------------------------------------------
+{
+  const p = machineProject();
+  const [a, b, c] = p.timelines.map((t) => t.id);
+  it('unknown target → null', check(directTransition(p, a, 'nope', { durationMs: 0 }) === null));
+  const r1 = directTransition(p, a, b, { durationMs: 100, input: '  ' })!;
+  it('blank input name falls back to state, created as String', check(r1.input === 'state' && r1.value === p.timelines[1].name && p.stateMachine!.inputs.some((i) => i.name === 'state')));
+  const n = p.stateMachine!.transitions.length;
+  directTransition(p, a, b, { durationMs: -5, easing: { type: 'linear' } });
+  it('same edge updates in place (clamped)', check(p.stateMachine!.transitions.length === n && p.stateMachine!.transitions.at(-1)!.durationMs === 0 && p.stateMachine!.transitions.at(-1)!.easing?.type === 'linear'));
+  directTransition(p, a, b, { durationMs: 7 });
+  it('same edge without easing keeps it', check(p.stateMachine!.transitions.at(-1)!.durationMs === 7));
+  it('custom string value', check(directTransition(p, a, c, { durationMs: 0, value: 'go', easing: { type: 'linear' } })!.value === 'go'));
+  it('boolean input refused', check(directTransition(p, a, b, { durationMs: 0, input: 'isTyping' }) === null));
+  p.stateMachine!.inputs.push({ name: 'ev', type: 'Event' });
+  it('event input refused', check(directTransition(p, a, b, { durationMs: 0, input: 'ev' }) === null));
+  it('numeric: explicit and indexed values', check(directTransition(p, a, b, { durationMs: 0, input: 'energy', value: 9 })!.value === 9 && directTransition(p, a, c, { durationMs: 0, input: 'energy' })!.value === 2));
+  it('string input with empty value uses the name', check(directTransition(p, a, b, { durationMs: 0, input: 'mood', value: '' })!.value === p.timelines[1].name));
+  it('self edge and unknown source are skipped', check((() => { const k = p.stateMachine!.transitions.length; directTransition(p, b, b, { durationMs: 0 }); directTransition(p, 'ghost', b, { durationMs: 0 }); return p.stateMachine!.transitions.length === k; })()));
+  it('fromAny adds one any-state rule', check((() => { directTransition(p, a, c, { durationMs: 0, fromAny: true, input: 'anyIn' }); return p.stateMachine!.transitions.filter((t) => t.from === ANY_STATE).length === 1; })()));
+  const bare = defaultProject();
+  bare.timelines.push(makeTimeline('x'));
+  it('creates the machine when absent', check(directTransition(bare, bare.timelines[0].id, bare.timelines[1].id, { durationMs: 0 }) !== null && !!bare.stateMachine));
+}
+
+// --- validation -------------------------------------------------------------------------
+{
+  const p = machineProject();
+  p.timelines[0].name = ' ';
+  p.timelines[1].name = 'x'; p.timelines[2].name = 'X';
+  p.timelines[1].animationId = 'gone';
+  const m = p.stateMachine!;
+  m.initialStateId = 'missing';
+  m.inputs = [
+    { name: ' ', type: 'Numeric' }, { name: 'ev', type: 'Event' }, { name: 'dup', type: 'Numeric', value: 'bad' as never }, { name: 'dup', type: 'Boolean', value: false },
+    { name: 'unused', type: 'Numeric', value: 0 }, { name: 'num', type: 'Numeric', value: 1 }, { name: 'str', type: 'String', value: 's' }, { name: 'flag', type: 'Boolean', value: true },
+  ];
+  const [a, b] = p.timelines.map((t) => t.id);
+  const tr = (id: string, from: string, to: string, conditions: never[]) => ({ id, from, to, conditions, logic: 'AND' as const, durationMs: 0 });
+  m.transitions = [
+    tr('gone', 'ghost', b, []), tr('gone2', ANY_STATE, 'ghost', []), tr('empty', a, b, []),
+    tr('noinput', a, b, [{ input: 'zz', operator: 'Equal', value: 1 }] as never),
+    tr('badop', a, b, [{ input: 'str', operator: 'GreaterThan', value: 's' }] as never),
+    tr('evok', a, b, [{ input: 'ev', operator: 'Fired' }] as never),
+    tr('badval', a, b, [{ input: 'num', operator: 'Equal', value: 's' }] as never),
+    tr('fine', ANY_STATE, b, [{ input: 'flag', operator: 'Equal', value: true }] as never),
+  ];
+  const msgs = validateMachine(p).map((i) => i.message).join('\n');
+  for (const frag of ['no name', 'both called "X"', 'not in this project', 'An input has no name', 'both called "dup"', 'default is a string', 'initial state no longer', 'no longer exists', 'no conditions', 'not an input', 'cannot be used', 'compared to a string', 'not used by any transition', 'starts in', '? →', 'Any state →'])
+    it(`validation reports: ${frag}`, check(msgs.includes(frag), msgs));
+  const lone = defaultProject();
+  lone.timelines.push(makeTimeline('two'));
+  it('no transitions warns', check(validateMachine(lone).some((i) => i.message.includes('No transitions'))));
+}
+
+// --- toDotLottie guards and segments -------------------------------------------------------
+{
+  const p = machineProject();
+  const [a, b] = p.timelines.map((t) => t.id);
+  p.stateMachine!.inputs.push({ name: 'ev', type: 'Event' }, { name: 'bare', type: 'Numeric' });
+  p.stateMachine!.transitions = [
+    { id: 'x1', from: a, to: b, conditions: [{ input: 'nope', operator: 'Equal', value: 1 }], logic: 'AND', durationMs: 0 },
+    { id: 'x2', from: a, to: b, conditions: [{ input: 'ev', operator: 'Fired' }, { input: 'bare', operator: 'Equal' }], logic: 'AND', durationMs: 0 },
+  ];
+  p.timelines[1].segment = 'seg';
+  const j = toDotLottie(p).json as { states: { transitions: { guards: Record<string, unknown>[] }[]; segment?: string }[] };
+  it('unknown-input guards drop the edge, event and defaulted guards stay', check(j.states[0].transitions.length === 1 && j.states[0].transitions[0].guards[0].type === 'Event' && j.states[0].transitions[0].guards[1].compareTo === 0));
+  it('segment only when set', check(j.states[0].segment === undefined && j.states[1].segment === 'seg'));
+  it('slug is total', check(slug() === ''));
+  p.stateMachine!.inputs.push({ name: 'nov', type: 'Numeric' });
+  it('a valueless numeric input validates', check(!validateMachine(p).some((i) => i.inputName === 'nov' && i.level === 'error')));
 }

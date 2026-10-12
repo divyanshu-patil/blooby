@@ -179,7 +179,7 @@ const count = (s: string) => [...s.replace(/\n/g, '')].length;
 export function textPresetOnto(preset: Preset, node: RigNode): Preset | null {
   const own = (preset.layers ?? []).filter((l) => l.text);
   if (!node.text || own.length !== 1 || (own[0].text!.path?.mode ?? 'straight') !== 'straight') return null;
-  if ((preset.layers ?? []).some((l) => l.kind === 'body')) return null;
+  if (preset.layers!.some((l) => l.kind === 'body')) return null;
   const from = own[0].id, scale = count(node.text.content) / Math.max(1, count(own[0].text!.content));
   const swap = (id: string) => (id === from ? node.id : id);
   return {

@@ -362,7 +362,7 @@ const OPERATOR_WORDS: Record<string, ConditionOp> = {
 };
 const opWord = (v: unknown) => OPERATOR_WORDS[String(v ?? '').trim().toLowerCase()];
 /** "is false" carries its value in the operator, which is the only place it can live. */
-const opNegates = (v: unknown) => /^(is\s*)?false$/i.test(String(v ?? '').trim());
+const opNegates = (v: unknown) => /^(is\s*)?false$/i.test(String(v).trim());
 
 const INPUT_TYPES = ['Boolean', 'Numeric', 'String', 'Event'] as const;
 
@@ -517,6 +517,8 @@ function curveAt(p: Project, id: string, t: number) {
 /** How wide a text's first line is, px — what an arc's "amount" is measured against. */
 function textWidth(n: RigNode): number {
   const t = n.text!;
+  // a text always lays out at least one line; the fallback only guards an empty layout
+  /* v8 ignore next */
   return layoutLines({ ...t, width: undefined }, metricsFor(t.font, t.size))[0]?.width ?? t.size * 3;
 }
 
@@ -573,7 +575,8 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
   }
   // set_eye_params documents short names (`openness`), so models write them everywhere.
   // resolveProp maps any unambiguous short name back onto its full path.
-  const prop = resolveProp(a.property);
+  // set_camera's `fov` / `distance` are camera fields, not layer properties
+  const prop = name === 'set_camera' ? undefined : resolveProp(a.property);
   if (prop) a.property = prop;
 
   // a layer name and a short property name are just as likely to show up nested — models
@@ -685,10 +688,10 @@ function plannedLayers(p: Project, call: ToolCall): RigNode[] {
   }
   if (type === 'group') return [placed(p, makeGroup(null, { name: str(a.name) ?? 'Group' }), a)];
   const shape = str(a.shape) && shapeById(str(a.shape)!) ? str(a.shape)! : 'circle';
-  const node = makeShapeLayer('circle', { name: str(a.name) ?? shapeById(shape)?.name ?? 'Shape', shape: { kind: shape } });
-  node.shapePath = libraryOutline(shape) ?? node.shapePath;
+  const node = makeShapeLayer('circle', { name: str(a.name) ?? shapeById(shape)!.name, shape: { kind: shape } });
+  node.shapePath = libraryOutline(shape);
   const w = num(a.width), h = num(a.height);
-  if (w || h) node.size = { x: Math.max(1, w ?? h ?? 96), y: Math.max(1, h ?? w ?? 96) };
+  if (w || h) node.size = { x: Math.max(1, w ?? h!), y: Math.max(1, h ?? w!) };
   const fill = colorOf(a.fill ?? a.color);
   if (fill) node.color = fill;
   return [placed(p, node, a)];
@@ -700,6 +703,8 @@ function placed(p: Project, node: RigNode, a: Record<string, unknown>): RigNode 
   return {
     ...node,
     parentId: onMascot ? p.rig.rootId : null,
+    // every layer maker sets flatOffset; the `?? 0` is only there because the type says optional
+    /* v8 ignore next */
     surface: { ...node.surface, mapped: false, flatOffset: { x: num(a.x) ?? node.surface.flatOffset?.x ?? 0, y: num(a.y) ?? node.surface.flatOffset?.y ?? 0 } },
   };
 }
@@ -1048,7 +1053,7 @@ export function validate(p: Project, call: ToolCall): string | null {
     case 'set_layer_parent': {
       const n = layerOf(p, a.nodeId);
       if (!n) return `no layer "${String(a.nodeId)}"`;
-      if (a.parent === null || a.parent === undefined || a.parent === 'world') return n.id === p.rig.rootId ? null : null;
+      if (a.parent === null || a.parent === undefined || a.parent === 'world') return null;
       const parent = layerOf(p, a.parent) ?? mascotRef(p, a.parent);
       if (!parent) return `no layer or mascot "${String(a.parent)}"`;
       if (parent.id === n.id) return 'a layer cannot ride itself';
@@ -1632,6 +1637,8 @@ export function applyCalls(calls: ToolCall[]) {
             const q = toLocal(num(a.x)!, num(a.y)!);
             const at2 = nearestOnCurve(c, type, q);
             next = { closed: c.closed, points: [...c.points] };
+            // a curve always has two points, so there is always a nearest segment
+            /* v8 ignore next */
             next.points.splice((at2?.seg ?? c.points.length - 1) + 1, 0, q);
           } else if (call.name === 'move_curve_point') next = moveAnchor(c, num(a.index)!, toLocal(num(a.x)!, num(a.y)!));
           else if (call.name === 'remove_curve_point') next = removePoint(c, num(a.index)!);

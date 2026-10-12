@@ -140,3 +140,68 @@ it('renames a project', async () => {
   await userEvent.click(screen.getByRole('button', { name: /save name/i }));
   await waitFor(() => expect(update).toHaveBeenCalledWith('p1', { name: 'Renamed' }));
 });
+
+it('names a refused action even when the failure is not an Error', async () => {
+  duplicate.mockRejectedValue('x');
+  render(<Dashboard onOpen={() => {}} />);
+  await openMenu();
+  await userEvent.click(screen.getByText('Duplicate'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('That did not work.');
+});
+
+it('shows a failed list with a retry, and starts a project from the empty state', async () => {
+  list.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ items: [], nextCursor: null });
+  render(<Dashboard onOpen={() => {}} />);
+  expect(await screen.findByText(/offline/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: /try again|retry/i }));
+  await userEvent.click(await screen.findByRole('button', { name: /^create project$/i }));
+  expect(await screen.findByLabelText(/project name/i)).toBeInTheDocument();
+});
+
+it('makes a public project private', async () => {
+  list.mockResolvedValue({ items: [row({ visibility: 'public' })], nextCursor: null });
+  render(<Dashboard onOpen={() => {}} />);
+  await openMenu();
+  await userEvent.click(screen.getByText('Make private'));
+  await waitFor(() => expect(update).toHaveBeenCalledWith('p1', { visibility: 'private' }));
+});
+
+it('dismisses the rename, delete and create dialogs', async () => {
+  render(<Dashboard onOpen={() => {}} />);
+  await openMenu();
+  await userEvent.click(screen.getByText('Rename'));
+  await userEvent.click(await screen.findByRole('button', { name: /cancel/i }));
+  await openMenu();
+  await userEvent.click(screen.getByText('Delete'));
+  await screen.findByText(/can’t be undone/i);
+  await userEvent.keyboard('{Escape}');
+  await userEvent.click(screen.getByRole('button', { name: /new project/i }));
+  await userEvent.click(await screen.findByRole('button', { name: /cancel/i }));
+  expect(screen.queryByLabelText(/project name/i)).toBeNull();
+});
+
+it('creates with Enter, and reports a refusal in either form', async () => {
+  create.mockRejectedValueOnce(new Error('Quota')).mockRejectedValueOnce('x');
+  render(<Dashboard onOpen={() => {}} />);
+  await screen.findByText('My mascot');
+  await userEvent.click(screen.getByRole('button', { name: /new project/i }));
+  await userEvent.type(await screen.findByLabelText(/project name/i), 'x{Enter}');
+  expect(await screen.findByText('Quota')).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText(/project name/i), '{Enter}');
+  expect(await screen.findByText('Could not create the project.')).toBeInTheDocument();
+});
+
+it('renames with Enter, and not with an empty name', async () => {
+  render(<Dashboard onOpen={() => {}} />);
+  await openMenu();
+  await userEvent.click(screen.getByText('Rename'));
+  const field = await screen.findByLabelText(/project name/i);
+  await userEvent.type(field, '{Enter}');
+  await waitFor(() => expect(update).toHaveBeenCalledWith('p1', { name: 'My mascot' }));
+  await openMenu();
+  await userEvent.click(screen.getByText('Rename'));
+  const again = await screen.findByLabelText(/project name/i);
+  await userEvent.clear(again);
+  await userEvent.type(again, '{Enter}');
+  expect(update).toHaveBeenCalledTimes(1);
+});

@@ -8,13 +8,16 @@ const mine = vi.fn();
 const markUsed = vi.fn();
 const projects = vi.fn();
 const insights = vi.fn();
+const dup = vi.fn();
+const navigated = vi.fn();
 vi.mock('@blooby/studio', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('@blooby/studio');
-  return { ...actual, assetsApi: { browse, mine, markUsed }, communityApi: { projects, insights } };
+  return { ...actual, assetsApi: { browse, mine, markUsed }, projectsApi: { duplicate: (...a: unknown[]) => dup(...a), projectData: () => Promise.resolve(null) }, communityApi: { projects, insights } };
 });
 
 const { Community } = await import('./Community');
 const { useEditor } = await import('@blooby/studio');
+vi.mock('react-router', async () => ({ ...(await vi.importActual<Record<string, unknown>>('react-router')), useNavigate: () => navigated }));
 
 const asset = (over: Record<string, unknown> = {}) => ({
   id: 'a1', name: 'Wave', kind: 'preset', source: 'community', status: 'published',
@@ -24,7 +27,8 @@ const asset = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
-  for (const fn of [browse, mine, markUsed, projects, insights]) fn.mockReset();
+  for (const fn of [browse, mine, markUsed, projects, insights, dup, navigated]) fn.mockReset();
+  dup.mockResolvedValue({ id: 'copy1' });
   projects.mockResolvedValue({ items: [], nextCursor: null });
   insights.mockResolvedValue({ topAssets: [], topCreators: [] });
   browse.mockResolvedValue({ items: [asset()], nextCursor: null });
@@ -128,4 +132,65 @@ it('shows the community insights in the open', async () => {
   expect(creators[1]).toHaveTextContent('Unnamed creator');
   expect(within(board).getByText('1 use')).toBeInTheDocument();
   expect(within(board).getByText('Preset · Bo Diaz')).toBeInTheDocument();
+});
+
+const proj = (over: Record<string, unknown> = {}) => ({ id: 'p9', name: 'Dancing blob', visibility: 'public', updatedAt: '2026-09-01T00:00:00Z', ...over });
+const toProjects = async () => {
+  render(<Community />, { wrapper: MemoryRouter });
+  await screen.findByText('Wave');
+  await userEvent.click(screen.getByRole('button', { name: 'Popular' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Projects' }));
+};
+
+it('falls back to trending for a project list when a library-only sort was picked', async () => {
+  projects.mockResolvedValue({ items: [proj({ access: 'edit' })], nextCursor: null });
+  await toProjects();
+  expect(await screen.findByText(/open to edit/)).toBeInTheDocument();
+  expect(projects).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'trending' }));
+});
+
+it('says when there are no public projects', async () => {
+  await toProjects();
+  expect(await screen.findByText(/no public projects yet/i)).toBeInTheDocument();
+});
+
+it('opens and duplicates a public project', async () => {
+  projects.mockResolvedValue({ items: [proj()], nextCursor: null });
+  await toProjects();
+  const card = (await screen.findByText('Dancing blob')).closest('.card') as HTMLElement;
+  await userEvent.click(card);
+  expect(navigated).toHaveBeenCalledWith('/projects/p9');
+  await userEvent.click(within(card).getByRole('button', { name: /⋯|more|menu/i }));
+  await userEvent.click(await screen.findByText('Open'));
+  expect(navigated).toHaveBeenCalledTimes(2);
+  await userEvent.click(within(card).getByRole('button', { name: /⋯|more|menu/i }));
+  await userEvent.click(await screen.findByText('Duplicate to my projects'));
+  await waitFor(() => expect(navigated).toHaveBeenLastCalledWith('/projects/copy1'));
+});
+
+it('opens an asset to preview it, and adds or closes from there', async () => {
+  browse.mockResolvedValue({ items: [asset({ description: 'Hi', tags: ['fun'] })], nextCursor: null });
+  render(<Community />, { wrapper: MemoryRouter });
+  await userEvent.click(await screen.findByText('Wave'));
+  expect(await screen.findByText('fun')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(screen.queryByText('fun')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByText('Wave'));
+  await userEvent.keyboard('{Escape}');
+  await userEvent.click(screen.getByText('Wave'));
+  await userEvent.click(await screen.findByRole('button', { name: 'Add to project' }));
+  await waitFor(() => expect(markUsed).toHaveBeenCalledWith('a1'));
+});
+
+it('covers a leaderboard with a zero leader, an expression, an owner-less row and a fourth place', async () => {
+  const a = (i: number, over = {}) => ({ id: `x${i}`, name: `A${i}`, kind: 'expression', source: 'community', downloadCount: 0, owner: null, ...over });
+  insights.mockResolvedValue({ topAssets: [a(1), a(2), a(3), a(4)], topCreators: [] });
+  render(<Community />, { wrapper: MemoryRouter });
+  expect((await screen.findAllByText('Expression')).length).toBe(4);
+});
+
+it('previews an asset that has no description', async () => {
+  render(<Community />, { wrapper: MemoryRouter });
+  await userEvent.click(await screen.findByText('Wave'));
+  expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument();
 });

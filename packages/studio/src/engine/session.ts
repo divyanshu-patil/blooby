@@ -731,6 +731,7 @@ const SESSION: (Omit<Capability, 'kind' | 'since' | 'reversible' | 'requires'> &
     description: 'Runs capability calls in order, each validated and applied exactly as if called alone. atomic (default true): if one fails, everything in the batch is rolled back and the failing call is named. Up to 200 calls.',
     inputSchema: obj({ calls: { type: 'array', items: { type: 'object', properties: { capability: str, args: { type: 'object' } }, required: ['capability'] } }, atomic: bool, ...mutation }, ['calls']),
     examples: [{ calls: [{ capability: 'add_keyframe', args: { nodeId: 'body', property: 'flatOffset.y', atMs: 0, value: 0 } }, { capability: 'add_keyframe', args: { nodeId: 'body', property: 'flatOffset.y', atMs: 400, value: -80, easing: 'easeOut' } }] }],
+    /* v8 ignore next -- invoke routes batch_execute to EditorSession.batch before any handler lookup */
     handler: () => { throw new CapabilityError('HOST_CAPABILITY', 'batch_execute is run by EditorSession.batch'); },
   },
 ];

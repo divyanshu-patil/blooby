@@ -1,4 +1,10 @@
-import { it } from 'vitest';
+import { it, vi } from 'vitest';
+
+// no DOM here: run the hook's subscribe / unsubscribe / snapshot by hand instead of rendering
+vi.mock('react', async (orig) => ({
+  ...(await orig<typeof import('react')>()),
+  useSyncExternalStore: (sub: (l: () => void) => () => void, get: () => unknown, server: () => unknown) => { (globalThis as { unsub?: () => void }).unsub = sub(() => {}); server(); return get(); },
+}));
 import { check } from './core/testkit';
 import { RELEASES, compareVersions, unseenReleases, type Release } from './whatsNew';
 
@@ -38,3 +44,27 @@ it('everything newer than what was last seen, newest first', check(unseenRelease
 it('nothing when the newest has been seen', check(unseenReleases('2026.10.02', fake).length === 0));
 it('someone who has never looked sees only the latest', check(unseenReleases(null, fake).map((r) => r.title).join() === 'c'));
 it('a same-day second release sorts after the first', check(compareVersions('2026.10.01.2', '2026.10.01') > 0 && compareVersions('2026.09.30', '2026.10.01') < 0));
+
+// --- "seen": kept in storage, or in the signed-in profile -----------------------------------
+{
+  const { configureWhatsNew, markWhatsNewSeen, useWhatsNewSeen: readSeen } = await import('./whatsNew');
+  markWhatsNewSeen('1999.01.01');                      // the default save: no storage here, swallowed
+  await Promise.resolve(); await Promise.resolve();
+  const saved: string[] = [];
+  configureWhatsNew({ seen: null, save: (v) => { saved.push(v); } });
+  readSeen();                                          // subscribes, so the next change notifies it
+  markWhatsNewSeen('2020.01.01');
+  (globalThis as { unsub?: () => void }).unsub!();
+  markWhatsNewSeen('2019.01.01');                      // never moves backwards
+  markWhatsNewSeen('2020.01.01.1');                    // a second release the same day does
+  markWhatsNewSeen();                                  // the latest
+  await Promise.resolve(); await Promise.resolve();
+  it('only forward moves are saved', check(saved.join() === `2020.01.01,2020.01.01.1,${(await import('./whatsNew')).LATEST_RELEASE}`, saved.join()));
+  configureWhatsNew({ seen: '2999.01.01', save: () => { throw new Error('offline'); } });
+  markWhatsNewSeen();                                  // older than seen: nothing to save
+  configureWhatsNew({ seen: null, save: () => { throw new Error('offline'); } });
+  markWhatsNewSeen();                                  // a failing save is swallowed
+  await Promise.resolve(); await Promise.resolve();
+  it('compareVersions pads a short version with zeros', check(compareVersions('2020.01', '2020.01.0') === 0 && compareVersions('2020.01.1', '2020.01') > 0));
+  it('the hook reads the current value', check(readSeen() === RELEASES[0].version));
+}

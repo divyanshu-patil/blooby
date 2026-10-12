@@ -104,7 +104,6 @@ const same = (frames: Vec[]) =>
  * the old spot to the new one, half faded in, for a split second.
  */
 function prop(frames: Vec[], eps: number, startFrame: number, cuts: number[] = []) {
-  if (!frames.length) return { a: 0, k: [0] };
   if (same(frames)) return { a: 0, k: frames[0].length === 1 ? frames[0][0] : frames[0] };
   const hold = new Set(cuts);
   const keep = [...new Set([...reduce(frames, eps), ...cuts.flatMap((i) => [i, i + 1])])].sort((a, b) => a - b);

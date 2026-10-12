@@ -85,3 +85,28 @@ it('never renders the password as readable text', async () => {
   render(<AuthScreen />);
   expect(screen.getByLabelText(/password/i)).toHaveAttribute('type', 'password');
 });
+
+it('reports a refused reset and a refused sign-up', async () => {
+  resetPassword.mockResolvedValue({ error: { message: 'No such user' } });
+  render(<AuthScreen />);
+  await userEvent.click(screen.getByRole('button', { name: /forgot/i }));
+  await fill('a@example.com');
+  await userEvent.click(screen.getByRole('button', { name: /send|reset/i }));
+  expect(await screen.findByText(/no such user/i)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: /back to sign in/i }));
+  await userEvent.click(screen.getByRole('button', { name: /create an account/i }));
+  signUp.mockResolvedValue({ error: { message: 'Taken' } });
+  await userEvent.clear(screen.getByLabelText(/email/i));
+  await fill('b@example.com', 'a-long-password');
+  await userEvent.click(screen.getByRole('button', { name: /^create account$/i }));
+  expect(await screen.findByText(/taken/i)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
+});
+
+it('falls back to a generic message for a non-Error throw', async () => {
+  signInWithPassword.mockRejectedValue('boom');
+  render(<AuthScreen />);
+  await fill('ann@example.com', 'a-long-password');
+  await userEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
+  expect(await screen.findByText(/something went wrong/i)).toBeInTheDocument();
+});

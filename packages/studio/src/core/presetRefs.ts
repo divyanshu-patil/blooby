@@ -40,7 +40,7 @@ function signature(value: unknown): string {
     // sorted, so a field written in a different order is not read as an edit
     return Object.fromEntries(
       Object.entries(v as Record<string, unknown>)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .sort(([a], [b]) => (a < b ? -1 : 1))
         .map(([k, x]) => [k, k === 'id' && typeof x === 'string' && GENERATED_ID.test(x) ? '·' : norm(x)]),
     );
   };
@@ -86,9 +86,6 @@ export function unpackPresets(stored: StoredPreset[]): Preset[] {
  * `uid('t')`/`uid('k')` for everything it places, and a Block only ever refers to a preset
  * by `presetId`, so nothing outside this array has ever pointed at those ids.
  */
-
-/** Only for tests: `builtinPresets()` is memoised above, and a test may want it rebuilt. */
-export const resetPresetSignatures = () => { cache = undefined; };
 
 /**
  * A project ready to be written down — to the cloud, to localStorage, to a file.

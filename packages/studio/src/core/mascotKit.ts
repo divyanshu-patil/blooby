@@ -274,9 +274,9 @@ function writingMotion(t0: number, lines: number, lineMs = 700): Track[] {
     for (let j = 0; j <= 6; j++) tips.push([s + (j * lineMs) / 7, -96 + j * 13, y + (j % 2 ? -5 : 3), 'easeInOut']);
     if (l < lines - 1) tips.push([s + lineMs - 30, -20, y + 8, 'easeInOut']);
   }
-  // then lifted back to where it started, so a loop has no jump
+  // then lifted back to where it started, so a loop has no jump (the lines always fit inside the loop)
   const end = t0 + lines * lineMs;
-  if (end < t0 + WRITE_LOOP) tips.push([end + 60, -60, 70, 'easeInOut'], [t0 + WRITE_LOOP, tips[0][1], tips[0][2]]);
+  tips.push([end + 60, -60, 70, 'easeInOut'], [t0 + WRITE_LOOP, tips[0][1], tips[0][2]]);
   const pen = tips.map(([t, x, y, e]): P => [t, ...pencilAt(x, y), e]);
   return [...xy('pencil', pen), ...hand('R', pen.map(([t, x, y, e]): P => [Math.min(t + 30, t0 + WRITE_LOOP), x + 10, y + 14, e]))];
 }

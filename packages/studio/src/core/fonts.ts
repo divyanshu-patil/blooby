@@ -36,11 +36,8 @@ interface Face { status: FontStatus; data?: FontData; error?: string; weight?: n
 const faces = new Map<string, Face>();
 const inflight = new Map<string, Promise<boolean>>();
 const listeners = new Set<() => void>();
-let version = 0;
-const bump = () => { version++; for (const fn of listeners) fn(); };
+const bump = () => { for (const fn of listeners) fn(); };
 
-/** Changes every time a face arrives or fails — what a renderer re-lays text out on. */
-export const fontsVersion = () => version;
 export function onFonts(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);

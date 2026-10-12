@@ -4,12 +4,14 @@ import type { NextFunction, Request, Response } from 'express';
 
 const findUnique = vi.fn();
 const verifyImpl = vi.fn();
+const signing = vi.hoisted(() => ({ keyFn: null as null | ((h: { kid: string }, cb: (e: unknown, k?: unknown) => void) => void) }));
 
 vi.mock('../config/prisma.js', () => ({ prisma: { profile: { findUnique } } }));
-vi.mock('jwks-rsa', () => ({ JwksClient: class { getSigningKey() { /* unused */ } } }));
+vi.mock('jwks-rsa', () => ({ JwksClient: class { getSigningKey(_kid: string, cb: (e: unknown, k?: unknown) => void) { cb(null, { getPublicKey: () => 'pub' }); } } }));
 vi.mock('jsonwebtoken', () => ({
   default: {
-    verify: (token: string, _key: unknown, _opts: unknown, cb: (e: unknown, d?: unknown) => void) => {
+    verify: (token: string, _key: never, _opts: unknown, cb: (e: unknown, d?: unknown) => void) => {
+      signing.keyFn = _key;
       try { cb(null, verifyImpl(token)); } catch (e) { cb(e); }
     },
   },
@@ -121,4 +123,20 @@ it('optionalAuth lets an anonymous caller straight through', async () => {
 it('optionalAuth still rejects a token that is present but bad', async () => {
   verifyImpl.mockImplementation(() => { throw new Error('nope'); });
   expect((await run(optionalAuth, req('Bearer x')) as HttpErrorType).status).toBe(401);
+});
+
+it('falls back to the sign-in provider\'s name and picture, trimmed, ignoring blanks and non-strings', async () => {
+  verifyImpl.mockReturnValue({ sub: 'u1', user_metadata: { full_name: '   ', name: ' Ada ', avatar_url: 5, picture: 'p.png' } });
+  findUnique.mockResolvedValue({ id: 'u1', role: 'user' });
+  const r = req('Bearer x');
+  await run(authenticate, r);
+  expect(r.user).toMatchObject({ name: 'Ada', avatarUrl: 'p.png' });
+});
+
+it('resolves the signing key through the JWKS client', async () => {
+  verifyImpl.mockReturnValue({ sub: 'u1' });
+  findUnique.mockResolvedValue({ id: 'u1', role: 'user' });
+  await run(authenticate, req('Bearer x'));
+  const key = await new Promise((r) => signing.keyFn!({ kid: 'k' }, (_e, k) => r(k)));
+  expect(key).toBe('pub');
 });

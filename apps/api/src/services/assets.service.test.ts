@@ -125,3 +125,30 @@ it('lets an admin delete anything, but a user only their own', async () => {
   expect(await status(assetsService.remove('a1', 'u1', 'user'))).toBe(404);
   expect(await status(assetsService.remove('a1', 'u1', 'admin'))).toBe(0);
 });
+
+it('applies every browse filter, and the owner library filters', async () => {
+  assetsService.browse({ kind: 'preset', source: 'official', category: 'c', tag: 't', q: 'x', limit: 5 } as never, null);
+  expect(repo.list.mock.calls[0][0]).toMatchObject({ kind: 'preset', source: 'official', category: 'c', tags: { has: 't' }, name: { contains: 'x' } });
+  assetsService.mine('u1', { kind: 'preset', q: 'x', limit: 5 } as never);
+  expect(repo.list.mock.calls[1][0]).toMatchObject({ ownerId: 'u1', kind: 'preset', name: { contains: 'x' } });
+  assetsService.mine('u1', { limit: 5 } as never);
+  expect(repo.list.mock.calls[2][0]).toEqual({ ownerId: 'u1' });
+});
+
+it('404s a missing item on update, remove, submit and moderate, admin or not', async () => {
+  repo.findById.mockResolvedValue(null);
+  expect(await status(assetsService.update('a1', 'u1', 'admin', { name: 'x' } as never))).toBe(404);
+  expect(await status(assetsService.update('a1', 'u1', 'user', { name: 'x' } as never))).toBe(404);
+  expect(await status(assetsService.remove('a1', 'u1', 'user'))).toBe(404);
+  expect(await status(assetsService.moderate('a1', 'admin', { action: 'approve' } as never))).toBe(404);
+});
+
+it('counts a use', async () => {
+  repo.incrementDownloads.mockResolvedValue({ downloadCount: 2 });
+  expect(await assetsService.use('a1')).toEqual({ downloadCount: 2 });
+});
+
+it('leaves the source unfiltered when the caller names none', () => {
+  assetsService.browse({ limit: 5 } as never, null);
+  expect(repo.list.mock.calls[0][0]).not.toHaveProperty('source');
+});

@@ -1,4 +1,4 @@
-import { it } from 'vitest';
+import { it, vi } from 'vitest';
 import { check } from '../core/testkit';
 import { crc32, unzip, writeZip, ZIP_COMMENT } from './zip';
 
@@ -41,4 +41,36 @@ const raw = async (b: Blob) => new Uint8Array(await b.arrayBuffer()) as Uint8Arr
   it('the archive comment says who made it', check(tail === ZIP_COMMENT, tail));
   // the reader scans backwards past exactly this comment to find the directory
   it('and a commented archive still reads', check((await unzip(zip)).has('a.json')));
+}
+
+// --- the platform missing, and archives that are not what they claim -----------------------
+{
+  const anim = `{"layers":[${Array.from({ length: 400 }, (_, i) => `{"t":${i}}`).join(',')}]}`;
+  const entries = [{ name: 'd/', data: bytes('') }, { name: 'a.json', data: bytes(anim) }];
+
+  vi.stubGlobal('CompressionStream', undefined);
+  const stored = await raw(await writeZip(entries));
+  vi.unstubAllGlobals();
+  it('with no CompressionStream everything is stored', check((await raw(await writeZip([]))).length > 0 && stored.length > anim.length));
+  const back = await unzip(stored);
+  it('a directory entry is skipped and a stored file read', check(!back.has('d/') && back.has('a.json')));
+
+  const packed = await raw(await writeZip(entries));
+  vi.stubGlobal('DecompressionStream', undefined);
+  const nope = await unzip(packed).then(() => null, (e: Error) => e.message);
+  vi.unstubAllGlobals();
+  it('with no DecompressionStream a deflated entry says so', check(nope?.includes('cannot read compressed') === true));
+
+  const notZip = await unzip(bytes('this is plainly not an archive, just text')).then(() => null, (e: Error) => e.message);
+  it('something that is not a zip says so', check(notZip === 'Not a zip file.'));
+
+  const dirAt = (z: Uint8Array<ArrayBuffer>) => new DataView(z.buffer, z.byteOffset).getUint32(z.length - ZIP_COMMENT.length - 22 + 16, true);
+  const odd = packed.slice();
+  new DataView(odd.buffer).setUint16(dirAt(odd) + 48 + 10, 99, true);
+  const badMethod = await unzip(odd).then(() => null, (e: Error) => e.message);
+  it('an unknown compression method is named', check(badMethod?.includes('unsupported compression method (99)') === true));
+
+  const cut = packed.slice();
+  new DataView(cut.buffer).setUint32(dirAt(cut), 0, true);
+  it('a damaged directory ends the listing', check((await unzip(cut)).size === 0));
 }

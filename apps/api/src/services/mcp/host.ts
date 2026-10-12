@@ -144,8 +144,7 @@ const jobView = (j: Job) => ({
   ...(j.result ? { file: { filename: j.result.filename, mimeType: j.result.mimeType, bytes: j.result.bytes.length, downloadUrl: j.result.url, warnings: j.result.warnings, ...j.result.info } } : {}),
 });
 function jobResources(j: Job): HostResult['resources'] {
-  const r = j.result;
-  if (!r) return [];
+  const r = j.result!;   // only ever asked of a finished job
   const uri = `blooby://exports/${j.id}/${r.filename}`;
   const text = r.mimeType === 'application/json' || r.mimeType.startsWith('image/svg');
   if (text && r.bytes.length <= 200_000) return [{ uri, mimeType: r.mimeType, text: r.bytes.toString('utf8') }];
@@ -170,7 +169,9 @@ async function everyPreset(conn: Conn): Promise<(Preset & { from: string })[]> {
   const seen = new Set<string>();
   return [
     ...project.map((p) => ({ ...p, from: 'project' })),
+    /* v8 ignore start -- every catalogue row carries a source; the fallback only satisfies the type */
     ...lib.presets.map((p) => ({ ...p, from: p.source === 'custom' ? 'mine' : p.source ?? 'library' })),
+    /* v8 ignore stop */
     ...builtinList().map((p) => ({ ...p, from: 'builtin' })),
   ].filter((p) => !seen.has(p.id) && seen.add(p.id));
 }

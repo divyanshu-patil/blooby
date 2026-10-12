@@ -131,3 +131,49 @@ it('pages forward by cursor and back again', async () => {
   await userEvent.click(screen.getByRole('button', { name: /previous/i }));
   await waitFor(() => expect(users).toHaveBeenLastCalledWith({ q: undefined, limit: 50 }));
 });
+
+it('falls back through username, email and id for the name, and omits an email that is the name', async () => {
+  users.mockResolvedValue({ items: [
+    row({ id: 'a', name: null, username: 'annie', email: null }),
+    row({ id: 'bbbbbbbbbbbb', name: null, username: null, email: null }),
+    row({ id: 'c', name: 'solo@x.c', email: 'solo@x.c' }),
+  ], nextCursor: null });
+  render(<Users />);
+  expect(await screen.findByText('annie')).toBeInTheDocument();
+  expect(screen.getByText('bbbbbbbb')).toBeInTheDocument();
+  expect(screen.getAllByText('solo@x.c')).toHaveLength(1);
+});
+
+it('opens detail with Enter only, titled by whatever name exists', async () => {
+  users.mockResolvedValue({ items: [row({ email: null, username: null })], nextCursor: null });
+  user.mockResolvedValue({ ...row({ email: null, username: null }), publishedAssets: 1, pendingAssets: 0, recentProjects: [{ id: 'p', name: 'Blob', updatedAt: '2026-08-01T00:00:00Z' }] });
+  render(<Users />);
+  const tr = (await screen.findAllByRole('row'))[1];
+  tr.focus();
+  await userEvent.keyboard('a');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await userEvent.keyboard('{Enter}');
+  expect(await screen.findByText('Blob')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'User' })).toBeInTheDocument();
+});
+
+it('offers to revoke an admin, names a non-Error refusal, and shows a detail that fails to load', async () => {
+  users.mockResolvedValue({ items: [row({ role: 'admin' })], nextCursor: null });
+  user.mockRejectedValue(new Error('detail down'));
+  setRole.mockRejectedValue('x');
+  render(<Users />);
+  await userEvent.click(await screen.findByText('ann@example.com'));
+  expect(await screen.findByText('detail down')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Revoke admin' }));
+  expect(await screen.findByText('Could not change the role.')).toBeInTheDocument();
+  expect(setRole).toHaveBeenCalledWith(row().id, 'user');
+});
+
+it('closes the detail dialog without changing anything', async () => {
+  render(<Users />);
+  await userEvent.click(await screen.findByText('ann@example.com'));
+  await screen.findByRole('dialog');
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(setRole).not.toHaveBeenCalled();
+});

@@ -103,3 +103,8 @@ import type { Preset, StoredPreset } from './types';
   const back = unpackPresets(ghost);
   it('a reference to a preset this build no longer has is dropped, not left as a stub', check(back.length === 0));
 }
+
+{
+  it('a hole in a stored library is skipped', check(unpackPresets([null as never]).length === 0));
+  it('a project with no presets array packs to none', check(packProject({} as { presets: Preset[] }).presets.length === 0));
+}

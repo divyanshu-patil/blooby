@@ -62,3 +62,27 @@ it('signed out, it asks you to sign in first and remembers the request', async (
   expect(await screen.findByRole('button', { name: /Continue with Google/ })).toBeInTheDocument();
   expect(sessionStorage.getItem('blooby.connect')).toBe('r9');
 });
+
+it('says so when the link carries no request', () => {
+  at('/connect', <Connect user={user} />);
+  expect(screen.getByText(/missing its request/)).toBeInTheDocument();
+});
+
+it('lets a permission be unticked, and names someone by email when they have no name', async () => {
+  at('/connect?request=r1', <Connect user={{ ...user, name: null }} />);
+  await userEvent.click(await screen.findByLabelText('Change your projects'));
+  await userEvent.click(screen.getByLabelText('Change your projects'));
+  await userEvent.click(screen.getByLabelText('See your projects'));
+  await userEvent.click(screen.getByLabelText('Change your projects'));
+  expect(screen.getByRole('button', { name: 'Allow Claude' })).toBeDisabled();
+  expect(screen.getByText(/ann@example\.com/)).toBeInTheDocument();
+});
+
+it('reports a refused approval, whatever was thrown', async () => {
+  decide.mockRejectedValueOnce(new Error('Expired')).mockRejectedValueOnce('x');
+  at('/connect?request=r1', <Connect user={user} />);
+  await userEvent.click(await screen.findByRole('button', { name: 'Allow Claude' }));
+  expect(await screen.findByText('Expired')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Allow Claude' }));
+  expect(await screen.findByText('That did not work.')).toBeInTheDocument();
+});

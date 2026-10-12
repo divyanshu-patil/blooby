@@ -1,12 +1,14 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { fireEvent } from '@testing-library/react';
 
 // the page's data comes from the studio package's own API client, imported inside it
 const api = { overview: vi.fn(), live: vi.fn(), createToken: vi.fn(), revokeToken: vi.fn(), rotateToken: vi.fn(), disconnect: vi.fn(), decideProposal: vi.fn() };
 vi.mock('../../../../../packages/studio/src/cloud/api', async (orig) => ({ ...(await orig<Record<string, unknown>>()), mcpApi: api }));
 
 const { AiClients } = await import('./AiClients');
+const { ApiError } = await import('@blooby/studio');
 
 /** the section under a heading — "Claude" appears both as a connected app and in the paste list */
 const section = (heading: string) => (screen.getByRole('heading', { name: heading }).closest('section')) as HTMLElement;
@@ -82,4 +84,49 @@ it('says what to do when nothing is connected', async () => {
   api.overview.mockResolvedValue({ ...overview, connections: [], tokens: [] });
   render(<AiClients />);
   expect(await screen.findByText(/No app is connected yet/)).toBeInTheDocument();
+});
+
+it('asks a signed-out visitor to sign in', async () => {
+  api.overview.mockRejectedValue(new ApiError(401, 'no'));
+  render(<AiClients />);
+  expect(await screen.findByText(/sign in to connect/i)).toBeInTheDocument();
+});
+
+it('shows why the server could not be reached, in words even when the failure is not an Error', async () => {
+  api.overview.mockRejectedValue(new Error('down'));
+  const { unmount } = render(<AiClients />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('down');
+  unmount();
+  api.overview.mockRejectedValue('nope');
+  render(<AiClients />);
+  expect(await screen.findByText(/could not reach/i)).toBeInTheDocument();
+});
+
+it('explains localhost, and selects the link on focus', async () => {
+  api.overview.mockResolvedValue({ ...overview, serverUrl: 'http://localhost:3000/mcp' });
+  render(<AiClients />);
+  const link = await screen.findByLabelText('Your MCP link');
+  fireEvent.focus(link);
+  expect(screen.getByText(/runs on localhost/)).toBeInTheDocument();
+});
+
+it('rejects a change, rotates and revokes tokens, and shows activity with its error', async () => {
+  api.overview.mockResolvedValue({
+    ...overview,
+    tokens: [{ ...overview.tokens[0], lastUsedAt: '2026-09-02T00:00:00Z' }],
+    connections: [{ ...overview.connections[0], lastUsedAt: '2026-09-02T00:00:00Z' }],
+    recent: [{ ...overview.recent[0], ok: false, errorCode: 'NOT_FOUND' }],
+  });
+  api.live.mockResolvedValue({ projects: [], proposals: [{ id: 'p1', projectId: 'x', client: 'Claude', capability: 'c', summary: 'Do it', status: 'pending', preview: null, createdAt: '2026-09-01T00:00:00Z' }] });
+  api.decideProposal.mockResolvedValue({});
+  api.rotateToken.mockResolvedValue({ token: 'blb_new', meta: { name: 'Laptop' } });
+  api.revokeToken.mockRejectedValue(new Error('cannot revoke'));
+  render(<AiClients />);
+  expect(await screen.findByText('not found')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Reject' }));
+  await waitFor(() => expect(api.decideProposal).toHaveBeenCalledWith('p1', false));
+  await userEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+  expect(await screen.findByText('blb_new')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+  expect(await screen.findByText('cannot revoke')).toBeInTheDocument();
 });

@@ -9,7 +9,7 @@ import { builtinPresets, defaultProject, presetPreviewProject } from './defaults
 import { compOf } from './comp';
 import { sceneAt } from './scene';
 import { shapeIdOf } from './emitters';
-import { showcasePresets } from './showcase';
+import { art, showcasePresets } from './showcase';
 import { textPresets } from './textPresets';
 import { makeLimb, makeTextLayer } from './layers';
 import { bakeLottie } from '../export/lottie';
@@ -294,4 +294,8 @@ for (const preset of SHOWCASE) {
   it('outside it, the mascot looks exactly as it did', check((before.fx?.list.find((e) => e.kind === 'outline')?.params.width ?? 0) === 0));
   it('the eyes get the look too', check(['eyeL', 'eyeR'].every((id) => project.rig.nodes[id].effects?.some((e) => e.kind === 'outline'))));
   it('ten character presets besides it, each with a tagline', check(creativePresets().length === 11 && creativePresets().every((p) => (p.tagline ?? '').length > 20)));
+}
+
+{
+  it('art that is not SVG is refused by name', check((() => { try { art('x', 'X', 'not svg', {}); return false; } catch (e) { return /showcase art "x"/.test((e as Error).message); } })()));
 }

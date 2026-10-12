@@ -2,7 +2,8 @@ import { it } from 'vitest';
 import { check } from './testkit';
 import { evaluateRig } from './scene';
 import { defaultProject } from './defaults';
-import { activeTransitionAt, DEFAULT_TRANSITION_MS, derivedDuration, explicitTransitionFor } from './timeline';
+import { activeTransitionAt, characteristicTime, DEFAULT_TRANSITION_MS, derivedDuration, evenDuration, explicitTransitionFor, relayoutBlocks } from './timeline';
+import { makeTimeline } from './defaults';
 import { buildDotLottie } from '../export/dotlottie';
 import { useEditor } from './store';
 import { activeTimeline } from './types';
@@ -68,4 +69,34 @@ import { activeTimeline } from './types';
   it('a closed loop is exactly its own length', check(derivedDuration(tl) === 3600, String(derivedDuration(tl))));
   it('a timeline that does not loop still gets room past its last key', check(derivedDuration({ ...tl, loop: false }) === 3800, String(derivedDuration({ ...tl, loop: false }))));
   it('and so does a loop whose keys run past its length', check(derivedDuration({ ...tl, durationOverrideMs: 3000 }) === 3800));
+}
+
+// --- relayout, evenDuration, characteristicTime --------------------------------------
+{
+  const blk = (id: string, durationMs: number) => ({ id, presetId: 'p', name: id, durationMs }) as never;
+  const key = (time: number, value: unknown) => ({ id: `k${time}`, time, value, easing: { type: 'linear' } }) as never;
+  const tl = makeTimeline('t');
+  it('evenDuration of an empty strip is 1s', check(evenDuration(tl) === 1000));
+  tl.blocks = [blk('a', 1000), blk('b', 500)];
+  it('evenDuration averages', check(evenDuration(tl) === 750));
+  tl.tracks = [
+    { id: 'loose', nodeId: 'n', prop: 'x', keyframes: [key(0, 1)] },
+    { id: 'ta', nodeId: 'n', prop: 'x', blockId: 'a', keyframes: [key(500, 1)] },
+    { id: 'gone', nodeId: 'n', prop: 'x', blockId: 'zzz', keyframes: [key(5, 1)] },
+    { id: 'tb', nodeId: 'n', prop: 'x', blockId: 'b', keyframes: [key(1100, 1)] },
+  ] as never;
+  relayoutBlocks(tl, [blk('a', 2000), blk('c', 100)]);
+  it('block-owned keys follow; tracks of unknown or removed blocks go', check(tl.tracks.find((t) => t.id === 'ta')!.keyframes[0].time === 1000 && !tl.tracks.some((t) => t.id === 'gone') && !tl.tracks.some((t) => t.id === 'tb') && tl.tracks.some((t) => t.id === 'loose')));
+  const base = { id: 'p', name: 'p', source: 'builtin', durationMs: 1000 };
+  const kf = (time: number, value: unknown) => ({ time, value }) as never;
+  it('no emitters: furthest key wins; non-numeric tracks skipped', check(characteristicTime({ ...base, tracks: [
+    { id: 't0', nodeId: 'n', prop: 'x', keyframes: [] },
+    { id: 't1', nodeId: 'n', prop: 'c', keyframes: [kf(0, 'red')] },
+    { id: 't2', nodeId: 'n', prop: 'x', keyframes: [kf(0, 0), kf(300, 'x'), kf(400, 5), kf(900, 2)] },
+  ] } as never) === 400));
+  it('nothing numeric → 45% of the duration', check(characteristicTime({ ...base, tracks: [] } as never) === 450));
+  it('emitters that start too late are ignored', check(characteristicTime({ ...base, tracks: [], emitters: [{ startMs: 2000, lifeMs: 100 }] } as never) === 450));
+  it('a running emitter gives its opening moment', check(characteristicTime({ ...base, tracks: [], emitters: [{ lifeMs: 500 }] } as never) === 300));
+  it('opens after the preset ends → falls through', check(characteristicTime({ ...base, tracks: [], emitters: [{ lifeMs: 5000 }] } as never) === 450));
+  it('emitter with an end', check(characteristicTime({ ...base, tracks: [], emitters: [{ startMs: 100, lifeMs: 500, endMs: 200 }] } as never) === 400));
 }

@@ -3,7 +3,11 @@ import { check } from './testkit';
 import { activeTrackFor, buildScene, emitterItems, evaluateRig, sampleTrack, sceneAt, valueAt } from './scene';
 import { builtinPresets, defaultProject, makeTimeline, presetPreviewProject } from './defaults';
 import { blockStarts } from './timeline';
-import { useEditor, writeKeyframe } from './store';
+import { keyframeTimes, panelTime, setEasingIn, uniqueName, useEditor, usePlayhead, writeKeyframe } from './store';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { confetti } from './defaults';
+import { makeGroup, makeLimb, makeShapeLayer, makeTextLayer } from './layers';
 import { readProp } from './props';
 import { applyCalls, describe, validate, validateBatch, type ToolCall } from '../copilot/tools';
 import { defaultValues, machineOf, validateMachine } from './stateMachine';
@@ -822,4 +826,466 @@ import type { Preset, Project } from './types';
   it('with no state machine left over', check(machineOf(ed().project).inputs.length === 0));
   it('no live values left over', check(Object.keys(ed().inputs).length === 0));
   it('and no undo history pointing at the old document', check(ed().past.length === 0));
+}
+
+// === store corners: bad ids, empty inputs, and the branches a tidy session never takes ===================
+{
+  const ed = () => useEditor.getState();
+  const fresh = () => { ed().loadProject(defaultProject()); return ed(); };
+  const proj = () => ed().project;
+  const tl = () => activeTimeline(proj());
+  const kf = (id: string, time: number, value: unknown = 1) => ({ id, time, value: value as number, easingOut: { type: 'linear' as const } });
+  const track = (id: string, nodeId: string, property: string, keys: ReturnType<typeof kf>[], blockId?: string) => ({ id, nodeId, property, keyframes: keys, ...(blockId ? { blockId } : {}) });
+  const noBlocks = () => { fresh(); ed().commit((p) => { activeTimeline(p).blocks = []; activeTimeline(p).tracks = []; }); };
+
+  it('uniqueName numbers repeats', check(uniqueName('a', ['a', 'a 2']) === 'a 3' && uniqueName('b', ['a']) === 'b'));
+  it('panelTime steps while playing; usePlayhead reads it', check(panelTime({ playing: true, playhead: 300 }) === 250 && panelTime({ playing: false, playhead: 300 }) === 300
+    && renderToStaticMarkup(createElement(() => String(usePlayhead()))) === '0'));
+  it('keyframeTimes dedupes and sorts', check(keyframeTimes([track('a', 'n', 'p', [kf('1', 5.2), kf('2', 1)]), track('b', 'n', 'p', [kf('3', 5)])]).join() === '1,5'));
+
+  // undo/redo with nothing to do, selection side-effects, simple setters
+  fresh();
+  it('undo and redo on empty stacks do nothing', check((() => { const before = proj(); ed().undo(); ed().redo(); return proj() === before; })()));
+  it('simple setters', check((() => { ed().setEditPoints(true); ed().setTool('hand' as never); ed().select(['body']); ed().setActiveLane('x'); return ed().tool === 'hand' && !ed().editPoints && ed().activeLane === 'x'; })()));
+
+  // effects as properties
+  noBlocks();
+  ed().addModifier({ nodeId: 'body', kind: 'shake', amount: 5, frequency: 1, amplitude: 1 });
+  const modId = tl().modifiers[0].id;
+  it('a new global effect is bound to the strip even with no clips', check(tl().modifiers[0].endMs !== undefined));
+  it('an effect property reads, writes, and keys through the same paths', check((() => {
+    ed().setValue(modId, 'fx.amount', 9);
+    const wrote = tl().modifiers[0].amount === 9;
+    ed().toggleTrack(modId, 'fx.amount');
+    const keyed = tl().tracks.some((t) => t.nodeId === modId);
+    ed().toggleTrack(modId, 'fx.amount');
+    return wrote && keyed && !tl().tracks.some((t) => t.nodeId === modId);
+  })()));
+  it('toggleTrack on something unreadable does nothing; on an empty track too', check((() => {
+    ed().toggleTrack('nobody', 'zzz');
+    ed().commit((p) => { activeTimeline(p).tracks.push(track('e', 'body', 'surface.yaw', [])); });
+    ed().toggleTrack('body', 'surface.yaw');
+    return !tl().tracks.some((t) => t.id === 'e');
+  })()));
+  it('addKeyframeNow with nothing to read does nothing; a shape keys its natural outline', check((() => {
+    ed().addKeyframeNow('nobody', 'zzz');
+    ed().addKeyframeNow('body', 'shape.path');
+    return tl().tracks.some((t) => t.property === 'shape.path');
+  })()));
+  it('toggleKeyframe adds, then removes the last key and bakes it', check((() => {
+    noBlocks();
+    ed().setPlayhead(0);
+    ed().toggleKeyframe('body', 'surface.yaw');
+    const added = tl().tracks.length === 1;
+    ed().toggleKeyframe('body', 'surface.yaw');
+    return added && tl().tracks.length === 0;
+  })()));
+  it('keyframe edits with unknown ids do nothing; deleting the last key drops the track', check((() => {
+    noBlocks();
+    ed().commit((p) => { activeTimeline(p).tracks = [track('t1', 'body', 'surface.yaw', [kf('a', 0), kf('b', 10)]), track('t2', 'body', 'surface.pitch', [kf('c', 0)])]; });
+    ed().moveKeyframe('nope', 'a', 5); ed().moveKeyframes([]); ed().moveKeyframes([{ trackId: 't1', kfId: 'zz', time: 5 }, { trackId: 't1', kfId: 'b', time: 3 }]);
+    ed().deleteKeyframe('nope', 'a'); ed().deleteKeyframe('t2', 'c');
+    ed().deleteKeyframes([]); ed().deleteKeyframes([{ trackId: 'nope', kfId: 'a' }, { trackId: 't1', kfId: 'a' }, { trackId: 't1', kfId: 'b' }]);
+    ed().setEasing('nope', 'a', { type: 'linear' });
+    return tl().tracks.length === 0;
+  })()));
+  it('setEasingIn on a missing key does nothing', check((() => { const t = track('t', 'body', 'surface.yaw', [kf('a', 0)]); const before = JSON.stringify(t); setEasingIn(t as never, 'zzz', { type: 'linear' }); return JSON.stringify(t) === before; })()));
+
+  // layers
+  fresh();
+  it('add and delete nodes', check((() => {
+    const n = makeShapeLayer('star', { id: 'n1' });
+    ed().addNode(n); ed().updateNode('n1', (x) => { x.name = 'Renamed'; }); ed().updateNode('nobody', () => undefined); ed().deleteNode('n1');
+    return !proj().rig.nodes.n1;
+  })()));
+  it('addLayer: nothing, a lost parent, a limb on a second mascot, an appearance time', check((() => {
+    ed().addLayer([]);
+    ed().addLayer(makeShapeLayer('star', { id: 'lost', parentId: 'gone' }), { appearAt: 500 });
+    ed().addLayer(makeShapeLayer('star', { id: 'now' }), { appearAt: 0 });
+    const m2 = ed().addMascot('cute');
+    ed().addLayer(makeLimb('arm', 1, m2, { id: 'arm2' }));
+    return proj().rig.nodes.lost.parentId === 'body' && proj().rig.nodes.arm2.zIndex !== 0;
+  })()));
+  it('duplicate of nothing; copy and paste through text', check((() => {
+    const none = ed().duplicateLayer('nobody');
+    const text = ed().copyLayers(['body']);
+    const copied = ed().copyLayers([]);
+    return none === null && text.startsWith('blooby-layers:') && copied === '' && ed().pasteLayers('plain words').length === 0 && ed().pasteLayers('blooby-layers:{nope').length === 0
+      && ed().pasteLayers('blooby-layers:{"v":1,"nodes":[]}').length === 0 && ed().pasteLayers(text).length > 0;
+  })()));
+  it('grouping nothing selects nothing', check((() => { ed().groupLayers(['nobody']); ed().ungroupLayer('nobody'); return true; })()));
+  it('tween of an unreadable property does nothing', check((() => { ed().tweenProperty('nobody', 'zzz', 1, 100, { type: 'linear' }); return true; })()));
+  it('mascots: by template, a missing template', check((() => {
+    fresh();
+    const first = ed().addMascot('blob');
+    ed().saveMascotTemplate(first, 'T');
+    const tid = proj().mascotTemplates![0].id;
+    return !!ed().addMascot({ templateId: tid }) && ed().addMascot({ templateId: 'nope' }) === '';
+  })()));
+  it('role changes and a new face', check((() => {
+    fresh();
+    ed().addLayer(makeShapeLayer('star', { id: 'hat', parentId: 'body' }));
+    ed().setRole('hat', 'eyeL');
+    ed().setFaceRole('face', true);
+    const m2 = ed().addMascot('cute');
+    ed().commit((p) => { for (const n of Object.values(p.rig.nodes)) if (n.parentId === `${m2}.face`) n.parentId = m2; delete p.rig.nodes[`${m2}.face`]; });
+    ed().addFace(m2);
+    ed().addFace(m2);       // already has one
+    ed().addFace('eyeL');   // not a mascot
+    ed().commit((p) => { p.rig.nodes[`${m2}.face`] = { ...p.rig.nodes.face, id: `${m2}.face`, role: undefined, parentId: null } as never; });
+    delete proj().rig.nodes[m2 + '.face'];
+    return true;
+  })()));
+  it('addFace when the default face id is taken', check((() => {
+    fresh();
+    const m = ed().addMascot('cute');
+    ed().commit((p) => { const f = Object.values(p.rig.nodes).find((n) => n.parentId === m && n.role === 'face')!; delete f.role; f.id = 'other'; p.rig.nodes.other = f; delete p.rig.nodes[`${m}.face`]; p.rig.nodes[`${m}.face`] = { ...f, id: `${m}.face`, kind: 'primitive' as never }; });
+    ed().addFace(m);
+    return true;
+  })()));
+  it('text: placed by click in a frame, in an unknown frame, and edited', check((() => {
+    fresh();
+    const a = ed().addText('hi', { at: { x: 100, y: 100 } });
+    const b = ed().addText('there', { parentId: 'body', at: { x: 10, y: 10 } });
+    const c = ed().addText('lost', { parentId: 'gone', at: { x: 10, y: 10 } });
+    ed().setText(a, (t) => { t.content = 'changed'; }); ed().setText('nobody', () => undefined); ed().setText('body', () => undefined);
+    return !!b && !!c && proj().rig.nodes[a].text!.content === 'changed';
+  })()));
+  it('curves: none in an empty rig, too few points, edited and retyped', check((() => {
+    fresh();
+    const empty = defaultProject(); empty.rig.nodes = {}; ed().loadProject(empty);
+    const none = ed().addCurve([{ x: 0, y: 0 }, { x: 50, y: 0 }]);
+    fresh();
+    const one = ed().addCurve([{ x: 0, y: 0 }]);
+    const id = ed().addCurve([{ x: 0, y: 0 }, { x: 50, y: 20 }, { x: 100, y: 0 }], { type: 'polyline' })!;
+    ed().editCurve('nobody', (c) => c);
+    ed().editCurve(id, () => null);
+    ed().editCurve(id, (c) => ({ ...c, points: c.points.map((q) => ({ ...q, x: q.x + 1 })) }));
+    ed().updateNode(id, (n) => { n.shapePath = 'garbage'; n.curve = undefined; });
+    ed().editCurve(id, (c) => c);
+    ed().setCurveType('nobody', 'bezier'); ed().setCurveType('body', 'bezier'); ed().setCurveType(id, 'bezier');
+    ed().updateNode(id, (n) => { n.shapePath = 'M 0 0 C 0 0 1 1 2 2'; n.curve = { type: 'smooth' }; });
+    ed().setCurveType(id, 'bezier');
+    ed().setCurveType(id, 'smooth');
+    return none === null && one === null && !!id;
+  })()));
+}
+
+// --- blocks, transitions, timelines ---------------------------------------------------------------------------
+{
+  const ed = () => useEditor.getState();
+  const fresh = () => { ed().loadProject(defaultProject()); return ed(); };
+  const proj = () => ed().project;
+  const tl = () => activeTimeline(proj());
+  const kf = (id: string, time: number, value: unknown = 1) => ({ id, time, value: value as number, easingOut: { type: 'linear' as const } });
+  const pre = (id: string): Preset => ({ id, name: id, source: 'official', durationMs: 500, tracks: [{ id: 't', nodeId: 'body', property: 'surface.yaw', keyframes: [kf('k', 0, 1), kf('k2', 400, 5)] }] });
+
+  it('a catalogue preset joins the file when used; an unknown one does nothing; the selection plays text presets', check((() => {
+    fresh();
+    ed().addBlock('nobody');
+    useEditor.setState({ catalog: [pre('cat')] });
+    ed().addBlock('cat');
+    ed().addBlock('cat');
+    ed().select(['eyeL']);
+    ed().addBlock('cat', 0, 'body');
+    return proj().presets.filter((x) => x.id === 'cat').length === 1;
+  })()));
+  it('block edits on missing ids do nothing', check((() => {
+    fresh();
+    const b = tl().blocks[0].id;
+    ed().duplicateBlock('nobody'); ed().renameBlock('nobody', 'x'); ed().renameBlock(b, '   '); ed().renameBlock(b, ' ok ');
+    ed().setBlockSpeed('nobody', 2); ed().setBlockLoop('nobody', true); ed().setBlockColor('nobody', 'red'); ed().moveBlock('nobody', 0);
+    ed().setBlockSpeed(b, 2); ed().setBlockLoop(b, true); ed().setBlockColor(b, 'red');
+    return tl().blocks[0].name === 'ok' && tl().blocks[0].speed === 2;
+  })()));
+  it('removing the selected clip clears the selection', check((() => {
+    fresh();
+    const b = tl().blocks[0].id; ed().selectBlock(b); ed().removeBlock(b);
+    return ed().selectedBlockId === null;
+  })()));
+  it('duplicating a clip with its keys and its effects', check((() => {
+    fresh();
+    const b = tl().blocks[0].id;
+    ed().addModifier({ nodeId: 'body', kind: 'shake', amount: 1, frequency: 1, amplitude: 1, blockId: b });
+    const n = tl().blocks.length;
+    ed().duplicateBlock(b);
+    return tl().blocks.length === n + 1 && tl().modifiers.length === 2;
+  })()));
+  it('transitions: new, patched, removed (also when there are none)', check((() => {
+    fresh();
+    const b = tl().blocks[0].id;
+    ed().commit((p) => { activeTimeline(p).transitions = undefined; });
+    ed().removeTransition(b);
+    ed().setTransition(b, { durationMs: 100 }); ed().setTransition(b, { durationMs: 200 });
+    const patched = tl().transitions![0].durationMs === 200;
+    ed().removeTransition(b);
+    return patched && tl().transitions!.length === 0;
+  })()));
+  it('even durations with no clips; timeline length floor', check((() => {
+    fresh();
+    ed().commit((p) => { activeTimeline(p).blocks = []; });
+    ed().setDurationMode('even'); ed().setTimelineLoop(false); ed().setTimelineDuration(10);
+    return tl().durationMode === 'even';
+  })()));
+  it('timelines: default and blank names, missing ids, renaming, deleting the active one', check((() => {
+    fresh();
+    ed().addTimeline('  '); ed().addTimeline('Idle', { copyLayers: true });
+    ed().duplicateTimeline('nobody');
+    const second = proj().timelines[1].id;
+    ed().duplicateTimeline(second);
+    ed().renameTimeline('nobody', 'x'); ed().renameTimeline(second, '  '); ed().renameTimeline(second, 'Renamed');
+    ed().setStateTransition('nobody', 100); ed().setStateTransition(second, 50, { type: 'linear' });
+    ed().setActiveTimeline('nobody');
+    ed().deleteTimeline(proj().activeTimelineId);                        // the active one, with no machine yet
+    const before = proj().timelines.length;
+    ed().commit((p) => { p.stateMachine = { id: 'm', initialStateId: p.timelines[0].id, inputs: [], transitions: [{ id: 'e', from: p.timelines[0].id, to: p.timelines[1].id, conditions: [], logic: 'AND', durationMs: 0 }] }; });
+    ed().deleteTimeline(proj().timelines[0].id);                         // the machine's initial state
+    ed().commit((p) => { p.stateMachine!.initialStateId = 'other'; });
+    ed().deleteTimeline(proj().timelines[0].id);
+    while (proj().timelines.length > 1) ed().deleteTimeline(proj().timelines[0].id);
+    ed().deleteTimeline(proj().timelines[0].id);                         // the last one stays
+    return before > 1 && proj().timelines.length === 1;
+  })()));
+  it('state changes: unknown, scheduled, immediate, hard cut, and back', check((() => {
+    fresh();
+    ed().addTimeline('Two');
+    const [a, b] = proj().timelines;
+    ed().setActiveTimeline(a.id);
+    ed().returnToPreviousState();
+    ed().setState('nobody'); ed().setState(a.name);
+    ed().setState('two', { at: 500 });
+    const scheduled = ed().pendingStateChange !== null;
+    ed().cancelScheduledState();
+    ed().setState(b.id, { duration: 0 });
+    ed().returnToPreviousState({ duration: 100 });
+    ed().enableState(b.name);
+    ed().clearStateTransition();
+    return scheduled && ed().stateTransition === null;
+  })()));
+}
+
+// --- state machine editing -------------------------------------------------------------------------------------
+{
+  const ed = () => useEditor.getState();
+  const fresh = () => { ed().loadProject(defaultProject()); ed().addTimeline('Other'); return ed(); };
+  const proj = () => ed().project;
+  const m = () => proj().stateMachine!;
+  it('inputs: blank, duplicate, retype with conditions, describe, remove', check((() => {
+    fresh();
+    const [a, b] = proj().timelines.map((t) => t.id);
+    const blank = ed().addInput({ name: ' ', type: 'Boolean' });
+    ed().addStateTransition(a, b);                                       // no inputs yet: no conditions
+    ed().addInput({ name: 'ev', type: 'Event' });
+    ed().addStateTransition(a, b);                                       // first input is an Event
+    ed().removeStateTransition(m().transitions[0].id);
+    ed().removeInput('ev');
+    ed().addInput({ name: 'n', type: 'Numeric', value: 1 });
+    const again = ed().addInput({ name: 'n', type: 'Numeric' });
+    ed().addStateTransition(a, b);
+    ed().addStateTransition(a, b, [{ input: 'n', operator: 'Equal', value: 1 }]);
+    const tid = m().transitions[0].id;
+    ed().updateStateTransition(tid, { durationMs: 5 }); ed().updateStateTransition('nobody', { durationMs: 5 });
+    ed().updateInput('nobody', { type: 'Boolean' });
+    ed().updateInput('n', { name: 'n' });                                // unchanged name
+    ed().updateInput('n', { name: 'taken' }); ed().addInput({ name: 'other', type: 'Boolean' }); ed().updateInput('taken', { name: 'other' });
+    ed().updateInput('taken', { type: 'String' });
+    ed().updateInput('taken', { type: 'Boolean', value: true });
+    ed().updateInput('taken', { type: 'Numeric' });
+    ed().updateInput('taken', { type: 'Event' });
+    ed().updateInput('taken', { type: 'Numeric', description: 'd' });
+    ed().updateInput('taken', { value: 3, description: undefined });
+    ed().removeInput('taken');
+    ed().setInitialState(b);
+    return blank === '' && again === 'n' && ed().inputs !== undefined;
+  })()));
+  it('direct goto: refused, and driving an event-free machine', check((() => {
+    fresh();
+    const [a, b] = proj().timelines.map((t) => t.id);
+    ed().addInput({ name: 'flag', type: 'Boolean' });
+    ed().goToState(b, { durationMs: 0, input: 'flag' });                 // a boolean cannot carry it
+    ed().goToState('nobody', { durationMs: 0 });
+    ed().goToState(b, { durationMs: 0 });
+    return ed().project.activeTimelineId !== undefined && a !== b;
+  })()));
+  it('machine id and reset with an empty name', check((() => {
+    fresh();
+    ed().setMachineId('!!!'); ed().setMachineId('My Machine');
+    ed().commit((p) => { p.name = ''; p.stateMachine = undefined; });
+    ed().resetMachine();
+    ed().setStateNodePosition('x', { x: 1.4, y: 2.6 });
+    return m().id === 'blooby';
+  })()));
+  it('resetting a state transition: missing and present', check((() => {
+    fresh();
+    ed().resetStateTransition('nobody'); ed().setStateTransition(proj().timelines[0].id, 10); ed().resetStateTransition(proj().timelines[0].id);
+    return proj().timelines[0].transitionMs === undefined;
+  })()));
+  it('firing and resetting inputs', check((() => {
+    fresh();
+    ed().addInput({ name: 'ev', type: 'Event' });
+    ed().addStateTransition(proj().timelines[0].id, proj().timelines[1].id);
+    ed().fireInput('ev'); ed().setInput('x', 1); ed().resetInputs('x'); ed().resetInputs();
+    return true;
+  })()));
+}
+
+// --- effects, expressions, presets --------------------------------------------------------------------------------
+{
+  const ed = () => useEditor.getState();
+  const fresh = () => { ed().loadProject(defaultProject()); return ed(); };
+  const proj = () => ed().project;
+  const tl = () => activeTimeline(proj());
+  const kf = (id: string, time: number, value: unknown = 1) => ({ id, time, value: value as number, easingOut: { type: 'linear' as const } });
+  it('modifiers and emitters: missing ids, no emitters yet, svg assets that go', check((() => {
+    fresh();
+    ed().updateModifier('nobody', () => undefined); ed().updateEmitter('nobody', () => undefined);
+    ed().removeEmitter('nobody');                                        // no emitters at all
+    ed().commit((p) => { activeTimeline(p).blocks = []; });
+    ed().addEmitter({ ...confetti('body') } as never);
+    const eid = tl().emitters![0].id;
+    ed().updateEmitter(eid, (e) => { e.svgAssetId = 'asset'; e.svg = { sourceMarkup: '', viewBox: '' }; });
+    ed().removeSvgAsset('other');                                        // no assets at all
+    const asset = ed().addSvgAsset('a', '<svg/>', '0 0 1 1');
+    ed().updateEmitter(eid, (e) => { e.svgAssetId = asset; });
+    ed().commit((p) => { p.timelines[0].emitters!.push({ ...p.timelines[0].emitters![0], id: 'plain', svgAssetId: undefined }); });
+    ed().removeSvgAsset(asset);
+    const cleared = tl().emitters![0].svgAssetId === undefined;
+    ed().selectEmitter(eid); ed().removeEmitter('plain'); ed().removeEmitter(eid);
+    return cleared && ed().selectedEmitterId === null;
+  })()));
+  it('expressions: blank, duplicate, missing; applying and morphing across odd snapshots', check((() => {
+    fresh();
+    ed().captureExpression('pose'); ed().captureExpression('pose');
+    const [a, b] = proj().expressions.map((x) => x.id);
+    ed().renameExpression('nobody', 'x'); ed().renameExpression(a, '  '); ed().renameExpression(a, 'renamed');
+    ed().applyExpression('nobody', 0);
+    ed().commit((p) => {
+      p.expressions[0].snapshot['ghost.surface.yaw'] = 5;
+      p.expressions[1].snapshot['ghost.surface.yaw'] = 9;
+      p.expressions[1].snapshot['body.surface.yaw'] = 40;
+      p.expressions[0].snapshot['body.color'] = { r: 0, g: 0, b: 0, a: 1 };
+      p.expressions[1].snapshot['body.color'] = { r: 9, g: 9, b: 9, a: 1 };
+      p.expressions[1].snapshot['body.extra'] = 3;
+      p.expressions[1].snapshot['body.transform.rotation'] = 30;
+    });
+    ed().applyExpression(a, 100); ed().applyExpression(b, 100, { type: 'linear' });
+    ed().morphBetween('nobody', b, 0, 100, { type: 'linear' }); ed().morphBetween(a, 'nobody', 0, 100, { type: 'linear' });
+    ed().morphBetween(a, b, 0, 100, { type: 'linear' });
+    return true;
+  })()));
+  it('presets: nothing picked, with global effects, with layers, from a clip, adopted keys', check((() => {
+    fresh();
+    ed().savePreset('none', ['nobody'], 500);
+    ed().commit((p) => {
+      const t = activeTimeline(p);
+      t.blocks = [{ id: 'b1', presetId: 'p1', name: 'b', durationMs: 1000 }, { id: 'b2', presetId: '', name: 'c', durationMs: 1000 }];
+      t.tracks = [
+        { id: 'own', nodeId: 'body', property: 'surface.yaw', blockId: 'b1', keyframes: [kf('a', 0, 1), kf('b', 500, 2)] },
+        { id: 'loose', nodeId: 'hat', property: 'transform.rotation', keyframes: [kf('c', 100, 1), kf('d', 1500, 2)] },
+        { id: 'cam', nodeId: '__camera', property: 'camera.zoom', keyframes: [kf('e', 100, 1), kf('f', 600, 1.2)] },
+      ];
+      p.rig.nodes.group = makeGroup(null, { id: 'group' });
+      p.rig.nodes.hat = makeShapeLayer('star', { id: 'hat', parentId: 'group', mask: { nodeId: 'eyeL' } });
+      p.rig.nodes.cap = makeTextLayer('x', { id: 'cap' }, { path: { mode: 'path', nodeId: 'hat' } } as never);
+      p.presets.push({ id: 'p1', name: 'p1', source: 'custom', durationMs: 1000, tracks: [] });
+      t.modifiers = [
+        { id: 'm0', nodeId: 'body', kind: 'shake', amount: 1, frequency: 1, amplitude: 1, startMs: 5000 },
+        { id: 'm1', nodeId: 'body', kind: 'shake', amount: 1, frequency: 1, amplitude: 1 },
+        { id: 'm2', nodeId: 'hat', kind: 'float', amount: 1, frequency: 1, amplitude: 1, startMs: 10, endMs: 400 },
+        { id: 'm3', nodeId: 'body', kind: 'float', amount: 1, frequency: 1, amplitude: 1, blockId: 'b1' },
+        { id: 'm4', nodeId: 'body', kind: 'float', amount: 1, frequency: 1, amplitude: 1, blockId: 'b2' },
+      ];
+      t.emitters = [{ ...confetti('cap'), id: 'e1', to: { nodeId: 'hat', x: 0, y: 0 }, attract: { nodeId: 'cap', startMs: 0, durationMs: 1 } }] as never;
+      t.appearances = [{ id: 'ap', nodeId: 'hat', startMs: 0, endMs: 100 }];
+    });
+    ed().savePreset('saved', ['own', 'loose', 'cam'], 600);
+    ed().savePreset('saved', ['own'], 600);
+    const saved = proj().presets.find((x) => x.name === 'saved')!;
+    ed().updatePresetFromBlock('nobody'); ed().updatePresetFromBlock('b2'); ed().updatePresetFromBlock('b1');
+    ed().commit((p) => { activeTimeline(p).emitters = undefined; });
+    ed().updatePresetFromBlock('b1');
+    ed().adoptKeysIntoBlock('nobody'); ed().adoptKeysIntoBlock('b1'); ed().adoptKeysIntoBlock('b1');
+    ed().commit((p) => { activeTimeline(p).tracks.push({ id: 'loose2', nodeId: 'body', property: 'surface.yaw', keyframes: [kf('z', 10, 3)] }, { id: 'out', nodeId: 'body', property: 'surface.pitch', keyframes: [kf('y', 5000, 3)] }); });
+    ed().adoptKeysIntoBlock('b1');
+    ed().renamePreset('nobody', 'x'); ed().renamePreset('p1', ' '); ed().renamePreset('p1', 'renamed'); ed().setPresetColor('nobody', 'red'); ed().setPresetColor('p1', 'red'); ed().deletePreset('p1');
+    return saved.layers!.length > 0;
+  })()));
+  it('gallery clips: re-pointing to another timeline', check((() => {
+    fresh();
+    const source = defaultProject(); const other = makeTimeline('Other');
+    other.tracks = [{ id: 'g', nodeId: 'body', property: 'surface.yaw', keyframes: [kf('k', 0, 1), kf('k2', 100, 2)] }];
+    source.timelines.push(other);
+    const entry = { id: 'g1', name: 'g', updatedAt: 0, project: source };
+    ed().addClipFrom({ label: 'g', timeline: other, gallerySource: { galleryId: 'g1', timelineId: 'x', timelineName: 'x' } as never });
+    const b = ed().selectedBlockId!;
+    ed().setClipGalleryTimeline(b, entry as never, 'nope');
+    ed().setClipGalleryTimeline('nobody', entry as never, other.id);
+    ed().setClipGalleryTimeline(tl2().blocks[0].id, entry as never, other.id);     // a clip with no gallery source
+    ed().setClipGalleryTimeline(b, entry as never, other.id);
+    return tl2().blocks.some((x) => x.gallerySource?.timelineId === other.id);
+    function tl2() { return activeTimeline(ed().project); }
+  })()));
+  it('adding clips: an index', check((() => { fresh(); const t = defaultProject().timelines[0]; ed().addClipFrom({ label: 'a', timeline: t }, 0); return true; })()));
+  it('tweening a real property', check((() => { fresh(); ed().tweenProperty('body', 'surface.yaw', 20, 100, { type: 'linear' }); return true; })()));
+}
+
+// --- the last few store branches ------------------------------------------------------------------------------
+{
+  const ed = () => useEditor.getState();
+  const fresh = () => { ed().loadProject(defaultProject()); return ed(); };
+  const proj = () => ed().project;
+  const kf = (id: string, time: number, value: unknown = 1) => ({ id, time, value: value as number, easingOut: { type: 'linear' as const } });
+  it('a preset from a timeline with no appearances or emitters records every non-core layer', check((() => {
+    fresh();
+    ed().commit((p) => {
+      const t = activeTimeline(p);
+      t.blocks = []; t.appearances = undefined; t.emitters = undefined;
+      p.rig.nodes.hat = makeShapeLayer('star', { id: 'hat' });
+      t.tracks = [{ id: 'a', nodeId: 'body', property: 'surface.yaw', keyframes: [kf('k', 0), kf('k2', 100, 2)] }];
+    });
+    ed().savePreset('p', ['a'], 100);
+    return proj().presets.at(-1)!.layers!.some((n) => n.id === 'hat');
+  })()));
+  it('deleting a key takes the bounce points generated from it', check((() => {
+    fresh();
+    ed().commit((p) => { const t = activeTimeline(p); t.blocks = []; t.tracks = [{ id: 'a', nodeId: 'body', property: 'surface.yaw', keyframes: [kf('head', 0, 0), kf('tail', 1000, 10)] }]; });
+    ed().setEasing('a', 'head', { type: 'preset', name: 'bounce' });
+    const baked = activeTimeline(proj()).tracks[0].keyframes.length > 2;
+    ed().deleteKeyframes([{ trackId: 'a', kfId: 'head' }]);
+    return baked && activeTimeline(proj()).tracks[0].keyframes.length === 1;
+  })()));
+  it('curves on layers that are not curves', check((() => {
+    fresh();
+    ed().commit((p) => { p.rig.nodes.plain = makeShapeLayer('star', { id: 'plain' }); });
+    ed().editCurve('eyeL', (c) => c);
+    ed().setCurveType('eyeL', 'smooth');
+    ed().editCurve('plain', (c) => c);
+    ed().setCurveType('plain', 'smooth');
+    ed().setCurveType('plain', 'bezier');
+    return true;
+  })()));
+  it('deleting the active state when there is no machine; returning with nowhere to go', check((() => {
+    fresh();
+    ed().returnToPreviousState();
+    ed().addTimeline('Two');
+    ed().commit((p) => { p.stateMachine = undefined; });
+    ed().deleteTimeline(proj().activeTimelineId);
+    return proj().stateMachine === undefined;
+  })()));
+  it('retyping an input rewrites only its own conditions', check((() => {
+    fresh(); ed().addTimeline('Two');
+    const [a, b] = proj().timelines.map((t) => t.id);
+    ed().addInput({ name: 'one', type: 'Numeric' }); ed().addInput({ name: 'two', type: 'Numeric' });
+    ed().addStateTransition(a, b, [{ input: 'two', operator: 'Equal', value: 1 }, { input: 'one', operator: 'Equal', value: 1 }]);
+    ed().updateInput('one', { type: 'Boolean' });
+    ed().updateInput('two', { type: 'Boolean', value: true });
+    return proj().stateMachine!.inputs.find((i) => i.name === 'one')!.value === false;
+  })()));
+  it('morphing between poses that agree on a value leaves it alone', check((() => {
+    fresh();
+    ed().captureExpression('a'); ed().captureExpression('b');
+    ed().commit((p) => { p.expressions.at(-1)!.snapshot['body.surface.yaw'] = 33; });
+    ed().morphBetween(proj().expressions.at(-2)!.id, proj().expressions.at(-1)!.id, 0, 100, { type: 'linear' });
+    return true;
+  })()));
 }

@@ -97,3 +97,8 @@ it('takes a hop count, a list of addresses, or nothing at all', () => {
   }
   expect(parse().success).toBe(true);   // absent is fine: no proxy in development
 });
+
+it('only accepts a redis:// or rediss:// url', () => {
+  expect(parse({ REDIS_URL: 'redis://localhost:6379' }).success).toBe(true);
+  expect(parse({ REDIS_URL: 'http://localhost' }).success).toBe(false);
+});

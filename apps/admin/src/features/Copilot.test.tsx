@@ -124,3 +124,20 @@ it('reports a failed change instead of pretending it worked', async () => {
   await userEvent.click(screen.getByRole('button', { name: /add key/i }));
   expect(await screen.findByText(/Ollama rejected that key/)).toBeInTheDocument();
 });
+
+it('shows a pool that fails to load, and a key with no label', async () => {
+  copilot.mockRejectedValueOnce(new Error('pool down'));
+  const { unmount } = render(<Copilot />);
+  expect(await screen.findByText(/pool down/)).toBeInTheDocument();
+  unmount();
+  copilot.mockResolvedValue({ allowUserKeys: true, keys: [key({ label: '' })] });
+  render(<Copilot />);
+  expect(await screen.findByText('—')).toBeInTheDocument();
+});
+
+it('names a refusal that is not an Error', async () => {
+  removeCopilotKey.mockRejectedValue('x');
+  render(<Copilot />);
+  await userEvent.click(await screen.findByRole('button', { name: /remove/i }));
+  expect(await screen.findByText('That did not work.')).toBeInTheDocument();
+});

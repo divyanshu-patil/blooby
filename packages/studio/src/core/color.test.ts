@@ -1,6 +1,6 @@
 import { it } from 'vitest';
 import { check } from './testkit';
-import { hsvToRgb, lerpColor, oklchToRgb, parseHex, PASTELS, readHex, rgbToHsv, rgbToOklch } from './color';
+import { hexColor, hsvToRgb, lerpColor, oklchToRgb, parseHex, PASTELS, readHex, rgbToHsv, rgbToOklch } from './color';
 
 // --- colour --------------------------------------------------------------------
 for (const c of [{ r: 255, g: 0, b: 0, a: 1 }, { r: 12, g: 200, b: 90, a: 1 }, { r: 255, g: 255, b: 255, a: 1 }, { r: 0, g: 0, b: 0, a: 1 }]) {
@@ -27,4 +27,12 @@ it('lerp t=0 is exact', check(lerpColor({ r: 20, g: 30, b: 40, a: 1 }, { r: 200,
   it('rgb → hsv → rgb returns the same colour', check(back.every(([a, b]) => a.r === b.r && a.g === b.g && a.b === b.b), JSON.stringify(back)));
   it('pure red is hue 0, fully saturated and bright', check((() => { const v = rgbToHsv({ r: 255, g: 0, b: 0, a: 1 }); return v.h === 0 && v.s === 1 && v.v === 1; })()));
   it('there are pastel presets', check(PASTELS.length >= 12 && PASTELS.every((c) => c.r > 150 && c.g > 150 && c.b > 150)));
+}
+
+{
+  it('hex is two digits a channel', check(hexColor({ r: 255, g: 0, b: 10, a: 1 }) === '#ff000a'));
+  it('hue is found whichever channel is the largest', check(
+    Math.round(rgbToHsv({ r: 0, g: 255, b: 0, a: 1 }).h) === 120 && Math.round(rgbToHsv({ r: 0, g: 0, b: 255, a: 1 }).h) === 240
+    && Math.round(rgbToHsv({ r: 255, g: 0, b: 0, a: 1 }).h) === 0 && rgbToHsv({ r: 9, g: 9, b: 9, a: 1 }).h === 0,
+  ));
 }

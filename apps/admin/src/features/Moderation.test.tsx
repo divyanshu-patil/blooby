@@ -128,3 +128,43 @@ it('keeps the dialog open and reports why when moderation fails', async () => {
   expect(await screen.findByText(/already reviewed/)).toBeInTheDocument();
   expect(screen.getByRole('dialog')).toBeInTheDocument();
 });
+
+it('shows a queue that fails to load, and an empty queue other than pending', async () => {
+  moderationQueue.mockRejectedValueOnce(new Error('queue down'));
+  const { unmount } = render(<Moderation />);
+  expect(await screen.findByText(/queue down/)).toBeInTheDocument();
+  unmount();
+  moderationQueue.mockResolvedValue({ items: [], nextCursor: null });
+  render(<Moderation />);
+  expect(await screen.findByText('Nothing waiting')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Rejected' }));
+  expect(await screen.findByText('Nothing here')).toBeInTheDocument();
+});
+
+it('opens a submission from the keyboard, and shows a missing description', async () => {
+  moderationQueue.mockResolvedValue({ items: [preset({ description: null })], nextCursor: null });
+  render(<Moderation />);
+  const card = (await screen.findByText('Wave')).closest('.card') as HTMLElement;
+  card.focus();
+  await userEvent.keyboard('a');
+  await userEvent.keyboard('{Enter}');
+  expect(await screen.findByText('No description was submitted.')).toBeInTheDocument();
+});
+
+it('unpublishes a published item, and names a refusal that is not an Error', async () => {
+  moderationQueue.mockResolvedValue({ items: [preset({ status: 'published' })], nextCursor: null });
+  moderate.mockRejectedValueOnce('x');
+  render(<Moderation />);
+  await userEvent.click(await screen.findByText('Wave'));
+  await userEvent.click(await screen.findByRole('button', { name: 'Unpublish' }));
+  expect(await screen.findByText('Could not apply that.')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Unpublish' }));
+  await waitFor(() => expect(moderate).toHaveBeenLastCalledWith('a1', { action: 'unpublish' }));
+});
+
+it('closes the review dialog without acting', async () => {
+  await openReview();
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(moderate).not.toHaveBeenCalled();
+});

@@ -297,3 +297,64 @@ const v4Hidden = (visible: boolean) => JSON.parse(JSON.stringify({
   it('a range inside the timeline keeps its numbers', check(byId('part').startMs === 500 && byId('part').endMs === 1200));
   it('and a clip-long range is open-ended within its clip', check(byId('clip').startMs === undefined && byId('clip').endMs === undefined, JSON.stringify(byId('clip'))));
 }
+
+// --- steps on the shapes of file nobody makes any more ------------------------------------------
+{
+  // hand-written at a given version, so only the steps after it run
+  const at = (schemaVersion: number, extra: Record<string, unknown> = {}) => JSON.parse(JSON.stringify({
+    schemaVersion, name: 'old', rig: defaultProject().rig, presets: [], expressions: [], timelines: [], ...extra,
+  })) as unknown as Project;
+  const track = (nodeId: string, property: string) => ({ id: nodeId + property, nodeId, property, keyframes: [] });
+
+  // 3: stale offsets of mapped layers go, wherever they are, whatever else the file lacks
+  const rig = defaultProject().rig;
+  const mappedId = Object.values(rig.nodes).find((n) => n.surface?.mapped)!.id;
+  const f3 = at(2, {
+    timelines: [null, { id: 'empty' }, { id: 'tl', tracks: [track(mappedId, 'flatOffset.x'), track(mappedId, 'transform.rotation')] }],
+    presets: [null, { id: 'bare' }, { id: 'pr', tracks: [track(mappedId, 'flatOffset.y')] }],
+  });
+  const m3 = migrateProject(f3).project;
+  it('stale offsets are dropped from timelines and presets; ragged entries survive', check(
+    m3.timelines[2].tracks.length === 1 && m3.timelines[2].tracks[0].property === 'transform.rotation'
+    && m3.presets.find((x) => x.id === 'pr')!.tracks.length === 0 && m3.presets.some((x) => x.id === 'bare'),
+  ));
+
+  // 5: a hidden body with and without a stroke; a template that is not a list of nodes
+  const hidden = (stroke: boolean) => {
+    const r = defaultProject().rig;
+    r.nodes[r.rootId].visible = false;
+    if (!stroke) delete r.nodes[r.rootId].stroke; else r.nodes[r.rootId].stroke = { color: { r: 0, g: 0, b: 0, a: 1 }, width: 2, enabled: true } as never;
+    return r;
+  };
+  const h1 = migrateProject(at(4, { rig: hidden(true) })).project.rig;
+  const h2 = migrateProject(at(4, { rig: hidden(false), mascotTemplates: [{ id: 't', name: 't' }, null] })).project;
+  it('a hidden body stays unpainted whether or not it had a stroke', check(h1.nodes[h1.rootId].visible === true && h1.nodes[h1.rootId].stroke!.enabled === false && h2.rig.nodes[h2.rig.rootId].fill!.enabled === false));
+  it('a template without nodes is left alone', check(h2.mascotTemplates!.length === 2));
+
+  // 9, 10, 12: preset steps on a library with none of the built-ins in it
+  const empty = migrateProject(at(8, { presets: [] })).project;
+  it('the cinematic, kit and character presets are appended to an empty library', check(empty.presets.length > 30));
+
+  // 11: the active timeline is the first when the id names nothing
+  const tls = [{ id: 'a', name: 'a', tracks: [], blocks: [], modifiers: [] }, { id: 'b', name: 'b', tracks: [], blocks: [], modifiers: [] }];
+  const m11 = migrateProject(at(10, { timelines: tls, activeTimelineId: 'nope' })).project;
+  it('the first timeline is active when none is named; the others get their own layers', check(!m11.timelines[0].rig && !!m11.timelines[1].rig));
+
+  // 16: ranges on clips that are not there, or on a file with no durations
+  const m16 = migrateProject(at(15, {
+    timelines: [{ id: 'a', name: 'a', tracks: [], modifiers: [], blocks: 'none', appearances: [null, { id: 'x', blockId: 'gone', startMs: 0, endMs: 100 }, { id: 'y', startMs: 0, endMs: 100 }, { id: 'z', startMs: 0, endMs: 100 }], timelineDurationMs: 100 }],
+  })).project;
+  it('a range on a missing clip is left as it is; one on the timeline is opened', check(m16.timelines[0].appearances![1].endMs === 100 && m16.timelines[0].appearances![2].endMs === undefined));
+  it('timelines that are not a list are ignored', check(migrateProject(at(15, { timelines: 'x' })).applied.length === 1));
+}
+{
+  const base = (schemaVersion: number, extra: Record<string, unknown> = {}) => JSON.parse(JSON.stringify({ schemaVersion, name: 'old', rig: defaultProject().rig, ...extra })) as unknown as Project;
+  const bare = migrateProject(base(2)).project;
+  it('a file with no timelines and no presets at step 3 still migrates', check(bare.schemaVersion === SCHEMA_VERSION && bare.composition!.width === 720));
+  const body = { ...defaultProject().rig.nodes.body };
+  const eye = { ...defaultProject().rig.nodes.eyeL, parentId: 'body' };
+  delete (body as { role?: string }).role;
+  const tpl = migrateProject(base(5, { presets: [], mascotTemplates: [{ id: 't', name: 't', nodes: [null, body, eye] }] })).project;
+  it('a saved mascot template gets its face', check(tpl.mascotTemplates![0].nodes.some((n) => n.role === 'face')));
+  it('text and app presets are appended to an empty library at step 8', check(migrateProject(base(7, { presets: [] })).project.presets.length > 20));
+}

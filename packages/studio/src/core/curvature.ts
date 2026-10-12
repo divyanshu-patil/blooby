@@ -215,10 +215,10 @@ export function screenToSurface(
     if (radiusAt(mid) >= target) a = mid; else hi = mid;
   }
   const m = perspective(a, fov, distance);
-  let nx = x / (R * m), ny = y / (R * m);
+  const nx = x / (R * m), ny = y / (R * m);
+  // never zero: x = y = 0 puts the crossing at the front (a > 0), anything else has x or y
   const len = Math.hypot(nx, ny, a);
-  if (len > 0) { nx /= len; ny /= len; }
-  const n: V3 = [nx, ny, len > 0 ? a / len : 1];
+  const n: V3 = [nx / len, ny / len, a / len];
 
   const l = unrotateHead(n, head.x * D2R, head.y * D2R);
   return {

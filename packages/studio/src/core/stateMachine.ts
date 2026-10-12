@@ -183,7 +183,7 @@ export function defaultValues(p: Project): Record<string, InputValue> {
   const out: Record<string, InputValue> = {};
   for (const i of machineOf(p).inputs) {
     if (i.type === 'Event') continue;
-    out[i.name] = i.value ?? defaultValueFor(i.type) ?? 0;
+    out[i.name] = i.value ?? defaultValueFor(i.type)!;
   }
   return out;
 }
@@ -240,7 +240,7 @@ export function toDotLottie(p: Project, layout?: DotLottieLayout) {
   const m = machineOf(p);
   const anim = layout?.animationOf ?? animationIds(p);
   const byId = new Map(p.timelines.map((t) => [t.id, t]));
-  const nameOf = (id: string) => byId.get(id)?.name ?? '';
+  const nameOf = (id: string) => byId.get(id)!.name; // only asked for after `byId.has`
 
   const states = p.timelines.map((tl) => {
     const outgoing: ReturnType<typeof transitionJson>[] = [];

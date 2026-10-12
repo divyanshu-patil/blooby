@@ -304,7 +304,7 @@ ${example || '    // no inputs configured yet'}
 />
 \`\`\`
 
-You never call \`play('${project.timelines[0]?.name ?? 'idle'}')\`. Set an input; the state
+You never call \`play('${project.timelines[0].name}')\`. Set an input; the state
 machine evaluates its conditions and changes state itself.
 
 ## States

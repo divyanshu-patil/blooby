@@ -1,6 +1,9 @@
 import { it } from 'vitest';
 import { check, near, rig } from './testkit';
-import { buildScene, evaluateRig, lerpAngle, resolveTracks, sampleTrack, sceneAt, valueAt } from './scene';
+import { activeTrackFor, appearanceSpans, composeScene, emitterFrame, emitterItems, emitterPathAt, fromFrame, pinned, blockSampleTime, buildScene, effectAt, evaluateRig, evaluateWithTransition, lerpAngle, lerpValue, resolveTracks, sampleTrack, sceneAt, valueAt } from './scene';
+import { makeGroup, makeLimb, makeShapeLayer, makeTextLayer } from './layers';
+import { makeTimeline } from './defaults';
+import type { Modifier } from './types';
 import { confetti, defaultProject, defaultRig } from './defaults';
 import { relayoutBlocks } from './timeline';
 import { useEditor } from './store';
@@ -450,3 +453,305 @@ it('eyes are mirrored', check(near(scene[1].cx + scene[2].cx, 600, 1e-6), `${sce
   }
   it('valueAt reads what evaluateRig draws, every animated property of a 50-layer loop', check(keys.length > 100 && off.length === 0, off.slice(0, 5).join(', ')));
 }
+
+// --- lerp fallbacks, angle seam, sealed clips -------------------------------------------------
+{
+  const col = { r: 0, g: 0, b: 0, a: 1 }, vec = { x: 0, y: 0 };
+  it('mixed kinds keep the first', check(lerpValue(5, 'x', 0.5) === 5 && lerpValue(col, 5, 0.5) === col && lerpValue(vec, 5, 0.5) === vec && lerpValue(col, vec, 0.5) === col));
+  it('vectors lerp', check((lerpValue(vec, { x: 2, y: 4 }, 0.5) as { x: number }).x === 1));
+  it('angle takes the short way round the other seam', check(near(lerpAngle(0, 270, 1), -90)));
+  // two other lanes both running over this layer's clip: the first one lends its track, the second is not needed
+  const tl = makeTimeline('t');
+  tl.blocks = [{ id: 'a', presetId: 'p', name: 'a', durationMs: 1000 }, { id: 'b', presetId: 'p', name: 'b', durationMs: 1000, mascotId: 'm2' }, { id: 'c', presetId: 'p', name: 'c', durationMs: 1000, mascotId: 'm3' }];
+  const tk = (id: string, blockId: string) => ({ id, nodeId: 'n', property: 'surface.yaw', blockId, keyframes: [{ id: `${id}k`, time: 0, value: 1, easingOut: { type: 'linear' as const } }] });
+  tl.tracks = [tk('tA', 'a'), tk('tB', 'b'), tk('tC', 'c')];
+  it('inside its own clip wins; otherwise the first lender', check(activeTrackFor(tl, 'n', 'surface.yaw', 500)?.id === 'tA'));
+  const [tA, tB, tC] = [tk('tA', 'a'), tk('tB', 'b'), tk('tC', 'c')];
+  it('the first lender is kept over the second, but the own clip still wins', check(activeTrackFor(tl, 'n', 'surface.yaw', 500, undefined, [tB, tC, tA], [tA])?.id === 'tA'));
+  tl.tracks = [tk('tB', 'b'), tk('tC', 'c')];
+  it('a node with no clip of its own borrows from one running now', check(activeTrackFor(tl, 'n', 'surface.yaw', 500)?.id === 'tB'));
+}
+
+// --- every modifier kind, on the root and on a mapped feature, with and without a phase ------
+{
+  const run = (mods: Partial<Modifier>[], patch?: (p: ReturnType<typeof defaultProject>) => void, at = 700) => {
+    const p = defaultProject();
+    activeTimeline(p).modifiers = mods.map((m, i) => ({ id: `m${i}`, nodeId: 'body', kind: 'shake', amount: 100, frequency: 2, amplitude: 20, ...m }) as Modifier);
+    patch?.(p);
+    return evaluateRig(p, at);
+  };
+  const base = evaluateRig(defaultProject(), 700);
+  const kinds = ['shake', 'float', 'pendulum', 'bounce', 'breathe', 'orbit', 'heartbeat', 'stretch'] as const;
+  for (const kind of kinds) for (const nodeId of ['body', 'eyeL']) for (const phase of [undefined, 1]) {
+    const r = run([{ kind, nodeId, phase }]);
+    it(`${kind} on ${nodeId}${phase ? ' with a phase' : ''} moves something`, check(JSON.stringify(r.nodes[nodeId]) !== JSON.stringify(base.nodes[nodeId])));
+  }
+  for (const axis of ['rotation', 'x', 'y', 'yaw', 'pitch'] as const)
+    it(`pendulum on ${axis}`, check(JSON.stringify(run([{ kind: 'pendulum', axis }]).nodes.body) !== JSON.stringify(base.nodes.body)));
+  it('a modifier with no gain does nothing', check(JSON.stringify(run([{ amplitude: 0 }]).nodes.body) === JSON.stringify(base.nodes.body)));
+  it('a modifier on a missing layer does nothing', check(run([{ nodeId: 'ghost' }]) !== undefined));
+  for (const kind of ['shake', 'float', 'pendulum', 'bounce'] as const)
+    it(`the camera ${kind}s`, check((() => { const r = run([{ nodeId: '__camera', kind, phase: kind === 'float' ? 1 : undefined, seed: kind === 'shake' ? 3 : undefined }]); return kind === 'bounce' ? r.camera.offset.y === 0 : r.camera.offset.x !== 0 || r.camera.offset.y !== 0; })()));
+  it('follow and jelly on a face', check(run([{ kind: 'follow', nodeId: 'face' }, { kind: 'jelly', nodeId: 'body' }], (p) => {
+    activeTimeline(p).tracks.push({ id: 'tk', nodeId: 'body', property: 'flatOffset.y', keyframes: [{ id: 'a', time: 0, value: 0, easingOut: { type: 'linear' } }, { id: 'b', time: 500, value: -200, easingOut: { type: 'linear' } }, { id: 'c', time: 600, value: 0, easingOut: { type: 'linear' } }] });
+  }) !== undefined));
+}
+
+// --- walk, follow and jelly on unusual rigs -----------------------------------------------------
+{
+  const proj = (mods: Partial<Modifier>[], patch?: (p: ReturnType<typeof defaultProject>) => void) => {
+    const p = defaultProject();
+    activeTimeline(p).modifiers = mods.map((m, i) => ({ id: `w${i}`, nodeId: 'body', kind: 'walk', amount: 100, frequency: 2, amplitude: 60, ...m }) as Modifier);
+    patch?.(p);
+    return p;
+  };
+  const addLimbs = (p: ReturnType<typeof defaultProject>) => {
+    const arm = makeLimb('arm', -1, 'body', { id: 'armNoRole', role: undefined });
+    const armC = makeLimb('arm', 1, 'body', { id: 'armC' });
+    armC.limb!.c = { x: 230, y: 130 };
+    const leg2 = makeLimb('leg', 1, 'body', { id: 'legNoC' });
+    delete leg2.limb!.c; delete leg2.limb!.foot; leg2.limb!.a = { x: 0, y: 112 };
+    const leg4 = makeLimb('leg', 1, 'body', { id: 'legZ' }); leg4.limb!.a = { x: 0, y: 112 }; p.rig.nodes.legZ = leg4;
+    const leg3 = makeLimb('leg', -1, 'body', { id: 'legFull' });
+    const world = makeLimb('arm', 1, null, { id: 'armWorld' });
+    for (const n of [arm, armC, leg2, leg3, world]) p.rig.nodes[n.id] = n;
+  };
+  it('a walk with every limb shape, forward and backward, at several steps', check([-1, 1].every((dir) => [100, 330, 700, 1000].every((t) => {
+    const p = proj([{ amplitude: 60 * dir }], addLimbs);
+    const r = evaluateRig(p, t);
+    return Number.isFinite(r.nodes.legFull.limb!.c!.x) && Number.isFinite(r.nodes.armC.limb!.c!.x) && Number.isFinite(r.nodes.legNoC.limb!.b.x);
+  }))));
+  it('a walk on a body and face with no offset yet, and a finished walk', check((() => {
+    const p = proj([{ endMs: 400, holdUntilMs: 2000 }, { id: 'later', endMs: 300, startMs: 100, kind: 'walk' }], (q) => { delete q.rig.nodes.body.surface.flatOffset; delete q.rig.nodes.face.surface.flatOffset; });
+    return [200, 900, 1500, 2500].every((t) => Number.isFinite(evaluateRig(p, t).nodes.body.surface.flatOffset!.x));
+  })()));
+  it('a walk with no face yaws its mapped children', check((() => {
+    const p = proj([{}], (q) => { delete q.rig.nodes.face; q.rig.nodes.eyeL.parentId = 'body'; q.rig.nodes.eyeR.parentId = 'body'; });
+    return evaluateRig(p, 400).nodes.eyeL.surface.yaw !== p.rig.nodes.eyeL.surface.yaw;
+  })()));
+  it('a walk held to a clip window leaves it', check((() => {
+    const p = proj([{ blockId: 'b1', endMs: 300, holdUntilMs: 800 }], (q) => { activeTimeline(q).blocks = [{ id: 'b1', presetId: 'x', name: 'b', durationMs: 1000 }, { id: 'b2', presetId: 'x', name: 'c', durationMs: 1000 }]; });
+    return [500, 900, 1200].every((t) => evaluateRig(p, t) !== undefined);
+  })()));
+  it('follow-through on a limb, a world layer, a group child and a free node', check((() => {
+    const p = proj([
+      { kind: 'follow', nodeId: 'armC', amplitude: 100 }, { kind: 'follow', nodeId: 'legNoC', amplitude: 100 },
+      { kind: 'follow', nodeId: 'armWorld', amplitude: 100 }, { kind: 'follow', nodeId: 'eyeL', amplitude: 100 }, { kind: 'follow', nodeId: 'grpChild', amplitude: 100 },
+    ], (q) => {
+      addLimbs(q);
+      q.rig.nodes.armC.limb!.c = { x: 230, y: 130 };
+      q.rig.nodes.grp = { ...q.rig.nodes.eyeL, id: 'grp', kind: 'group', parentId: null, surface: { yaw: 0, pitch: 0, mapped: false } };
+      q.rig.nodes.grpChild = { ...q.rig.nodes.eyeL, id: 'grpChild', parentId: 'grp', surface: { yaw: 0, pitch: 0, mapped: false, flatOffset: { x: 1, y: 1 } } };
+      activeTimeline(q).blocks = [];
+      activeTimeline(q).tracks.push({ id: 'mv', nodeId: 'body', property: 'flatOffset.x', keyframes: [{ id: 'a', time: 0, value: 0, easingOut: { type: 'linear' } }, { id: 'b', time: 400, value: 80, easingOut: { type: 'linear' } }] });
+    });
+    return Number.isFinite(evaluateRig(p, 300).nodes.armC.limb!.c!.x);
+  })()));
+  it('a follow on a missing layer or a free one is quiet', check((() => {
+    const p = proj([{ kind: 'follow', nodeId: 'orphan' }], (q) => { q.rig.nodes.orphan = { ...q.rig.nodes.eyeL, id: 'orphan', parentId: null, surface: { yaw: 0, pitch: 0, mapped: false } }; });
+    return evaluateRig(p, 300) !== undefined;
+  })()));
+  it('letters facing their way, with a mover on the text layer', check((() => {
+    const text = makeTextLayer('go', { id: 'txt' });
+    text.text!.charOrient = true;
+    text.text!.charOffsets = { 0: {}, 1: {}, 2: {}, 3: {} };
+    const key = (prop: string, v1: number) => ({ id: `t${prop}`, nodeId: 'txt', property: prop, keyframes: [{ id: `${prop}a`, time: 0, value: 0, easingOut: { type: 'linear' as const } }, { id: `${prop}b`, time: 1000, value: v1, easingOut: { type: 'linear' as const } }] });
+    const p = proj([{ kind: 'float', nodeId: 'txt' }], (q) => {
+      q.rig.nodes.txt = text; activeTimeline(q).blocks = [];
+      activeTimeline(q).tracks.push(key('text.char.0.x', -300), key('text.char.0.y', 60), key('text.char.1.x', -300), key('text.char.1.y', -60), key('text.char.2.x', 300), key('text.char.2.y', 10));
+    });
+    const r = evaluateRig(p, 500);
+    return r.nodes.txt.text!.charOffsets![0].rotation !== undefined && r.nodes.txt.text!.charOffsets![1].rotation !== undefined;
+  })()));
+}
+
+// --- looping timelines, block time, effect tracks, appearances, links, blends --------------------
+{
+  const loopProject = (patch: (p: ReturnType<typeof defaultProject>, tl: ReturnType<typeof activeTimeline>) => void) => {
+    const p = defaultProject(); const tl = activeTimeline(p);
+    tl.loop = true; tl.timelineDurationMs = 1000;
+    patch(p, tl);
+    return p;
+  };
+  const kfs = (...pairs: [number, number | string][]) => pairs.map(([time, value], i) => ({ id: `k${i}${time}`, time, value, easingOut: { type: 'linear' as const } }));
+  it('a track that already ends at the end is not closed again', check(resolveTracks(loopProject((_p, tl) => {
+    tl.blocks = [{ id: 'b1', presetId: 'x', name: 'a', durationMs: 1000 }];
+    tl.tracks = [{ id: 't', nodeId: 'body', property: 'surface.yaw', blockId: 'b1', keyframes: kfs([0, 0], [1000, 10]) }, { id: 't2', nodeId: 'body', property: 'surface.pitch', blockId: 'b1', keyframes: kfs([0, 0]) }];
+  })).length === 2));
+  it('nothing to hang the close on: no base value, or the last clip starts at the end', check((() => {
+    const p = loopProject((_p, tl) => {
+      tl.blocks = [{ id: 'b1', presetId: 'x', name: 'a', durationMs: 1000 }, { id: 'b2', presetId: 'x', name: 'b', durationMs: 0 }];
+      tl.tracks = [{ id: 't', nodeId: 'body', property: 'surface.yaw', blockId: 'b1', keyframes: kfs([0, 0], [500, 10]) }];
+    });
+    const q = loopProject((_p, tl) => {
+      tl.blocks = [{ id: 'b1', presetId: 'x', name: 'a', durationMs: 500 }, { id: 'b2', presetId: 'x', name: 'b', durationMs: 500 }];
+      tl.tracks = [{ id: 't', nodeId: 'body', property: 'shape.path', blockId: 'b1', keyframes: kfs([0, 'M0 0'], [200, 'M1 1']) }];
+    });
+    return resolveTracks(p).length === 1 && resolveTracks(q).length === 1;
+  })()));
+  it('block time: unknown block, looping zero-length block', check((() => {
+    const p = defaultProject(); const tl = activeTimeline(p);
+    tl.blocks = [{ id: 'z', presetId: 'nope', name: 'z', durationMs: 0, loop: true }];
+    return blockSampleTime(p, tl, 'missing', 123) === 123 && blockSampleTime(p, tl, 'z', 50) === 50;
+  })()));
+  it('effect tracks inside a clip; a non-number value is skipped', check((() => {
+    const p = defaultProject(); const tl = activeTimeline(p);
+    tl.blocks = [{ id: 'b1', presetId: 'x', name: 'a', durationMs: 1000 }];
+    tl.tracks = [
+      { id: 'e1', nodeId: 'fxid', property: 'fx.amount', blockId: 'b1', keyframes: kfs([0, 5]) },
+      { id: 'e2', nodeId: 'fxid', property: 'fx.speed', keyframes: kfs([0, 'str']) },
+    ];
+    const m = { id: 'fxid', amount: 1, frequency: 1, amplitude: 1 };
+    return (effectAt(p, tl, m, 100) as { amount: number }).amount === 5;
+  })()));
+  it('linked eyes mirror their source; a dead link is ignored', check((() => {
+    const p = defaultProject();
+    p.rig.nodes.eyeR.eye!.linkedToId = 'eyeL';
+    p.rig.nodes.eyeL.eye!.distanceFromCenter = 5;
+    p.rig.nodes.body.eye = { openness: 1, distanceFromCenter: 0, linkedToId: 'ghost' } as never;
+    const r = evaluateRig(p, 0);
+    return r.nodes.eyeR.eye!.distanceFromCenter === -5;
+  })()));
+  it('appearance spans know their clip', check((() => {
+    const p = defaultProject(); const tl = activeTimeline(p);
+    tl.blocks = [{ id: 'b1', presetId: 'x', name: 'a', durationMs: 1000 }];
+    tl.appearances = [{ id: 'ap', nodeId: 'eyeL', blockId: 'b1', startMs: 100, endMs: 400 }, { id: 'ap2', nodeId: 'eyeL' }];
+    const s = appearanceSpans(tl, 'eyeL');
+    return s.length === 2 && s[0].from === 100 && s[1].to === tl.timelineDurationMs;
+  })()));
+  it('a state switch blends the live pose', check((() => {
+    const p = defaultProject();
+    const from = evaluateRig(p, 0);
+    return evaluateWithTransition(p, 0, from, 2, { type: 'linear' }).rootId === 'body';
+  })()));
+  it('blends: a layer with no colour, strokes on one side, a lane that leaves the view alone', check((() => {
+    const p = defaultProject(); const tl = activeTimeline(p);
+    p.rig.nodes.eyeL.stroke = { enabled: true, color: { r: 1, g: 2, b: 3, a: 1 } };
+    p.rig.nodes.eyeR.stroke = { enabled: true, color: { r: 9, g: 9, b: 9, a: 1 } };
+    delete (p.rig.nodes.face as { color?: unknown }).color;
+    const from = evaluateRig(p, 0);
+    p.rig.nodes.eyeL.stroke = undefined;
+    p.rig.nodes.eyeR.stroke = { enabled: true, color: undefined } as never;
+    const bare = defaultProject(); bare.rig.nodes.eyeL.stroke = undefined; bare.rig.nodes.eyeR.stroke = { enabled: true, color: { r: 9, g: 9, b: 9, a: 1 } };
+    p.rig.nodes.eyeL.stroke = { enabled: true, color: { r: 1, g: 2, b: 3, a: 1 } };
+    evaluateWithTransition(p, 0, evaluateRig(bare, 0), 0.5, { type: 'linear' });
+    p.rig.nodes.eyeL.stroke = undefined;
+    tl.blocks = [{ id: 'a', presetId: 'x', name: 'a', durationMs: 1000 }, { id: 'b', presetId: 'x', name: 'b', durationMs: 1000, mascotId: 'm2' }, { id: 'c', presetId: 'x', name: 'c', durationMs: 1000, mascotId: 'm2' }];
+    return evaluateWithTransition(p, 0, from, 0.5, { type: 'linear' }) !== undefined && evaluateRig(p, 1050) !== undefined;
+  })()));
+}
+
+// --- buildScene: optional params, odd layers, text layout, masks ----------------------------------
+{
+  const view = { width: 720, height: 720 };
+  const fx = (kind: string, params: Record<string, number> = {}) => ({ kind, params }) as never;
+  const prim = (id: string, over: Record<string, unknown> = {}) => ({ ...makeShapeLayer('circle', { id }), parentId: null, ...over }) as RigNode;
+  const build = (patch: (r: Rig) => void) => { const r = defaultRig(); patch(r); return buildScene(r, view); };
+  it('an empty rig draws nothing', check(buildScene({ ...defaultRig(), nodes: {} }, view).length === 0));
+  it('effects with no params fall back to their defaults', check(build((r) => {
+    r.clockMs = 400;
+    r.nodes.body.effects = [fx('flicker'), fx('goo'), fx('wave', { amount: 4 }), fx('jitter', { amount: 4 })];
+    r.nodes.body.size.y = 0;
+    r.nodes.eyeL.effects = [fx('flicker')];
+    r.nodes.a = prim('a', { effects: [fx('wave', { amount: 3 }), fx('jitter', { amount: 3 }), fx('goo')], mask: { nodeId: 'ghost' }, guide: true, shapePath: undefined, primitive: { shape: 'circle' } });
+    r.nodes.b = prim('b', { shapePath: 'M-0.5 -0.5 L0.5 -0.5 L0.5 0.5 Z', trim: { start: 0.1, end: 0.9 }, stroke: { enabled: true, taper: 0.5 } });
+    r.nodes.c = prim('c', { shapePath: 'M-0.5 -0.5 L0.5 -0.5 L0.5 0.5 Z' });
+    r.nodes.d = prim('d', { effects: [fx('wave', { amount: 3 })], shapePath: undefined });
+  }).length > 0));
+  it('strokes without a colour or opacity, with both', check(build((r) => {
+    r.nodes.a = prim('a', { stroke: { enabled: true } });
+    r.nodes.b = prim('b', { stroke: { enabled: true, color: { r: 1, g: 2, b: 3, a: 0.5 }, opacity: 0.5 } });
+  }).filter((i) => i.stroke).length === 2));
+  it('a hidden body is not drawn; a masked body inherits a mask; goo passes down', check((() => {
+    const out = build((r) => {
+      r.nodes.grp = { ...makeGroup(null, { id: 'grp' }), effects: [fx('goo')] } as RigNode;
+      r.nodes.grp2 = { ...makeGroup('grp', { id: 'grp2' }) } as RigNode;
+      r.nodes.grp.mask = { nodeId: 'a' };
+      r.nodes.a = prim('a');
+      r.nodes.body.parentId = 'grp';
+      r.nodes.ghostBody = { ...r.nodes.body, id: 'ghostBody', visible: false, parentId: null } as RigNode;
+      r.nodes.p = prim('p', { parentId: 'grp2' });
+    });
+    return out.some((i) => i.id === 'body') && !out.some((i) => i.id === 'ghostBody');
+  })()));
+  it('a face with some opacity dims its head', check(build((r) => { r.nodes.face.opacity = 0.5; }).some((i) => i.id === 'body')));
+  it('a limb that cannot be drawn is skipped', check((() => {
+    const out = build((r) => { const l = makeLimb('arm', 1, 'body', { id: 'bad' }); l.limb!.thickness = NaN; r.nodes.bad = l; });
+    return !out.some((i) => i.id === 'bad');
+  })()));
+  it('direct frame maths: a collapsed frame, a pin on top of its hip', check((() => {
+    const f = { x: 0, y: 0, rot: 0, kx: 0, ky: 0, cum: 1, R: 0, head: { x: 0, y: 0 }, squash: 1, alpha: 1, parentCum: 1 };
+    const back = fromFrame(f, { x: 5, y: 5 });
+    const l = makeLimb('arm', 1, 'body').limb!;
+    l.a = { x: 0, y: 0 }; l.b = { x: 0, y: 0 }; l.pin = { x: 10, y: 10 };
+    const input = { points: [l.a, l.b], thickness: 1, bend: 0, roundness: 1, taper: 0, hose: 1, length: 5 };
+    const out = pinned(input as never, l, { ...f, kx: 1, ky: 1 });
+    return back.x === 5 && out.points[1].x === 10;
+  })()));
+  const textRig = (style: Record<string, unknown>, over: Record<string, unknown> = {}) => build((r) => { r.nodes.t = makeTextLayer('Hello world', { id: 't', ...over }, style as never); });
+  it('text alignment and width', check((['left', 'center', 'right'] as const).every((align) => (['top', 'middle', 'bottom'] as const).every((valign) => textRig({ align, valign, width: 200 }).some((i) => i.id === 't' && i.glyphs)))));
+  it('a guide text', check(textRig({}, { guide: true }).some((i) => i.id === 't' && i.guide)));
+  it('text on an arc, with and without its ends', check(
+    textRig({ path: { mode: 'arc', radius: 90 } }).some((i) => i.id === 't')
+    && textRig({ path: { mode: 'arc', radius: 90, start: -30, end: 30, reverse: true } }).some((i) => i.id === 't')));
+  it('text on another layer, and a face with no placement is plain', check(
+    build((r) => { r.nodes.c = prim('c'); r.nodes.t = makeTextLayer('go', { id: 't' }, { path: { mode: 'path', nodeId: 'c' } } as never); }).some((i) => i.id === 't')
+    && build((r) => { r.nodes.t = makeTextLayer('go', { id: 't' }, { path: { mode: 'path', nodeId: 'none' } } as never); }).some((i) => i.id === 't')));
+  it('a mask finds its layer, or none', check(build((r) => { r.nodes.a = prim('a', { mask: { nodeId: 'body', invert: true } }); r.nodes.b = prim('b', { mask: { nodeId: 'ghost' } }); }).some((i) => i.id === 'a' && i.clip)));
+}
+
+// --- emitters ------------------------------------------------------------------------------------
+{
+  const view = { width: 720, height: 720 };
+  const mk = (over: Record<string, unknown> = {}) => ({ ...confetti('body'), id: 'em', ...over }) as never;
+  const items = (e: unknown, t = 700, rig = defaultRig()) => {
+    const tl = makeTimeline('x'); tl.emitters = [e as never];
+    return emitterItems(tl, rig, buildScene(rig, view), t, view);
+  };
+  it('no emitters, no particles', check(emitterItems(makeTimeline('x'), defaultRig(), [], 0, view).length === 0));
+  it('a rig with no root measures by 1', check(emitterFrame({ ...defaultRig(), rootId: 'none' }, [], view).unit === 1));
+  it('an arc between the same two points does not divide by zero', check(Number.isFinite(emitterPathAt({ path: 'arc', bow: 5 }, { x: 1, y: 1 }, { x: 1, y: 1 }, 1, 0.5).x)));
+  for (const path of ['arc', 'fall', 'orbit', 'burst'] as const)
+    it(`${path} emitters with bare options`, check(items(mk({ path, speedJitter: undefined, easing: undefined, parts: undefined })).length >= 0));
+  it('orbit radii: none, x only, both', check([{}, { radiusX: 40 }, { radiusX: 40, radiusY: 20, orbitTilt: 30 }].every((r) => items(mk({ path: 'orbit', count: 3, ...r })).length === 3)));
+  it('a burst with the physics left to defaults, and aimed at a layer', check((() => {
+    const bare = items(mk({ path: 'burst', count: 6, lifeMs: 2000, angle: undefined, spread: undefined, velocity: undefined, velocityJitter: undefined, drag: undefined, turbulence: undefined, gravity: undefined, speed: undefined }), 300).length > 0;
+    const attract = (nodeId: string, fill: boolean, startMs = 0) => items(mk({ path: 'burst', count: 6, lifeMs: 2000, attract: { nodeId, fill, startMs, durationMs: 100 } }), 500).length > 0;
+    return bare && attract('eyeL', true) && attract('eyeL', false) && attract('ghost', false) && attract('eyeL', true, 400);
+  })()));
+  it('aiming at a hidden layer builds it as it would be drawn, once', check((() => {
+    const rig = defaultRig(); rig.nodes.eyeL.visible = false;
+    const tl = makeTimeline('x'); tl.emitters = [mk({ path: 'burst', count: 4, lifeMs: 2000, attract: { nodeId: 'eyeL', fill: true, startMs: 0, durationMs: 100 } }), mk({ id: 'em2', path: 'burst', count: 4, lifeMs: 2000, attract: { nodeId: 'eyeL', fill: false, startMs: 0, durationMs: 100 } })];
+    return emitterItems(tl, rig, buildScene(rig, view), 500, view).length > 0;
+  })()));
+  it('aiming at words', check((() => {
+    const rig = defaultRig(); rig.nodes.t = makeTextLayer('hi', { id: 't' });
+    const tl = makeTimeline('x'); tl.emitters = [mk({ path: 'burst', count: 4, lifeMs: 2000, attract: { nodeId: 't', fill: true, startMs: 0, durationMs: 100 } })];
+    return emitterItems(tl, rig, buildScene(rig, view), 500, view).length > 0;
+  })()));
+  it('a zero-length range still enters', check(items(mk({ startMs: 100, endMs: 100 }), 100).length >= 0));
+  it('a collapsed mascot is measured as if whole', check((() => { const rig = defaultRig(); rig.nodes.body.transform.scale = { x: 0.01, y: 0.01 }; return emitterFrame(rig, buildScene(rig, view), view).unit > 0; })()));
+  it('colour ramps, parts and shapes', check(items(mk({ colorTo: { r: 0, g: 0, b: 0, a: 1 }, wobble: 1, wobbleFrequency: 2, parts: [{ glyph: 'x', shapeId: 'a' }, { svgAssetId: 'z', color: { r: 1, g: 1, b: 1 } }] })).length >= 0 && items(mk({ parts: [{ color: { r: 1, g: 1, b: 1 } }] })).length > 0));
+  it('echo trails with default params, and a project through composeScene', check((() => {
+    const p = defaultProject(); const rig = p.rig;
+    rig.nodes.body.effects = [{ kind: 'echo', params: {} } as never];
+    rig.nodes.eyeL.effects = [{ kind: 'echo', params: { count: 2, delay: 20, falloff: 0.5 } } as never];
+    rig.nodes.eyeL.stroke = { enabled: true };
+    return composeScene(p, evaluateRig(p, 500), 500, view).some((i) => i.id.includes('~echo'));
+  })()));
+}
+
+it('a walk in progress on a body with no offset yet', check((() => {
+  const p = defaultProject(); delete p.rig.nodes.body.surface.flatOffset; activeTimeline(p).tracks = [];
+  activeTimeline(p).modifiers = [{ id: 'w', nodeId: 'body', kind: 'walk', amount: 100, frequency: 2, amplitude: 60 }];
+  return Number.isFinite(evaluateRig(p, 400).nodes.body.surface.flatOffset!.x);
+})()));
+
+it('effects a parent hands down merge under the child\'s own', check((() => {
+  const r = defaultRig();
+  r.nodes.g = { ...makeGroup(null, { id: 'g' }), effects: [{ kind: 'blur', params: { radius: 3 } }] } as never;
+  r.nodes.c = { ...makeShapeLayer('star', { id: 'c', parentId: 'g' }), effects: [{ kind: 'blur', params: { radius: 1 } }, { kind: 'rgbSplit', params: { amount: 1 } }] } as never;
+  r.nodes.c2 = makeShapeLayer('star', { id: 'c2', parentId: 'g' });
+  const out = buildScene(r, { width: 720, height: 720 });
+  return out.find((i) => i.id === 'c')!.fx!.list.length === 2 && !!out.find((i) => i.id === 'c2')!.fx;
+})()));

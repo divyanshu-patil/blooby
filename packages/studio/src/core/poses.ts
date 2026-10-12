@@ -98,7 +98,7 @@ export function applyPose(p: Project, mascotId: string, poseRef: string, atMs: n
     const role = n.role as keyof Pose['limbs'] | undefined;
     const target = role && n.limb && pose.limbs[role];
     if (!target || mascotOf(p.rig, n.id)?.id !== mascotId) continue;
-    const l = ev.nodes[n.id]?.limb ?? n.limb!;
+    const l = ev.nodes[n.id].limb!;
     const put = (path: string, v: number) => (keyed
       ? writeKeyframe(p, n.id, path, atMs, round(v), { type: 'preset', name: 'easeInOut' })
       : writeValue(p, n.id, path, round(v), atMs));

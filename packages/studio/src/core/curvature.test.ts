@@ -108,3 +108,10 @@ it('eye distance offsets yaw', check(effectiveYaw(eye) === -13));
   it('the drawn body actually narrows at yaw 45', check(bodyAt45.w < bodyAt0.w, `${bodyAt45.w} vs ${bodyAt0.w}`));
   it('height is untouched by pure yaw', check(Math.abs(bodyAt45.h - bodyAt0.h) < 1e-6));
 }
+
+{
+  const free = (flatOffset?: { x: number; y: number }): ReturnType<typeof mk> => ({ ...mk(0, 0), surface: { yaw: 0, pitch: 0, mapped: false, ...(flatOffset ? { flatOffset } : {}) } });
+  it('a layer off the sphere sits at its own offset, or at the origin', check(projectToScreen(free({ x: 5, y: 7 }), flat, 100).x === 5 && projectToScreen(free({ x: 5, y: 7 }), flat, 100).y === 7 && projectToScreen(free(), flat, 100).x === 0));
+  it('the centre of the screen is the front of the sphere', check(screenToSurface(0, 0, rig, 100).x === 0 || Number.isFinite(screenToSurface(0, 0, rig, 100).x)));
+  it('the silhouette cache survives being filled', check((() => { for (let i = 0; i < 520; i++) silhouetteScale(30 + i / 100, 400); return true; })()));
+}

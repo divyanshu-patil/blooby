@@ -62,3 +62,37 @@ for (const spec of SAILORS_PROJECTS) {
   });
   it(`${spec.name}: every state exports to Lottie with nothing lost`, check(lost.length === 0, lost.join('\n')));
 }
+
+// --- the puppet with and without each of its dials ---------------------------------------------------
+import { framesOf, Motion, puppet, type Puppet } from './sailorsPresets';
+{
+  const at = (x: number, y: number) => () => ({ x, y });
+  const num = (v: number) => () => v;
+  const foot = () => ({ x: 4, y: -3, angle: 10 });
+  const props = (m: Motion) => new Set(m.tracks.map((t) => `${t.nodeId}:${t.property}`));
+  it('a one-key spline is a constant', check(spline([[0, 7]])(123) === 7));
+
+  const full: Puppet = {
+    x: num(1), y: num(2), lean: num(3), squash: num(1.05), widen: num(1.02), headX: num(1), headY: num(1), tilt: num(2), yaw: num(5), pitch: num(4),
+    open: num(1), openL: num(0.5), openR: num(0.4), eyeSX: num(1.1), eyeSY: num(1.2),
+    handL: at(-120, 60), handR: at(120, 60), shoulderL: at(-110, 30), shoulderR: at(110, 30), slackL: 1.2, slackR: 1.1, bendL: num(0.2), bendR: num(-0.2),
+    mittens: 'both', footL: foot, footR: () => ({ x: 1, y: 1 }), plant: num(0.5), scale: 0.8, ground: { x: 5, y: 100 }, prefix: 'f1.',
+  };
+  const a = new Motion(1000); puppet(a, full);
+  it('every dial lands on a track of the prefixed character', check(props(a).has('f1.eyeL:eye.openness') && props(a).has('f1.mittenL:flatOffset.x') && props(a).has('f1.legL:limb.foot.angle') && props(a).has('f1.body:transform.scale.x')));
+  it('a foot with no angle keeps its toe level', check((() => { const t = a.tracks.find((x) => x.nodeId === 'f1.legR' && x.property === 'limb.foot.angle')!; return t.keyframes.every((k) => k.value === 0); })()));
+
+  const bare = new Motion(1000); puppet(bare, { mittens: 'both' });
+  it('a puppet with no dials rests: eyes open, hands at rest, no foot angles', check(props(bare).has('eyeR:eye.openness') && props(bare).has('mittenR:flatOffset.x') && !props(bare).has('legL:limb.foot.angle')));
+  const lone = new Motion(1000); puppet(lone, { mittens: 'L', arcs: 'happy', arcSY: num(0.8) });
+  const loneR = new Motion(1000); puppet(loneR, { mittens: 'R', arcs: 'sad', front: true });
+  it('one mitten, happy arcs, sad arcs, arms in front', check(props(lone).has('mittenL:flatOffset.x') && !props(lone).has('mittenR:flatOffset.x') && props(loneR).has('arcR:flatOffset.x') && props(loneR).has('frontArmL:limb.b.x')));
+  it('the frames of a puppet are finite at any time', check(Object.values(framesOf(full).body(100)).every((v) => typeof v !== 'number' || Number.isFinite(v))));
+}
+{
+  it('a project asking for a preset that is not in the library says which', check((() => { try { sailorsProject({ name: 'x', composition: { width: 1, height: 1 }, states: [['a', 'p_missing']] }); return false; } catch (e) { return /p_missing/.test((e as Error).message); } })()));
+  const custom = [{ id: 'pc', name: 'pc', durationMs: 1000, tracks: [], emitters: [{ id: 'e1', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }], appearances: [{ id: 'a1', nodeId: 'body', startMs: 0, endMs: 1000 }] }] as unknown as Preset[];
+  const proj = sailorsProject({ name: 'x', composition: { width: 10, height: 10 }, states: [['a', 'pc']] }, custom);
+  it('a state\'s emitters and ranges come with it, each with a new id', check(proj.timelines[0].emitters![0].id !== 'e1' && proj.timelines[0].appearances![0].id !== 'a1'));
+  it('a bare preset brings neither', check((() => { const q = sailorsProject({ name: 'x', composition: { width: 10, height: 10 }, states: [['a', 'pb']] }, [{ id: 'pb', name: 'pb', durationMs: 10, tracks: [] }] as unknown as Preset[]); return q.timelines[0].emitters!.length === 0 && q.timelines[0].appearances!.length === 0; })()));
+}
