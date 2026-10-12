@@ -20,8 +20,7 @@ const call = (name: string, args: Record<string, unknown> = {}): ToolCall => ({ 
 
 /** stage a turn the way the Copilot panel does: normalise, validate as a batch, apply */
 const run = (calls: ToolCall[]) => {
-  // set_camera's `fov` / `distance` are also short names of layer properties, so it is not normalised
-  const staged = calls.map((c) => (c.name === 'set_camera' ? c : normaliseCall(P(), c)));
+  const staged = calls.map((c) => normaliseCall(P(), c));
   const problems = validateBatch(P(), staged);
   problems.forEach((m, i) => { if (m) fails.push(`${staged[i].name}: ${m}`); });
   if (!problems.some(Boolean)) {

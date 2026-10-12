@@ -575,7 +575,8 @@ export function normaliseCall(p: Project, call: ToolCall): ToolCall {
   }
   // set_eye_params documents short names (`openness`), so models write them everywhere.
   // resolveProp maps any unambiguous short name back onto its full path.
-  const prop = resolveProp(a.property);
+  // set_camera's `fov` / `distance` are camera fields, not layer properties
+  const prop = name === 'set_camera' ? undefined : resolveProp(a.property);
   if (prop) a.property = prop;
 
   // a layer name and a short property name are just as likely to show up nested — models
