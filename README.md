@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="brand/exports/mark-dark-256.png#gh-light-mode-only" alt="Blooby" width="128" />
-  <img src="brand/exports/mark-light-256.png#gh-dark-mode-only" alt="Blooby" width="128" />
+  <img src="brand/exports/mark-dark-256.png#gh-light-mode-only" alt="Blooby" width="96" />
+  <img src="brand/exports/mark-light-256.png#gh-dark-mode-only" alt="Blooby" width="96" />
 </p>
 
 <h1 align="center">Blooby</h1>
 
 <p align="center">
-  A browser studio for building and animating mascot characters, and shipping them as<br />
-  Lottie, dotLottie (with a real state machine), GIF, MP4, PNG or a React Native component.
+  <b>Build a mascot, animate it, and ship it as a real dotLottie state machine.</b><br />
+  A browser studio for character animation: Lottie, <code>.lottie</code>, GIF, MP4, PNG or a React Native component.
 </p>
 
 <p align="center">
@@ -17,69 +17,72 @@
   <img src="https://img.shields.io/badge/React-19-149eca.svg" alt="React 19" />
 </p>
 
-## Overview
+<p align="center">
+  <img src="docs/readme/editor.gif" width="100%" alt="The Blooby editor playing the Hello Wave preset: layers on the left, the mascot waving on the dark stage, its transform and squash in the inspector, and the preset's keyframes passing under the playhead." />
+</p>
+<p align="center"><sub>The <i>Hello Wave</i> preset from the app mascot kit. The mascot, the layer list, the keyframes and the numbers are the editor's own (<code>pnpm --filter @blooby/api readme:hero</code>).</sub></p>
 
-A Blooby mascot is a sphere seen from the front, with features mapped onto its surface
-by angle rather than by pixel. Drag an eye sideways and it arcs across the face and
-narrows near the rim, the way it would on a real ball. On top of that rig sit freeform
-layers (shapes, SVG, text, drawn curves, rubber-hose hands and legs), a clip-based
-timeline with keyframes, a dotLottie state machine, and an agentic Copilot that edits
-the project through the same functions the UI uses.
+## What it is
 
-The editor, renderer and exporters run entirely in the browser. The backend (`apps/api`)
-adds accounts, cloud projects, a community preset catalogue and admin tooling. Without
-it, the editor still runs offline on the built-in presets.
+A Blooby mascot is a sphere seen from the front, with features placed on its surface **by angle, not by pixel**.
+Drag an eye sideways and it arcs across the face and narrows near the rim, the way it would on a real ball.
+On top of that rig sit freeform layers (shapes, SVG, text, drawn curves, rubber-hose hands and legs), a clip
+timeline with keyframes, a dotLottie state machine, and a Copilot that edits through the same functions the UI uses.
 
-## Features
+The editor, renderer and exporters run entirely in the browser. `apps/api` adds accounts, cloud projects, a
+community preset catalogue, admin tooling and the MCP server. Without it, the editor still runs offline on
+the built-in presets.
 
-| Area | What exists today |
+## What you can make
+
+| | |
 |---|---|
-| **Mascots** | Several per project, each a body, a **face** layer, eyes and optional hands and legs. Saved mascot templates. One mascot can follow another |
-| **Face rigging** | The face is its own layer holding the head shape, eyes and hands: move, roll, scale or turn it (yaw/pitch as a "look") while the body and legs stay put. Delete it, re-add it, or make any shape, SVG or group the face |
-| **Roles** | Double-click a layer's tag in the Layers panel to change the part it plays: face, left/right eye, hand, leg, or a mascot body |
-| **Hands & legs** | Rubber-hose limbs that keep their length, with an optional elbow or knee and a foot. Attach a limb to any part of a mascot (body, face, a shape) so it rides that part. **Pin any point** (hip, knee, foot, hand) in the world from the stage or the inspector: it stays put while the mascot moves, and the limb stretches past its length only while a pin needs it |
-| **Poses** | One-click poses (Excited, Kick, Hands up, Shrug, Wave, Point, Stride…) shown as thumbnails of your mascot, keyed at the playhead. Hands, elbows, knees and feet can be dragged on the stage whenever the mascot is selected |
-| **Layers** | Drag a layer onto the middle of a group, the face, a shape or a mascot to move it inside; "Move out" takes it back out. Nothing moves on screen. Layers made in another state are listed with "+ here" to bring them into this one (⇧ for every state) |
-| **Transforms** | Position, scale (X/Y linkable), roll and opacity, plus an **anchor point**: rotation, scale and squish pivot around it (drag the crosshair on the stage). **Apply as base size** bakes a mascot's scale into its real size so scale starts from 1 again |
-| **Squash & stretch** | Squish X/Y dials that multiply onto scale. Squish presets (Soft, Heavy, Landing, Bounce…) with a live preview write editable keyframes at the playhead |
-| **Colour** | A picker with a saturation/value square, hue and opacity strips, hex entry and pastel presets |
-| **Shapes** | A shape library, anchor editing and shape morphs via keyframes |
-| **SVG** | Paste or import SVG as real vector layers with separate fill and stroke |
-| **Text** | Google Fonts, on an arc or along another layer's outline, per-letter animations, and per-letter position/rotation/scale/opacity keyframes |
-| **Curves** | Pen-drawn smooth, polyline or Bézier curves. **Start/End offset** (a trim path) for draw-on, draw-off and reversed ranges, a travelling **offset**, and a brush **taper** |
-| **Layer effects** | Glow, blur, drop shadow, RGB split, slice tearing, scanlines, flicker, jitter (hand-drawn boil), echo trails and goo (metaballs), stacked per layer, every value keyframeable. Blend modes, masks from another layer's outline, linear/radial gradient fills |
-| **2.5D & camera** | Layer depth (parallax and scale with the camera), rotate X/Y card turns, a mascot spinning round its sphere, camera pan and zoom, camera shake |
-| **Procedural motion** | Shake, float, stretch, pendulum, plus a **walk cycle** with planted feet, **follow-through** on parts and **jelly** soft-body deformation |
-| **Particles** | Paths, orbits and physics **bursts** (velocity, drag, gravity, turbulence) whose particles can gather onto a layer's outline or into a word, changing colour as they go |
-| **Timeline** | Clips on per-mascot lanes, keyframe lanes, a value graph with Bézier easing that fits its range to curves and handles, clip transitions, loop closing. Bounce and Elastic easings become real keyframes you can drag |
-| **Ownership** | A layer created in one state (timeline) is visible only in that state unless you choose to share it |
-| **State machine** | A dotLottie machine: inputs, **rules** ("when `mood == 2`, play Dance" from any state) and state-to-state transitions, edited in a node graph whose nodes you can drag into place |
-| **Presets** | 72 built-ins, from moods and idles to showcase, text, app-screen and **cinematic** presets: Portal Entrance, Full Body Morph, Walk Cycle + Parallax, Particle Assembly, Liquid Splash, Glitch Materialize, Doodle Reveal, BLOOBY Title, 3D Card Flip and a 20-second showreel |
-| **Copilot** | An agent that inspects, searches presets, edits, previews and verifies. Shows live activity and token use; each run can be reverted or reapplied |
-| **Export** | Lottie JSON, `.lottie` with state machine, GIF, MP4/WebM, PNG, React Native pack |
-| **Admin** | Overview, moderation, users, projects, official presets and a splashscreen builder that uses the editor's renderer |
+| **Characters** | Several mascots per project, each a body, a **face** layer, eyes and rubber-hose hands and legs that keep their length. Pin a foot or a hand in the world and the limb bends around it. One-click poses, saved mascot templates, roles for any layer |
+| **Motion** | Keyframes on every property with Bézier easing and a value graph, squash & stretch, anchor points, procedural shake / float / pendulum / **walk cycle** / follow-through / **jelly** |
+| **Layers & looks** | Shapes, pasted SVG, Google Fonts text on an arc or along a path, pen curves with draw-on trim and taper. Glow, blur, shadow, RGB split, slices, scanlines, flicker, jitter, echo and goo, blend modes, masks, gradients |
+| **Space** | Layer depth with parallax, card turns, a mascot spinning round its sphere, camera pan / zoom / shake, particle bursts that gather into a word |
+| **States** | Each timeline is a state. Rules like *"when `mood == 2`, play Dance"* from any state, in a node graph, exported as a **real dotLottie state machine** |
+| **Presets** | 72 built-ins: moods and idles, text, app screens, the app mascot kit, and cinematic ones (Portal Entrance, Full Body Morph, Glitch Materialize, 3D Card Flip, a 20-second showreel). Every part of one is an ordinary layer, key or effect |
+| **Copilot** | An agent that inspects, searches presets, edits in small batches, previews and verifies. Every run can be reverted or reapplied |
+| **Admin** | Moderation, users, projects, official presets and a splashscreen builder on the editor's own renderer |
+
+### Ship it
+
+| Format | Notes |
+|---|---|
+| Lottie JSON | Baked per frame from the same scene the canvas draws. Guides are left out. Blend modes, trim offset, flicker, jitter, echo, depth, camera, particles and per-letter motion bake exactly. **Glow, blur, shadow, RGB split, slices, scanlines, goo, gradients and masks have no Lottie equivalent here**: they are drawn in the editor, GIF, MP4 and PNG, and the export lists which layers lost them |
+| `.lottie` | Every state in one composition, with markers and the state machine (`s/<id>.json`) |
+| React Native pack | The `.lottie`, `blooby.machine.json` and a generated `Mascot.tsx` for `@lottiefiles/dotlottie-react-native` |
+| GIF / MP4 / WebM / PNG | Rasterised in the browser. The video container depends on `MediaRecorder` support |
 
 ## Use it from Claude, ChatGPT or Cursor
 
-Blooby is an MCP server. Copy your MCP link from the editor's **MCP** tab, paste it into your AI app as a connector, approve on the Blooby page it opens — and ask it to animate. See [docs/mcp](docs/mcp/README.md).
+Blooby is an MCP server. Copy your link from the editor's **AI → Connect AI apps** tab, add it to your AI app
+as a connector, approve on the Blooby page it opens, and ask it to animate. Each edit it makes is saved as it
+lands and shows up in your open editor. See [docs/mcp](docs/mcp/README.md).
 
-## Getting started
+## Quick start
 
-### Prerequisites
-
-- **Node.js 22** (the version CI runs)
-- **pnpm 10** (`packageManager` pins `pnpm@10.34.5`; `corepack enable` picks it up)
-- For the backend only: a Supabase project, a Postgres connection string and an S3 bucket
-
-### Installation
+Needs **Node.js 22** and **pnpm 10** (`corepack enable` picks up the pinned version).
 
 ```bash
 git clone https://github.com/divyanshu-patil/blooby.git
 cd blooby
 pnpm install
+pnpm dev:web      # the editor, offline on the built-in presets: http://localhost:5173
 ```
 
-### Environment variables
+```bash
+pnpm dev          # web (5173), admin (5174) and api (3000) through Turborepo
+pnpm run ci       # lint + typecheck + test: run it before a pull request
+```
+
+<details>
+<summary><b>Running the backend</b>: environment, the S3 bucket, deploying</summary>
+
+The backend needs a Supabase project, a Postgres connection string and an S3 bucket.
+
+#### Environment variables
 
 Each app has its own `.env.example`. Copy it to `.env` in the same folder. **Frontend
 values are shipped in the browser bundle, so put only publishable keys in them.**
@@ -96,7 +99,7 @@ values are shipped in the browser bundle, so put only publishable keys in them.*
 | | `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | yes | Project JSON storage (private bucket) |
 | | `S3_CORS_ORIGINS` | no | Extra origins for the bucket's CORS rules, beyond `APP_URL` / `ADMIN_URL`. **The bucket needs them** — see below |
 | | `ALLOWED_MEDIA_TYPES`, `MAX_PROJECT_BYTES` | yes | Upload limits |
-| | `REDIS_URL` | no | Shared rate limits and cache invalidation across instances. Unset is a supported way to run it — see `docker compose up -d redis` |
+| | `REDIS_URL` | no | Shared rate limits, cache invalidation and MCP state across instances. Unset is fine on one instance — see `docker compose up -d redis`. Needed when a host runs several (Vercel) |
 | | `OLLAMA_URL` | no | Upstream for cloud Copilot requests |
 
 \* Leave all three unset in `apps/web` to run the editor offline on the bundled presets.
@@ -104,7 +107,7 @@ values are shipped in the browser bundle, so put only publishable keys in them.*
 specific message when a value is missing. Copilot API keys are not environment
 variables; they are managed from the admin dashboard.
 
-### The bucket needs CORS rules
+#### The bucket needs CORS rules
 
 The browser reads a project's JSON straight from S3 through a presigned link, instead of
 having it proxied through the API — that is what takes two round trips and a median 320KB
@@ -126,16 +129,159 @@ anyone who does not already hold a link the API handed them.
 document through the API instead. That is several times slower, and it is a fallback, not
 the arrangement.)
 
-### Running the project
+#### Deploying the API
 
-```bash
-pnpm dev          # web (5173), admin (5174) and api (3000) through Turborepo
-pnpm dev:web      # just the editor, http://localhost:5173
-pnpm dev:admin    # just the admin dashboard, http://localhost:5174
-pnpm dev:api      # just the API
+- **One long-running process** (Render, a VM): `pnpm --filter @blooby/api start`. Redis is optional.
+- **Vercel**: `apps/api/vercel.json` installs from the monorepo root and bundles `src/serverless.ts` into one
+  file (`scripts/bundle.mjs`). Set `REDIS_URL` there: calls land on different instances, and the MCP server's
+  open project, runs, jobs and approvals are shared through it ([docs/mcp/architecture.md](docs/mcp/architecture.md)).
+
+</details>
+
+## How it works
+
+```
+UI (ui/*.tsx)  ──►  store actions (core/store.ts, one per mutation, undoable)
+                      │
+Copilot agent ──► tools (copilot/tools.ts) ─┘  both call core/layers.ts, writeKeyframe, …
+                      ▼
+               Project (core/types.ts) ─► evaluateRig / buildScene (core/scene.ts)
+                                              ├─► <Shapes> (stage, thumbnails, admin splash, raster)
+                                              └─► bakeLottie ─► .lottie / React Native pack
 ```
 
-## Commands
+- **One document shape.** `Project` in `core/types.ts`. Old files are upgraded by
+  numbered, append-only steps in `core/migrate.ts`.
+- **One renderer.** Preview, thumbnails, the admin splashscreen and every export go
+  through `buildScene`, so they cannot drift apart.
+- **One property table.** `core/props.ts`.
+
+[AGENT_MAP.md](./AGENT_MAP.md) traces these flows in more detail.
+
+<details>
+<summary><b>Editor guide</b>: animation model, mascots, curves, squash, state machines, presets, Copilot</summary>
+
+- **Canvas**: select, move, scale and roll layers directly. Tools: select, hand, shape,
+  pen, text and turn (swing a mascot's head). The crosshair inside a selection is its
+  anchor. Limb points and curve anchors are dragged in place.
+- **Layers**: the hierarchy (Mascot → Face → Eyes and hands, then Legs), draw order,
+  grouping and attachment, plus adding mascots, shapes, SVG, text and curves.
+- **Inspector**: every property of the selection, each with a keyframe stopwatch. It
+  includes Role (make a shape the face), Transform and Anchor, Squish with its presets,
+  Leg (Pin to ground), Curve (Start/End offset), Fill and Stroke (hex colour input), and
+  Appearance (when the layer is on screen).
+- **Timeline**: clips from presets on per-mascot lanes, keyframe lanes and a graph view.
+  Select a keyframe to edit its easing curve. On a track's last key, you edit the curve
+  arriving at it.
+
+#### Animation model
+
+A project has several **timelines**, and each one is a **state**. A timeline holds clips
+(`Block`), keyframe tracks (`Track` → `Keyframe`), procedural modifiers (shake, float,
+stretch, pendulum), particle emitters and appearance ranges. A track animates one property
+path, such as `transform.rotation`, `squish.x`, `trim.end` or `limb.b.y`. Its keyframes
+interpolate with the outgoing key's easing (linear, named presets or a cubic Bézier).
+Every animatable property is defined once in `core/props.ts`; the inspector, timeline,
+exporters and Copilot all read that table.
+
+#### Mascots, face, hands and legs
+
+A mascot is a `body` node plus parts with roles: `face`, `eyeL`/`eyeR`, `armL`/`armR`,
+`legL`/`legR`. Eyes live inside the face, and the face hands the body's sphere down to
+them, so eyes still arc when the face moves or turns. Hands ride the face; legs ride the
+body. **Pin to ground** records the foot's world position. After that the leg bends
+between the moving hip and the planted foot. **Unpin** writes the pinned pose back, so
+nothing jumps.
+
+#### Curves and offsets
+
+**Start offset** and **End offset** control which part of a curve's stroke is drawn, as
+fractions of its length. Keyframe End from 0 to 1 to draw a line on, then Start from 0 to 1
+to draw it off. Start greater than End is allowed and draws the same span reversed. The
+Lottie export writes a trim path.
+
+#### Squash & stretch
+
+**Squish X/Y** multiply onto scale, so a squash stacks on top of any scale animation, and
+are clamped between 0.4 and 1.8. Set the anchor to the feet ("Squish from: Feet") to keep
+a squash on the ground. Squish presets are reusable actions, not clips: **Apply** writes
+squish keyframes starting at the playhead, which you can edit like any others.
+
+#### State machines
+
+States are timelines. Inputs are `Boolean`, `Numeric`, `String` or `Event`. The **Rules**
+section and its node graph express "when this input condition holds, play this state":
+
+```text
+mood == 1 → Happy
+mood == 2 → Dance
+mood == 3 → Sad
+```
+
+A rule applies from **whatever state is current**, so you never wire Idle → Dance,
+Happy → Dance and Sad → Dance separately. Drag from **Any state** onto a state in the
+graph to add a rule. Drag between two states for a transition out of one state only;
+those are tried first. Blend duration, easing and extra conditions are under **More**.
+Because dotLottie has no "any state", export fans each rule out into one edge per other
+state.
+
+#### Presets
+
+Presets are reusable clips: tracks plus any layers, effects and appearance ranges they
+bring. Placing one adds an editable clip on the selected mascot's lane. The library holds
+moods and idles, showcase presets (hands, legs, morphs, several mascots), text presets
+and app-screen presets, and cinematic presets (`core/cinematicPresets.ts`) built only from
+the editor's own systems: effects, masks, depth, the camera, bursts, walk/follow/jelly and
+per-letter keys — open one and every part of it is an ordinary layer, key or effect.
+`sequence()` joins presets end to end, which is how the showreel is made.
+
+The **app mascot kit** (`core/mascotKit.ts`) holds shippable states for app screens — Writing,
+Generation Failed/Cancelled/Complete, Shuffling Cards, Cards Fan Out, Hello Wave, Happy Idle,
+Cloud Float (+ Pro), Refresh Release, No Scripts Yet, Telescope Scan, Disconnected, Clap and Bow,
+Published!, Listening, Wrong Code, Thumbs Up, Head Scratch, Mail Sent, Sad Goodbye, Hello Jump In,
+Sparkle Excited, Cover Eyes. Each is Lottie-safe and its tagline names the `.lottie` and state it
+belongs to (`KIT_ASSETS`): make one timeline per state, place the preset, wire the inputs. Users can save
+their own, and the community catalogue is served by the API.
+
+A preset layer with a negative `zIndex` is placed behind the whole rig (portals, scenery);
+any other sits on top.
+
+#### Copilot
+
+The Copilot runs as an agent loop against Ollama (local, Ollama Cloud or a custom
+endpoint):
+
+```
+request → inspect project → find functions → search presets → read their keyframes
+        → edit in small batches → preview → verify → adjust → finish
+```
+
+- **Real editor operations.** Edits go through the same layer and keyframe functions the
+  UI uses, and each one is an undo step. `find_functions` lists the edit tools and every
+  store action (read from the store's own `Editor` interface), and `call_editor` runs one.
+- **Learns from preset data.** `search_presets` matches on what presets actually do
+  (hand tracks, squash, trim, curved text, several mascots). `get_preset` returns their
+  real layers, keyframe times, values and easings.
+- **Observes its work.** `preview` scrubs the playhead and reports where layers are drawn.
+  The agent can also move the playhead, select layers and switch inspector tabs.
+- **Visible.** A live activity list (status, reads, edits, errors), tokens used, counted as
+  the reply streams in (never capped), the step count and elapsed time. Stop cancels the run.
+- **Checkpoints.** Each run records the document before and after it. **Revert agent
+  decision** restores the before state in one step. **Reapply** restores the recorded
+  result without regenerating it.
+
+#### Admin splashscreens
+
+`apps/admin` builds the app's splashscreen from the editor's current project, a published
+preset or the default mascot. The preview and the live overlay render with the editor's
+`sceneAt` and `<Shapes>`, so every layer type the editor draws also draws there. A preset
+is mounted with the editor's own `presetPreviewProject`, which brings its layers, effects
+and ranges along with its tracks.
+
+</details>
+
+<details>
+<summary><b>Commands and project structure</b></summary>
 
 | Command | What it does |
 |---|---|
@@ -148,8 +294,6 @@ pnpm dev:api      # just the API
 | `pnpm test:coverage` | Tests with a per-file coverage table |
 | `pnpm seed:presets` | Seed the API's preset catalogue from `apps/api/prisma/presets.seed.json` |
 | `pnpm --filter @blooby/studio copilot:test -- <model> "<prompt>"` | Run the copilot prompt pipeline against a real Ollama |
-
-## Project structure
 
 ```
 packages/studio/    the editor, renderer, exporters and copilot: nearly all the logic
@@ -168,7 +312,10 @@ brand/              the icon: vector masters, and what every favicon is generate
 `packages/studio/src/index.ts` is the package's only public surface; the apps import from
 `@blooby/studio`.
 
-## The icon
+</details>
+
+<details>
+<summary><b>The icon</b>: <code>brand/</code> and <code>pnpm icons</code></summary>
 
 `brand/` is the source of truth, and `brand/blooby-icon.icon/` is the Icon Composer project
 everything comes out of. The masters are **its own exports** — the real icon, with the
@@ -204,155 +351,16 @@ its name and not by its icon.
 pnpm icons
 ```
 
-## Using the editor
+</details>
 
-- **Canvas**: select, move, scale and roll layers directly. Tools: select, hand, shape,
-  pen, text and turn (swing a mascot's head). The crosshair inside a selection is its
-  anchor. Limb points and curve anchors are dragged in place.
-- **Layers**: the hierarchy (Mascot → Face → Eyes and hands, then Legs), draw order,
-  grouping and attachment, plus adding mascots, shapes, SVG, text and curves.
-- **Inspector**: every property of the selection, each with a keyframe stopwatch. It
-  includes Role (make a shape the face), Transform and Anchor, Squish with its presets,
-  Leg (Pin to ground), Curve (Start/End offset), Fill and Stroke (hex colour input), and
-  Appearance (when the layer is on screen).
-- **Timeline**: clips from presets on per-mascot lanes, keyframe lanes and a graph view.
-  Select a keyframe to edit its easing curve. On a track's last key, you edit the curve
-  arriving at it.
+## Contributing
 
-### Animation model
+1. Fork and clone, then `pnpm install`.
+2. Branch: `git checkout -b feat/your-change`.
+3. Make the change, with tests beside the code you touch.
+4. Run `pnpm run ci`, then open a pull request against `main`.
 
-A project has several **timelines**, and each one is a **state**. A timeline holds clips
-(`Block`), keyframe tracks (`Track` → `Keyframe`), procedural modifiers (shake, float,
-stretch, pendulum), particle emitters and appearance ranges. A track animates one property
-path, such as `transform.rotation`, `squish.x`, `trim.end` or `limb.b.y`. Its keyframes
-interpolate with the outgoing key's easing (linear, named presets or a cubic Bézier).
-Every animatable property is defined once in `core/props.ts`; the inspector, timeline,
-exporters and Copilot all read that table.
-
-### Mascots, face, hands and legs
-
-A mascot is a `body` node plus parts with roles: `face`, `eyeL`/`eyeR`, `armL`/`armR`,
-`legL`/`legR`. Eyes live inside the face, and the face hands the body's sphere down to
-them, so eyes still arc when the face moves or turns. Hands ride the face; legs ride the
-body. **Pin to ground** records the foot's world position. After that the leg bends
-between the moving hip and the planted foot. **Unpin** writes the pinned pose back, so
-nothing jumps.
-
-### Curves and offsets
-
-**Start offset** and **End offset** control which part of a curve's stroke is drawn, as
-fractions of its length. Keyframe End from 0 to 1 to draw a line on, then Start from 0 to 1
-to draw it off. Start greater than End is allowed and draws the same span reversed. The
-Lottie export writes a trim path.
-
-### Squash & stretch
-
-**Squish X/Y** multiply onto scale, so a squash stacks on top of any scale animation, and
-are clamped between 0.4 and 1.8. Set the anchor to the feet ("Squish from: Feet") to keep
-a squash on the ground. Squish presets are reusable actions, not clips: **Apply** writes
-squish keyframes starting at the playhead, which you can edit like any others.
-
-### State machines
-
-States are timelines. Inputs are `Boolean`, `Numeric`, `String` or `Event`. The **Rules**
-section and its node graph express "when this input condition holds, play this state":
-
-```text
-mood == 1 → Happy
-mood == 2 → Dance
-mood == 3 → Sad
-```
-
-A rule applies from **whatever state is current**, so you never wire Idle → Dance,
-Happy → Dance and Sad → Dance separately. Drag from **Any state** onto a state in the
-graph to add a rule. Drag between two states for a transition out of one state only;
-those are tried first. Blend duration, easing and extra conditions are under **More**.
-Because dotLottie has no "any state", export fans each rule out into one edge per other
-state.
-
-### Presets
-
-Presets are reusable clips: tracks plus any layers, effects and appearance ranges they
-bring. Placing one adds an editable clip on the selected mascot's lane. The library holds
-moods and idles, showcase presets (hands, legs, morphs, several mascots), text presets
-and app-screen presets, and cinematic presets (`core/cinematicPresets.ts`) built only from
-the editor's own systems: effects, masks, depth, the camera, bursts, walk/follow/jelly and
-per-letter keys — open one and every part of it is an ordinary layer, key or effect.
-`sequence()` joins presets end to end, which is how the showreel is made.
-
-The **app mascot kit** (`core/mascotKit.ts`) holds shippable states for app screens — Writing,
-Generation Failed/Cancelled/Complete, Shuffling Cards, Cards Fan Out, Hello Wave, Happy Idle,
-Cloud Float (+ Pro), Refresh Release, No Scripts Yet, Telescope Scan, Disconnected, Clap and Bow,
-Published!, Listening, Wrong Code, Thumbs Up, Head Scratch, Mail Sent, Sad Goodbye, Hello Jump In,
-Sparkle Excited, Cover Eyes. Each is Lottie-safe and its tagline names the `.lottie` and state it
-belongs to (`KIT_ASSETS`): make one timeline per state, place the preset, wire the inputs. Users can save
-their own, and the community catalogue is served by the API.
-
-A preset layer with a negative `zIndex` is placed behind the whole rig (portals, scenery);
-any other sits on top.
-
-### Copilot
-
-The Copilot runs as an agent loop against Ollama (local, Ollama Cloud or a custom
-endpoint):
-
-```
-request → inspect project → find functions → search presets → read their keyframes
-        → edit in small batches → preview → verify → adjust → finish
-```
-
-- **Real editor operations.** Edits go through the same layer and keyframe functions the
-  UI uses, and each one is an undo step. `find_functions` lists the edit tools and every
-  store action (read from the store's own `Editor` interface), and `call_editor` runs one.
-- **Learns from preset data.** `search_presets` matches on what presets actually do
-  (hand tracks, squash, trim, curved text, several mascots). `get_preset` returns their
-  real layers, keyframe times, values and easings.
-- **Observes its work.** `preview` scrubs the playhead and reports where layers are drawn.
-  The agent can also move the playhead, select layers and switch inspector tabs.
-- **Visible.** A live activity list (status, reads, edits, errors), tokens used, counted as
-  the reply streams in (never capped), the step count and elapsed time. Stop cancels the run.
-- **Checkpoints.** Each run records the document before and after it. **Revert agent
-  decision** restores the before state in one step. **Reapply** restores the recorded
-  result without regenerating it.
-
-### Export
-
-| Format | Notes |
-|---|---|
-| Lottie JSON | Baked per frame from the same scene the canvas draws. Guides are left out. Blend modes, trim offset, flicker, jitter, echo, depth, camera, particles and per-letter motion bake exactly. **Glow, blur, shadow, RGB split, slices, scanlines, goo, gradients and masks have no Lottie equivalent here**: they are drawn in the editor, GIF, MP4 and PNG, and the export lists which layers lost them |
-| `.lottie` | Every state in one composition, with markers and the state machine (`s/<id>.json`) |
-| React Native pack | The `.lottie`, `blooby.machine.json` and a generated `Mascot.tsx` for `@lottiefiles/dotlottie-react-native` |
-| GIF / MP4 / WebM / PNG | Rasterised in the browser. The video container depends on `MediaRecorder` support |
-
-## Architecture
-
-```
-UI (ui/*.tsx)  ──►  store actions (core/store.ts, one per mutation, undoable)
-                      │
-Copilot agent ──► tools (copilot/tools.ts) ─┘  both call core/layers.ts, writeKeyframe, …
-                      ▼
-               Project (core/types.ts) ─► evaluateRig / buildScene (core/scene.ts)
-                                              ├─► <Shapes> (stage, thumbnails, admin splash, raster)
-                                              └─► bakeLottie ─► .lottie / React Native pack
-```
-
-- **One document shape.** `Project` in `core/types.ts`. Old files are upgraded by
-  numbered, append-only steps in `core/migrate.ts`.
-- **One renderer.** Preview, thumbnails, the admin splashscreen and every export go
-  through `buildScene`, so they cannot drift apart.
-- **One property table.** `core/props.ts`.
-
-[AGENT_MAP.md](./AGENT_MAP.md) traces these flows in more detail.
-
-## Admin splashscreens
-
-`apps/admin` builds the app's splashscreen from the editor's current project, a published
-preset or the default mascot. The preview and the live overlay render with the editor's
-`sceneAt` and `<Shapes>`, so every layer type the editor draws also draws there. A preset
-is mounted with the editor's own `presetPreviewProject`, which brings its layers, effects
-and ranges along with its tracks.
-
-## Testing
+### Tests
 
 ```bash
 pnpm test                                   # everything
@@ -373,15 +381,8 @@ use Testing Library in jsdom. Coverage includes:
 - the agent loop with a scripted model
 - a cross-feature scenario ending in revert, reapply and a "make it slower" follow-up
 
-## Contributing
-
-1. Fork and clone the repository, then run `pnpm install`.
-2. Create a branch: `git checkout -b feat/your-change`.
-3. Make the change, with tests beside the code you touch.
-4. Run `pnpm run ci` and make sure it passes.
-5. Commit and open a pull request against `main`.
-
-### Adding editor functionality
+<details>
+<summary><b>Adding editor functionality</b> (so the UI, the Copilot and MCP stay in sync)</summary>
 
 To keep the UI and the Copilot in sync:
 
@@ -400,6 +401,12 @@ To keep the UI and the Copilot in sync:
 More guidance: [CLAUDE.md](./CLAUDE.md) (codebase map and conventions),
 [ASSUMPTIONS.md](./ASSUMPTIONS.md) (decisions and known limits), [DESIGN.md](./DESIGN.md)
 (visual language), [ANIMATION.md](./ANIMATION.md) (motion craft behind the Copilot).
+
+</details>
+
+Read [CLAUDE.md](./CLAUDE.md) for the codebase map and conventions, [ASSUMPTIONS.md](./ASSUMPTIONS.md) for
+decisions and known limits, [DESIGN.md](./DESIGN.md) for the visual language and [ANIMATION.md](./ANIMATION.md)
+for the motion craft behind the Copilot.
 
 ## License
 
