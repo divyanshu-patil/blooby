@@ -113,6 +113,9 @@ async function instance() {
   vi.resetModules();
   const { createApp } = await import('../../app.js');
   const server = createApp().listen(0);
+  // past fetch's own 4s idle timeout: otherwise a socket idle while the OTHER instance works
+  // (slow on CI) can be closed by this server just as fetch reuses it — ECONNRESET
+  server.keepAliveTimeout = 60_000;
   await new Promise((r) => server.once('listening', r));
   return { server, base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, tokens: (await import('./auth.service.js')).tokensService };
 }
