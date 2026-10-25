@@ -1,10 +1,8 @@
-import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import express, { Router, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { capabilities, CAPABILITY_VERSION, SCOPES, summaryOf } from '@blooby/studio/engine';
@@ -17,7 +15,7 @@ import { uuidParam } from '../dtos/common.js';
 import { mcpRepository } from '../repositories/mcp.repository.js';
 import { ALL_SCOPES, consentService, MODES, oauthProvider, tokensService, type Principal } from '../services/mcp/auth.service.js';
 import { createMcpServer, type Profile } from '../services/mcp/server.js';
-import { newRun, type Conn } from '../services/mcp/host.js';
+import { connFor } from '../services/mcp/host.js';
 import { workspace } from '../services/mcp/workspace.js';
 
 /**
@@ -41,19 +39,20 @@ export const oauthRoutes = mcpAuthRouter({
 });
 
 // --- the MCP endpoint -----------------------------------------------------------------------
-
-interface Live { transport: StreamableHTTPServerTransport; conn: Conn; seen: number }
-const sessions = new Map<string, Live>();
-setInterval(() => {
-  for (const [id, s] of sessions) if (Date.now() - s.seen > 60 * 60_000) { void s.transport.close(); sessions.delete(id); }
-}, 60_000).unref();
+//
+// STATELESS Streamable HTTP: every POST gets its own server and transport, and nothing about
+// the connection is kept in this process. That is what lets any instance answer any call —
+// on Vercel consecutive calls land on different instances, and an instance can be frozen or
+// recycled between them; on Render it costs nothing. What a session used to hold is per
+// person instead: the open project and the run are in sharedState (services/mcp/host.ts
+// `connFor`), and the document is saved after every edit (services/mcp/workspace.ts).
 
 const bearer = requireBearerAuth({ verifier: oauthProvider, resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(MCP_URL) });
 const principalOf = (req: Request) => (req.auth!.extra as { principal: Principal }).principal;
 
 export const mcpRoutes = Router();
 // any origin: browser-based clients (the MCP Inspector) are fine — this is bearer auth, no cookies
-mcpRoutes.use(cors({ origin: true, exposedHeaders: ['Mcp-Session-Id', 'WWW-Authenticate'], allowedHeaders: ['Authorization', 'Content-Type', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-ID'] }));
+mcpRoutes.use(cors({ origin: true, exposedHeaders: ['WWW-Authenticate'], allowedHeaders: ['Authorization', 'Content-Type', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-ID'] }));
 mcpRoutes.use(express.json({ limit: '4mb' }));
 // BEFORE `bearer`, which costs two round trips to Postgres: a flood from one token is refused
 // here without touching the pool everyone else is waiting on. Keyed on the (hashed, unverified)
@@ -67,38 +66,21 @@ mcpRoutes.use(rateLimit({
 mcpRoutes.use(bearer);
 
 mcpRoutes.post('/', asyncHandler(async (req: Request, res: Response) => {
-  const principal = principalOf(req);
-  const sid = req.headers['mcp-session-id'] as string | undefined;
-  if (sid) {
-    const s = sessions.get(sid);
-    // a session belongs to the person who opened it; anyone else's token gets a 404 like a stranger's id
-    if (!s || s.conn.principal.userId !== principal.userId) { res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Session not found — initialize again.' }, id: null }); return; }
-    s.conn.principal = principal;    // a refreshed token may narrow scopes
-    s.seen = Date.now();
-    await s.transport.handleRequest(req, res, req.body);
-    return;
-  }
-  if (!isInitializeRequest(req.body)) { res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'No session: send initialize first.' }, id: null }); return; }
-  const conn: Conn = { principal, projectId: null, run: newRun(), subscriptions: new Set() };
+  const conn = await connFor(principalOf(req));
   const profile: Profile = req.query.tools === 'full' ? 'full' : 'compact';
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    onsessioninitialized: (id) => { sessions.set(id, { transport, conn, seen: Date.now() }); },
-  });
-  /* v8 ignore next -- a transport that closes before it was given a session id has nothing to remove */
-  transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
-  await createMcpServer(conn, profile).connect(transport);
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  const server = createMcpServer(conn, profile);
+  res.on('close', () => { void server.close(); });
+  await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 }));
 
-const existing = asyncHandler(async (req: Request, res: Response) => {
-  const s = sessions.get(req.headers['mcp-session-id'] as string ?? '');
-  if (!s || s.conn.principal.userId !== principalOf(req).userId) { res.status(404).send('Session not found'); return; }
-  s.seen = Date.now();
-  await s.transport.handleRequest(req, res);
-});
-mcpRoutes.get('/', existing);      // server → client event stream
-mcpRoutes.delete('/', existing);   // client ends its session
+// no sessions, so no server → client stream to open and none to end (the spec's answer is 405)
+const stateless = (_req: Request, res: Response) => {
+  res.status(405).set('Allow', 'POST').json({ jsonrpc: '2.0', error: { code: -32000, message: 'This server is stateless: send every request as a POST.' }, id: null });
+};
+mcpRoutes.get('/', stateless);
+mcpRoutes.delete('/', stateless);
 
 // --- the person's own management API ---------------------------------------------------------
 
@@ -145,7 +127,7 @@ mcpManageRoutes.post('/consent/:id', validate(uuidParam('id'), 'params'), valida
 
 /** Polled by the editor: AI presence, activity and pending approvals, and the version to reload at. */
 mcpManageRoutes.get('/live', asyncHandler(async (req, res) => {
-  res.json(workspace.live(req.user!.id, typeof req.query.projectId === 'string' ? req.query.projectId : undefined));
+  res.json(await workspace.live(req.user!.id, typeof req.query.projectId === 'string' ? req.query.projectId : undefined));
 }));
 mcpManageRoutes.post('/proposals/:id', validate(decideDto), asyncHandler(async (req, res) => {
   res.json(await workspace.decide(req.user!.id, String(req.params.id), (req.body as { approve: boolean }).approve));

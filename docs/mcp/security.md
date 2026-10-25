@@ -7,7 +7,7 @@
 | Stolen or leaked token | hashed at rest; short-lived access tokens; refresh rotation with reuse detection; instant revoke/disconnect; PAT expiry |
 | The person's own session given to an AI | never: OAuth mints a separate, scoped credential; the consent page is Blooby's own |
 | Cross-user access / ID enumeration | every project goes through `projectsService` (owner, or public with edit access); a stranger's id is `NOT_FOUND`, the same as a missing one. Tested |
-| Session hijack | an MCP session id is bound to its user; another user's token on it is a 404. Tested |
+| Session hijack | there are no sessions: the transport is stateless and every call acts for the person whose token it carries — a session header from someone else's connection means nothing. Tested |
 | Privilege escalation | scopes filter both the tool list and every call; `invoke` checks the target capability's scope; MCP always acts with the `user` role — never admin, even for an admin |
 | Malicious prompt / compromised agent | **Look only** and **Ask me first** modes; every edit undoable; checkpoints; `project_delete` / `preset_delete` need `confirm: true` and are refused in ask-first mode |
 | Replay / duplicate requests | `requestId` idempotency on every mutation; single-use OAuth codes |
