@@ -55,6 +55,37 @@ the built-in presets.
 | React Native pack | The `.lottie`, `blooby.machine.json` and a generated `Mascot.tsx` for `@lottiefiles/dotlottie-react-native` |
 | GIF / MP4 / WebM / PNG | Rasterised in the browser. The video container depends on `MediaRecorder` support |
 
+## Showcase
+
+Twelve of the built-in presets, played straight off the renderer. Under each: the systems it is built
+from and every property it keys. Open one in the editor and each of these is an ordinary layer, effect,
+modifier or keyframe track you can select and change. Nothing in the engine is special-cased for them.
+
+<!-- showcase:start (written by pnpm --filter @blooby/api readme:hero) -->
+<table>
+<tr>
+<td width="33%" valign="top"><img src="docs/readme/preset-portal.gif" width="100%" alt="Portal Entrance" /><br /><b>Portal Entrance</b> <sub>4.0 s</sub><br /><sub>blur · glow · screen blend · gradient · particle burst · camera shake · follow-through</sub><br /><sub><code>transform.scale</code> <code>gradient.angle</code> <code>effect.glow.strength</code> <code>flatOffset</code> <code>transform.rotation</code> <code>squish</code> <code>eye.openness</code> <code>camera.zoom</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-walk.gif" width="100%" alt="Walk Cycle + Parallax" /><br /><b>Walk Cycle + Parallax</b> <sub>5.0 s</sub><br /><sub>2.5D depth · blur · rubber-hose limbs · walk cycle · follow-through</sub><br /><sub><code>camera.offset</code> <code>camera.zoom</code> <code>eye.openness</code> <code>transform.rotation</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-particles.gif" width="100%" alt="Particle Assembly" /><br /><b>Particle Assembly</b> <sub>4.5 s</sub><br /><sub>text · glow · particles that gather · camera shake</sub><br /><sub><code>squish</code> <code>transform.scale</code> <code>transform.rotation</code> <code>text.letterSpacing</code> <code>camera.zoom</code></sub></td>
+</tr>
+<tr>
+<td width="33%" valign="top"><img src="docs/readme/preset-morph.gif" width="100%" alt="Full Body Morph" /><br /><b>Full Body Morph</b> <sub>4.2 s</sub><br /><sub>blur · echo · screen blend · gradient · rubber-hose limbs · particle burst · jelly · follow-through</sub><br /><sub><code>shape.path</code> <code>transform.scale</code> <code>transform.rotation</code> <code>squish</code> <code>limb.b</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-liquid.gif" width="100%" alt="Liquid Splash" /><br /><b>Liquid Splash</b> <sub>4.0 s</sub><br /><sub>goo · glow · gradient · particle burst · jelly</sub><br /><sub><code>flatOffset</code> <code>squish</code> <code>transform.scale</code> <code>effect.goo.radius</code> <code>eye.openness</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-glitch.gif" width="100%" alt="Glitch Materialize" /><br /><b>Glitch Materialize</b> <sub>3.6 s</sub><br /><sub>scanlines · rgb split · slices · flicker · mask · gradient · text · camera shake</sub><br /><sub><code>transform.scale</code> <code>effect.slices.amount</code> <code>effect.rgbSplit.amount</code> <code>effect.flicker.amount</code> <code>squish</code> <code>flatOffset</code> <code>surface.yaw</code> <code>eye.openness</code></sub></td>
+</tr>
+<tr>
+<td width="33%" valign="top"><img src="docs/readme/preset-doodle.gif" width="100%" alt="Doodle Reveal" /><br /><b>Doodle Reveal</b> <sub>4.0 s</sub><br /><sub>drawn curves · jitter · text</sub><br /><sub><code>trim.end</code> <code>trim.offset</code> <code>text.reveal.end</code> <code>transform.rotation</code> <code>transform.scale</code> <code>squish</code> <code>eye.openness</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-title.gif" width="100%" alt="BLOOBY Title" /><br /><b>BLOOBY Title</b> <sub>5.0 s</sub><br /><sub>text · shadow · glow · particle burst · camera shake</sub><br /><sub><code>text.char.*</code> <code>flatOffset</code> <code>transform.scale</code> <code>squish</code> <code>effect.glow.strength</code> <code>camera.zoom</code> <code>camera.offset</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-flip.gif" width="100%" alt="3D Card Flip" /><br /><b>3D Card Flip</b> <sub>4.0 s</sub><br /><sub>shadow · gradient · 2.5D depth · particle burst</sub><br /><sub><code>depth.z</code> <code>depth.rotateY</code> <code>depth.rotateX</code> <code>transform.scale</code> <code>flatOffset</code> <code>squish</code> <code>camera.zoom</code> <code>eye.openness</code></sub></td>
+</tr>
+<tr>
+<td width="33%" valign="top"><img src="docs/readme/preset-friends.gif" width="100%" alt="Two Friends" /><br /><b>Two Friends</b> <sub>3.2 s</sub><br /><sub>a second mascot</sub><br /><sub><code>flatOffset</code> <code>transform.scale</code> <code>surface.yaw</code> <code>eye.openness</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-dance.gif" width="100%" alt="Happy Dance" /><br /><b>Happy Dance</b> <sub>2.8 s</sub><br /><sub>rubber-hose limbs · particles</sub><br /><sub><code>flatOffset</code> <code>transform.scale</code> <code>transform.rotation</code> <code>limb.b</code> <code>limb.c</code> <code>eye.openness</code></sub></td>
+<td width="33%" valign="top"><img src="docs/readme/preset-curved.gif" width="100%" alt="Curved Reveal" /><br /><b>Curved Reveal</b> <sub>1.8 s</sub><br /><sub>text on a path</sub><br /><sub><code>text.arc.radius</code> <code>text.chars.kind</code> <code>text.chars.stagger</code> <code>text.chars.progress</code></sub></td>
+</tr>
+</table>
+<!-- showcase:end -->
+
 ## Use it from Claude, ChatGPT or Cursor
 
 Blooby is an MCP server. Copy your link from the editor's **AI → Connect AI apps** tab, add it to your AI app
