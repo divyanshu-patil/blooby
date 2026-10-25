@@ -1,5 +1,7 @@
 /**
- * The README's picture of the editor: docs/readme/editor.svg (still) and editor.gif (moving).
+ * The README's pictures: the editor (docs/readme/editor.svg still, editor.gif moving) and a
+ * showcase of presets (docs/readme/preset-*.gif, and the README's table between the
+ * `showcase` markers), each played straight off the renderer and captioned from its own data.
  *
  *   pnpm --filter @blooby/api readme:hero        (needs ffmpeg on PATH for the GIF)
  *
@@ -9,11 +11,12 @@
  * the rig evaluated at the playhead. Change the preset or the renderer and this follows.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
-import { compOf, defaultProject, evaluateRig, frameSvg, mascotKitPresets, presetPreviewProject } from '@blooby/studio/engine';
+import { builtinPresets, CAMERA_ID, compOf, defaultProject, evaluateRig, frameSvg, mascotKitPresets, presetPreviewProject } from '@blooby/studio/engine';
+import type { Preset } from '@blooby/studio/engine';
 
 const OUT = join(import.meta.dirname, '../../../docs/readme');
 const PRESET = 'p_kit_hello';
@@ -180,16 +183,67 @@ ${timeline(ms)}
 mkdirSync(OUT, { recursive: true });
 writeFileSync(join(OUT, 'editor.svg'), editor(STILL_MS));
 
-const frames = mkdtempSync(join(tmpdir(), 'readme-hero-'));
-const n = Math.round((DUR / 1000) * FPS);
-for (let i = 0; i < n; i++) {
-  const png = new Resvg(editor((i / n) * DUR), { fitTo: { mode: 'width', value: W }, font: { loadSystemFonts: true } }).render().asPng();
-  writeFileSync(join(frames, `${String(i).padStart(3, '0')}.png`), png);
+/** Render `n` frames of `svgAt` and encode them as one looping GIF. */
+function gif(file: string, width: number, svgAt: (ms: number) => string, dur: number, fps = FPS) {
+  const n = Math.round((dur / 1000) * fps);
+  const frames = mkdtempSync(join(tmpdir(), 'readme-hero-'));
+  for (let i = 0; i < n; i++) {
+    const png = new Resvg(svgAt((i / n) * dur), { fitTo: { mode: 'width', value: width }, font: { loadSystemFonts: true } }).render().asPng();
+    writeFileSync(join(frames, `${String(i).padStart(3, '0')}.png`), png);
+  }
+  // one palette for the whole loop, no dithering (flat UI), and only the changed rectangle per frame
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(fps), '-i', join(frames, '%03d.png'),
+    '-vf', 'split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle',
+    '-loop', '0', join(OUT, file)]);
+  rmSync(frames, { recursive: true });
 }
-// one palette for the whole loop, no dithering (flat UI), and only the changed rectangle per frame
-execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(FPS), '-i', join(frames, '%03d.png'),
-  '-vf', 'split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle',
-  '-loop', '0', join(OUT, 'editor.gif')]);
-rmSync(frames, { recursive: true });
-console.log(`wrote docs/readme/editor.svg and editor.gif (${n} frames)`);
+
+gif('editor.gif', W, editor, DUR);
+console.log('wrote docs/readme/editor.svg and editor.gif');
+
+// --- the showcase: the complex presets, each captioned with what it is made of ------------
+
+const SHOWCASE = ['p_cine_portal', 'p_cine_walk', 'p_cine_particles', 'p_cine_morph', 'p_cine_liquid', 'p_cine_glitch',
+  'p_cine_doodle', 'p_cine_title', 'p_cine_flip', 'p_friends', 'p_dance', 'p_txt_curved'];
+const SIDE = 300;
+
+const MODS: Record<string, string> = { shake: 'shake', follow: 'follow-through', jelly: 'jelly', walk: 'walk cycle', float: 'float', pendulum: 'pendulum', stretch: 'stretch' };
+/** What a preset is made of, read off its data: the systems its layers use, then its keyed properties. */
+function madeOf(p: Preset): { uses: string[]; keys: string[] } {
+  const uses = new Set<string>();
+  for (const n of p.layers ?? []) {
+    if (n.kind === 'body') uses.add('a second mascot');
+    if (n.limb) uses.add('rubber-hose limbs');
+    if (n.text) uses.add(n.text.path ? 'text on a path' : 'text');
+    if (n.curve) uses.add('drawn curves');
+    for (const e of n.effects ?? []) uses.add(e.kind.replace(/([A-Z])/g, ' $1').toLowerCase());
+    if (n.blend && n.blend !== 'normal') uses.add(`${n.blend} blend`);
+    if (n.mask) uses.add('mask');
+    if (n.gradient) uses.add('gradient');
+    if (n.depth) uses.add('2.5D depth');
+  }
+  for (const e of p.emitters ?? []) uses.add(e.attract ? 'particles that gather' : e.path === 'burst' ? 'particle burst' : 'particles');
+  for (const m of p.modifiers ?? []) uses.add(m.nodeId === CAMERA_ID ? 'camera shake' : MODS[m.kind] ?? m.kind);
+  // x/y pairs and per-letter keys read as one property each
+  const keys = [...new Set(p.tracks.map((t) => (t.nodeId === CAMERA_ID && !t.property.startsWith('camera') ? 'camera.' : '')
+    + t.property.replace(/^text\.char\.\d+\./, 'text.char.*.').replace(/\.(x|y)$/, '').replace(/^text\.char\.\*\..*/, 'text.char.*')))];
+  return { uses: [...uses], keys };
+}
+
+const cells: string[] = [];
+for (const id of SHOWCASE) {
+  const p = [...builtinPresets(), ...mascotKitPresets()].find((x) => x.id === id)!;
+  const proj = presetPreviewProject(defaultProject(), p);
+  const file = `preset-${id.replace(/^p_(cine_|txt_)?/, '')}.gif`;
+  // the frame as the renderer writes it: resvg cannot draw some of them nested in another <svg>
+  gif(file, SIDE, (ms) => frameSvg(proj, ms, C.stage), p.durationMs, 15);
+  const { uses, keys } = madeOf(p);
+  cells.push(`<td width="33%" valign="top"><img src="docs/readme/${file}" width="100%" alt="${esc(p.name)}" /><br /><b>${esc(p.name)}</b> <sub>${(p.durationMs / 1000).toFixed(1)} s</sub><br /><sub>${esc(uses.join(' · '))}</sub><br /><sub>${keys.map((k) => `<code>${esc(k)}</code>`).join(' ')}</sub></td>`);
+  console.log(`wrote ${file} — ${p.name}`);
+}
+const table = `<table>\n${Array.from({ length: Math.ceil(cells.length / 3) }, (_, r) => `<tr>\n${cells.slice(r * 3, r * 3 + 3).join('\n')}\n</tr>`).join('\n')}\n</table>`;
+const readme = join(OUT, '../../README.md');
+const md = readFileSync(readme, 'utf8');
+writeFileSync(readme, md.replace(/(<!-- showcase:start[^>]*-->)[\s\S]*?(<!-- showcase:end -->)/, `$1\n${table}\n$2`));
+console.log('wrote the showcase table into README.md');
 process.exit(0);
