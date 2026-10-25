@@ -116,7 +116,7 @@ Arguments: _no arguments_
 
 **Start a run** · `project:read` · read-only · source: server
 
-Starts a new agent run with a goal — the record of what this piece of work did (run_get). A run starts on its own at connect; call this per task.
+Starts a new agent run with a goal — the record of what this piece of work did (run_get). Without one, calls join this client's current run (kept for a day); call this per task.
 
 Arguments: `goal` (string)
 
@@ -411,7 +411,7 @@ Arguments: _no arguments_
 
 **Export** · `export:write` · read-only · source: server
 
-Exports the open project as a job. With wait (default true) it returns the file when ready — inline, plus a one-hour download link to give the person. Otherwise it returns a jobId for job_get / job_result. Save first if you want the cloud copy to match.
+Exports the open project and returns the file when it is ready — inline, plus a one-hour download link to give the person — with a jobId that job_get / job_result answer again later. (wait is accepted for older clients; the export always finishes within the call.)
 
 Arguments: `format` — one of `lottie`, `dotlottie`, `runtime`, `png`, `svg` · `fromMs`? (number) · `toMs`? (number) · `atMs`? (number) · `background`? (string) · `wait`? (boolean)
 
@@ -1660,7 +1660,7 @@ Arguments: `name` (string)
 
 **Save** · `project:write` · changes the project · source: server
 
-Saves to the cloud now (edits also autosave a few seconds after they stop). If the project was saved from the editor in between, this is a REVISION_CONFLICT; force: true overwrites it.
+Saves to the cloud now (every edit already saves as it is made — this retries one that failed). If the project was saved from the editor in between, this is a REVISION_CONFLICT; force: true overwrites it.
 
 Arguments: `force`? (boolean)
 

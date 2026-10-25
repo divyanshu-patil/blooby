@@ -1,6 +1,6 @@
 {
   "capabilityVersion": "1.0.0",
-  "generatedAt": "2026-09-27T08:15:01.443Z",
+  "generatedAt": "2026-10-25T20:31:24.138Z",
   "summary": {
     "capabilities": 247,
     "byKind": {
@@ -10,7 +10,7 @@
       "session": 25,
       "server": 32
     },
-    "tested": 241,
+    "tested": 247,
     "excludedStoreActions": 22
   },
   "capabilities": [
@@ -90,6 +90,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#batch_execute"
@@ -119,6 +120,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#critique"
@@ -151,6 +153,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#editor_get_state"
@@ -270,7 +273,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#clear_animation"
     },
@@ -363,6 +367,7 @@
       "tests": [
         "packages/studio/src/copilot/crossFeature.test.ts",
         "packages/studio/src/core/easing.test.ts",
+        "packages/studio/src/core/layerClipboard.test.ts",
         "packages/studio/src/core/mascot.test.ts",
         "packages/studio/src/core/morph.test.ts",
         "packages/studio/src/core/path.test.ts",
@@ -454,6 +459,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#evaluate"
@@ -490,7 +496,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/copilot/agent.test.ts"
+        "packages/studio/src/copilot/agent.test.ts",
+        "packages/studio/src/copilot/agentMore.test.ts"
       ],
       "docs": "tools.md#get_values"
     },
@@ -541,8 +548,10 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#set_property"
@@ -634,6 +643,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#set_composition"
@@ -667,6 +677,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#capabilities_search"
@@ -695,7 +706,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#capability_get"
     },
@@ -732,6 +744,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#guide_get"
@@ -775,7 +788,8 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/core/appPresets.test.ts",
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#search"
     },
@@ -938,7 +952,9 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/copilot.test.ts",
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#add_emitter"
     },
@@ -1014,9 +1030,11 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/props.test.ts",
         "packages/studio/src/core/store.test.ts",
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#add_modifier"
     },
@@ -1056,9 +1074,11 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/agentMore.test.ts",
         "packages/studio/src/copilot/copilot.test.ts",
         "packages/studio/src/core/emitters.test.ts",
         "packages/studio/src/core/regressions.test.ts",
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/export/lottie.test.ts"
       ],
       "docs": "tools.md#editor_add_emitter"
@@ -1100,7 +1120,9 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/core/emitters.test.ts",
-        "packages/studio/src/core/regressions.test.ts"
+        "packages/studio/src/core/layerClipboard.test.ts",
+        "packages/studio/src/core/regressions.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_add_modifier"
     },
@@ -1140,7 +1162,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/emitters.test.ts"
+        "packages/studio/src/core/emitters.test.ts",
+        "packages/studio/src/core/store.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#editor_remove_emitter"
     },
@@ -1180,7 +1204,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#editor_remove_modifier"
     },
@@ -1223,6 +1248,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_select_emitter"
@@ -1271,7 +1297,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_camera"
     },
@@ -1317,7 +1344,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_effect_range"
     },
@@ -1361,7 +1389,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_emitter_parts"
     },
@@ -1447,7 +1476,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#set_layer_effect"
     },
@@ -1578,7 +1609,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#apply_expression"
     },
@@ -1623,6 +1655,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#create_expression"
@@ -1670,6 +1703,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_apply_expression"
@@ -1754,6 +1788,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_rename_expression"
@@ -1782,7 +1817,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#checkpoint_create"
     },
@@ -1810,7 +1846,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#checkpoint_diff"
     },
@@ -1832,7 +1869,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#checkpoint_list"
     },
@@ -1872,7 +1910,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#checkpoint_restore"
     },
@@ -1894,7 +1933,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#history_get"
     },
@@ -1932,7 +1972,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#history_redo"
     },
@@ -1970,7 +2011,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#history_undo"
     },
@@ -1997,6 +2039,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#transaction_begin"
@@ -2019,6 +2062,7 @@
       "mutates": false,
       "reversible": false,
       "tests": [
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#transaction_commit"
@@ -2041,7 +2085,8 @@
       "mutates": true,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#transaction_rollback"
     },
@@ -2072,7 +2117,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#inspector_get"
     },
@@ -2246,11 +2292,15 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/agent.test.ts",
+        "packages/studio/src/copilot/agentMore.test.ts",
         "packages/studio/src/copilot/copilot.test.ts",
         "packages/studio/src/copilot/crossFeature.test.ts",
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/registry.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#add_keyframe"
@@ -2295,7 +2345,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/morph.test.ts"
+        "packages/studio/src/core/morph.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_add_keyframe_now"
     },
@@ -2339,7 +2390,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/easing.test.ts"
+        "packages/studio/src/core/easing.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_delete_keyframe"
     },
@@ -2429,7 +2481,9 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/core/appPresets.test.ts",
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/core/store.test.ts",
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#editor_move_keyframe"
     },
@@ -2519,6 +2573,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/core/easing.test.ts",
+        "packages/studio/src/core/store.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#editor_set_easing"
@@ -2565,6 +2620,7 @@
       "tests": [
         "packages/studio/src/core/path.test.ts",
         "packages/studio/src/core/store.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "packages/studio/src/export/lottie.test.ts"
       ],
       "docs": "tools.md#editor_toggle_keyframe"
@@ -2621,6 +2677,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_tween_property"
@@ -2676,6 +2733,7 @@
         "packages/studio/src/copilot/copilot.test.ts",
         "packages/studio/src/copilot/crossFeature.test.ts",
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#move_keyframe"
@@ -2724,7 +2782,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#remove_keyframe"
     },
@@ -2822,7 +2882,9 @@
       "tests": [
         "packages/studio/src/copilot/crossFeature.test.ts",
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#add_layer"
@@ -2875,7 +2937,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#add_svg"
     },
@@ -2915,7 +2979,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#duplicate_layer"
     },
@@ -2960,7 +3025,9 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/crossFeature.test.ts",
-        "packages/studio/src/core/rigging.test.ts"
+        "packages/studio/src/core/layerClipboard.test.ts",
+        "packages/studio/src/core/rigging.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_add_layer"
     },
@@ -2999,7 +3066,9 @@
       "scope": "project:write",
       "mutates": true,
       "reversible": true,
-      "tests": [],
+      "tests": [
+        "packages/studio/src/core/store.test.ts"
+      ],
       "docs": "tools.md#editor_add_node"
     },
     {
@@ -3046,6 +3115,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_add_svg_asset"
@@ -3084,7 +3154,10 @@
       "scope": "project:write",
       "mutates": true,
       "reversible": true,
-      "tests": [],
+      "tests": [
+        "packages/studio/src/core/layerClipboard.test.ts",
+        "packages/studio/src/core/store.test.ts"
+      ],
       "docs": "tools.md#editor_copy_layers"
     },
     {
@@ -3123,6 +3196,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_delete_node"
@@ -3163,7 +3237,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/mascot.test.ts"
+        "packages/studio/src/core/mascot.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_duplicate_layer"
     },
@@ -3204,6 +3279,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_group_layers"
@@ -3290,7 +3366,10 @@
       "scope": "project:write",
       "mutates": true,
       "reversible": true,
-      "tests": [],
+      "tests": [
+        "packages/studio/src/core/layerClipboard.test.ts",
+        "packages/studio/src/core/store.test.ts"
+      ],
       "docs": "tools.md#editor_paste_layers"
     },
     {
@@ -3329,6 +3408,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_remove_svg_asset"
@@ -3559,6 +3639,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_ungroup_layer"
@@ -3587,7 +3668,9 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/copilot/crossFeature.test.ts"
+        "packages/studio/src/copilot/agentMore.test.ts",
+        "packages/studio/src/copilot/crossFeature.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#get_layer"
     },
@@ -3628,7 +3711,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#layer_find"
     },
@@ -3669,6 +3753,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#remove_layer"
@@ -3719,7 +3804,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#reorder_layer"
     },
@@ -3774,7 +3860,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_layer_appearance_range"
     },
@@ -3825,7 +3912,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_layer_attachment"
     },
@@ -3869,7 +3957,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#set_layer_lock"
     },
@@ -3922,7 +4012,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_layer_order"
     },
@@ -3966,7 +4057,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_layer_parent"
     },
@@ -4010,7 +4102,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#set_layer_visibility"
     },
@@ -4048,6 +4142,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#add_face"
@@ -4102,6 +4197,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#add_mascot"
@@ -4142,7 +4238,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#duplicate_mascot"
     },
@@ -4181,7 +4278,9 @@
       "scope": "project:write",
       "mutates": true,
       "reversible": true,
-      "tests": [],
+      "tests": [
+        "packages/studio/src/core/store.test.ts"
+      ],
       "docs": "tools.md#editor_add_face"
     },
     {
@@ -4225,7 +4324,8 @@
       "tests": [
         "packages/studio/src/copilot/crossFeature.test.ts",
         "packages/studio/src/core/mascot.test.ts",
-        "packages/studio/src/core/showcase.test.ts"
+        "packages/studio/src/core/showcase.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_add_mascot"
     },
@@ -4503,6 +4603,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_save_mascot_template"
@@ -4547,7 +4648,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/crossFeature.test.ts"
+        "packages/studio/src/copilot/crossFeature.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_set_face_role"
     },
@@ -4591,6 +4693,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "apps/api/src/services/users.service.test.ts"
       ],
       "docs": "tools.md#editor_set_role"
@@ -4638,6 +4741,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#pin_limb"
@@ -4678,7 +4782,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#remove_mascot"
     },
@@ -4722,7 +4827,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#rename_mascot"
     },
@@ -4784,6 +4890,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#set_eye_params"
@@ -4828,6 +4935,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_face"
@@ -4877,7 +4985,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_hand_points"
     },
@@ -4938,7 +5047,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_hand_rig"
     },
@@ -4990,7 +5100,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_leg_points"
     },
@@ -5060,7 +5171,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_leg_rig"
     },
@@ -5103,7 +5215,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_mascot_parent"
     },
@@ -5150,7 +5263,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_mascot_shape"
     },
@@ -5212,7 +5326,9 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/mascotText.test.ts",
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#set_mascot_transform"
     },
@@ -5269,6 +5385,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_pose"
@@ -5324,6 +5441,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_role"
@@ -5384,7 +5502,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#add_curve"
     },
@@ -5432,7 +5551,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#add_curve_point"
     },
@@ -5476,7 +5596,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#close_curve"
     },
@@ -5520,7 +5641,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/curve.test.ts"
+        "packages/studio/src/copilot/promptMore.test.ts",
+        "packages/studio/src/core/curve.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_add_curve"
     },
@@ -5604,7 +5727,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/curve.test.ts"
+        "packages/studio/src/core/curve.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_set_curve_type"
     },
@@ -5659,7 +5783,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#move_curve_point"
     },
@@ -5703,7 +5828,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#remove_curve_point"
     },
@@ -5743,7 +5869,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#reverse_curve"
     },
@@ -5772,6 +5899,7 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#playhead_set"
@@ -5820,8 +5948,11 @@
       "tests": [
         "packages/studio/src/copilot/copilot.test.ts",
         "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/parse.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/store.test.ts",
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#add_preset_to_timeline"
     },
@@ -5879,7 +6010,9 @@
       "tests": [
         "packages/studio/src/copilot/agent.test.ts",
         "packages/studio/src/copilot/crossFeature.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#apply_squish_preset"
@@ -5928,8 +6061,13 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/agentMore.test.ts",
         "packages/studio/src/copilot/copilot.test.ts",
-        "packages/studio/src/core/defaults.test.ts"
+        "packages/studio/src/copilot/critique.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
+        "packages/studio/src/core/defaults.test.ts",
+        "packages/studio/src/engine/session.test.ts",
+        "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#create_preset"
     },
@@ -5978,7 +6116,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#edit_preset"
     },
@@ -6199,6 +6338,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_preset_color"
@@ -6268,6 +6408,7 @@
       "mutates": false,
       "reversible": false,
       "tests": [
+        "packages/studio/src/copilot/agentMore.test.ts",
         "packages/studio/src/copilot/crossFeature.test.ts"
       ],
       "docs": "tools.md#get_preset"
@@ -6665,7 +6806,9 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/copilot/agent.test.ts",
-        "packages/studio/src/copilot/crossFeature.test.ts"
+        "packages/studio/src/copilot/agentMore.test.ts",
+        "packages/studio/src/copilot/crossFeature.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#search_presets"
     },
@@ -6688,7 +6831,10 @@
       "reversible": false,
       "tests": [
         "packages/studio/src/copilot/agent.test.ts",
-        "packages/studio/src/copilot/crossFeature.test.ts"
+        "packages/studio/src/copilot/agentMore.test.ts",
+        "packages/studio/src/copilot/crossFeature.test.ts",
+        "packages/studio/src/engine/session.test.ts",
+        "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#inspect_project"
     },
@@ -7092,7 +7238,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#editor_select_track"
     },
@@ -7123,7 +7270,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#selection_set"
     },
@@ -7300,6 +7448,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#morph_between"
@@ -7363,7 +7512,8 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/copilot.test.ts",
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_shape"
     },
@@ -7422,7 +7572,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_shape_morph"
     },
@@ -7478,6 +7629,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
@@ -7547,6 +7699,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#add_rule"
@@ -7623,6 +7776,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
@@ -7830,6 +7984,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_enable_state"
@@ -7870,6 +8025,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_fire_input"
@@ -7914,7 +8070,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/stateDirect.test.ts"
+        "packages/studio/src/core/stateDirect.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_go_to_state"
     },
@@ -7994,7 +8151,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/core/stateDirect.test.ts"
+        "packages/studio/src/core/stateDirect.test.ts",
+        "packages/studio/src/core/store.test.ts"
       ],
       "docs": "tools.md#editor_remove_state_transition"
     },
@@ -8033,7 +8191,9 @@
       "scope": "project:write",
       "mutates": true,
       "reversible": true,
-      "tests": [],
+      "tests": [
+        "packages/studio/src/core/store.test.ts"
+      ],
       "docs": "tools.md#editor_remove_transition"
     },
     {
@@ -8225,6 +8385,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_initial_state"
@@ -8351,6 +8512,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_machine_id"
@@ -8394,8 +8556,10 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/agentMore.test.ts",
         "packages/studio/src/copilot/crossFeature.test.ts",
         "packages/studio/src/core/easing.test.ts",
+        "packages/studio/src/core/layerClipboard.test.ts",
         "packages/studio/src/core/rigging.test.ts",
         "packages/studio/src/core/store.test.ts",
         "packages/studio/src/core/timeline.test.ts"
@@ -8442,6 +8606,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_state_node_position"
@@ -8535,6 +8700,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/core/scene.test.ts",
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/core/timeline.test.ts"
       ],
       "docs": "tools.md#editor_set_transition"
@@ -8623,7 +8789,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/core/store.test.ts",
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#editor_update_state_transition"
     },
@@ -8663,7 +8831,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_state"
     },
@@ -8735,6 +8904,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_transition"
@@ -8777,7 +8947,9 @@
       "scope": "project:write",
       "mutates": true,
       "reversible": true,
-      "tests": [],
+      "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts"
+      ],
       "docs": "tools.md#show_layer_in_state"
     },
     {
@@ -8828,6 +9000,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_layer_style"
@@ -8895,6 +9068,7 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_svg_fill"
@@ -8970,7 +9144,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_svg_stroke"
     },
@@ -9017,7 +9192,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/freeform.test.ts"
+        "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_svg_stroke_width"
     },
@@ -9093,7 +9269,9 @@
       "reversible": true,
       "tests": [
         "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#add_text"
@@ -9156,7 +9334,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#animate_text"
     },
@@ -9246,7 +9425,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_text"
     },
@@ -9310,6 +9490,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_text_color"
@@ -9373,7 +9554,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_text_curve"
     },
@@ -9423,6 +9605,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_text_font"
@@ -9479,7 +9662,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_text_path"
     },
@@ -9526,7 +9710,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_text_path_offset"
     },
@@ -9573,6 +9758,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_text_size"
@@ -9642,7 +9828,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/mascotText.test.ts"
+        "packages/studio/src/copilot/mascotText.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_text_stroke"
     },
@@ -9710,6 +9897,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_text_style"
@@ -9757,6 +9945,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#set_text_weight"
@@ -9802,6 +9991,7 @@
       "tests": [
         "packages/studio/src/copilot/copilot.test.ts",
         "packages/studio/src/copilot/freeform.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts",
         "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
@@ -9948,6 +10138,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_adopt_keys_into_block"
@@ -10068,6 +10259,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_duplicate_timeline"
@@ -10197,6 +10389,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_rename_block"
@@ -10326,6 +10519,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_active_lane"
@@ -10415,6 +10609,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_block_color"
@@ -10503,6 +10698,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_block_loop"
@@ -10547,6 +10743,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_block_speed"
@@ -10591,6 +10788,7 @@
       "mutates": true,
       "reversible": true,
       "tests": [
+        "packages/studio/src/core/store.test.ts",
         "packages/studio/src/engine/engine.test.ts"
       ],
       "docs": "tools.md#editor_set_duration_mode"
@@ -10631,7 +10829,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#editor_set_loop"
     },
@@ -10711,7 +10910,9 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/core/store.test.ts",
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#editor_set_timeline_loop"
     },
@@ -10763,7 +10964,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#move_block"
     },
@@ -10811,7 +11013,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#remove_block"
     },
@@ -10863,7 +11066,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_block_duration"
     },
@@ -10907,7 +11111,8 @@
       "mutates": true,
       "reversible": true,
       "tests": [
-        "packages/studio/src/copilot/copilot.test.ts"
+        "packages/studio/src/copilot/copilot.test.ts",
+        "packages/studio/src/copilot/toolsCases.test.ts"
       ],
       "docs": "tools.md#set_timeline"
     },
@@ -10936,6 +11141,7 @@
       "mutates": false,
       "reversible": false,
       "tests": [
+        "packages/studio/src/engine/session.test.ts",
         "apps/api/src/services/mcp/mcp.e2e.test.ts"
       ],
       "docs": "tools.md#timeline_get"
@@ -10958,7 +11164,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#viewport_get"
     },
@@ -10999,7 +11206,8 @@
       "mutates": false,
       "reversible": false,
       "tests": [
-        "packages/studio/src/engine/engine.test.ts"
+        "packages/studio/src/engine/engine.test.ts",
+        "packages/studio/src/engine/session.test.ts"
       ],
       "docs": "tools.md#viewport_set"
     }

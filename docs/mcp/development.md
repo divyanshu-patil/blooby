@@ -57,7 +57,8 @@ Then `pnpm --filter @blooby/api mcp:docs` to regenerate the reference and the au
 | `apps/api/src/routes/mcp.routes.ts` | `/mcp`, OAuth router, `/api/mcp/*` |
 | `apps/api/src/services/mcp/server.ts` | MCP server: tools, resources, prompts, limits, audit |
 | `apps/api/src/services/mcp/host.ts` | server capabilities, rendering, jobs |
-| `apps/api/src/services/mcp/workspace.ts` | open projects, autosave, sync, proposals |
+| `apps/api/src/services/mcp/workspace.ts` | open projects, save per edit, sync, proposals, the live feed |
+| `apps/api/src/utils/sharedState.ts` | state every instance must agree on — Redis, or this process |
 | `apps/api/src/services/mcp/auth.service.ts` | OAuth provider, PATs, consent |
 | `apps/api/src/services/mcp/prompts.ts` | MCP prompts |
 | `packages/studio/src/ui/McpPanel.tsx` | the editor's MCP tab (also the dashboard's AI apps page) |

@@ -9,6 +9,7 @@ import { assetsService } from '../assets.service.js';
 import { projectsService } from '../projects.service.js';
 import { putExport } from '../storage.service.js';
 import { HttpError } from '../../utils/httpError.js';
+import { sharedState } from '../../utils/sharedState.js';
 import { forgetLibrary, libraryFor, openProjectOf, rememberOpen, workspace, type OpenProject } from './workspace.js';
 import type { Principal } from './auth.service.js';
 
@@ -20,17 +21,20 @@ import type { Principal } from './auth.service.js';
  */
 
 export interface Run {
-  runId: string; startedAt: string; goal: string | null; projects: Set<string>;
+  runId: string; startedAt: string; goal: string | null; projects: string[];
   ops: { at: string; capability: string; ok: boolean; summary: string; error?: string }[];
   created: number; changed: number; errors: number;
 }
 
-/** One MCP connection: who, which project is current, and its run so far. */
+/**
+ * One MCP request: who, which project is current, and the run so far. The transport is
+ * stateless, so the open project and the run are loaded per request (`connFor`) and the run
+ * is written back after each call (`saveRun`) — whichever instance serves the next one.
+ */
 export interface Conn {
   principal: Principal;
   projectId: string | null;
   run: Run;
-  subscriptions: Set<string>;
 }
 
 export interface HostResult {
@@ -44,25 +48,32 @@ export interface HostResult {
 }
 
 export const newRun = (goal: string | null = null): Run => ({
-  runId: `run_${randomUUID().slice(0, 8)}`, startedAt: new Date().toISOString(), goal, projects: new Set(), ops: [], created: 0, changed: 0, errors: 0,
+  runId: `run_${randomUUID().slice(0, 8)}`, startedAt: new Date().toISOString(), goal, projects: [], ops: [], created: 0, changed: 0, errors: 0,
 });
 
-/** Note which project this person is working on, for this connection and for the next one. */
-export function setProject(conn: Conn, projectId: string) {
+/** A run belongs to one person in one client — Claude and Cursor on the same account keep their own. */
+const runKey = (p: Principal) => `mcp:run:${p.userId}:${p.clientId}`;
+export async function connFor(principal: Principal): Promise<Conn> {
+  const [projectId, run] = await Promise.all([openProjectOf(principal.userId), sharedState.get<Run>(runKey(principal))]);
+  return { principal, projectId, run: run ?? newRun() };
+}
+export const saveRun = (conn: Conn) => sharedState.set(runKey(conn.principal), conn.run, 24 * 3600);
+
+/** Note which project this person is working on, for this call and the next one. */
+export async function setProject(conn: Conn, projectId: string) {
   conn.projectId = projectId;
-  conn.run.projects.add(projectId);
-  rememberOpen(conn.principal.userId, projectId);
+  if (!conn.run.projects.includes(projectId)) conn.run.projects.push(projectId);
+  await rememberOpen(conn.principal.userId, projectId);
 }
 
 /**
  * The project this person works on, opened and synced — or a refusal they can act on.
  *
- * Falls back to the project they last opened, because a client that does not keep its MCP
- * session (ChatGPT's connector, among others) arrives on a new connection every call, and
- * "the project I opened" must survive that.
+ * `conn.projectId` is the project the person last opened (`connFor` loads it per request), so
+ * "the project I opened" survives every call arriving on a fresh connection.
  */
 export async function current(conn: Conn): Promise<{ o: OpenProject; warning: string | null }> {
-  const projectId = conn.projectId ?? openProjectOf(conn.principal.userId);
+  const { projectId } = conn;
   if (!projectId) {
     const recent = await projectsService.list(conn.principal.userId, { limit: 5, sort: 'recent' })
       .then((p) => p.items.map((x) => ({ id: x.id, name: x.name }))).catch(() => []);
@@ -74,7 +85,7 @@ export async function current(conn: Conn): Promise<{ o: OpenProject; warning: st
     });
   }
   const o = await workspace.open(conn.principal.userId, projectId).catch(asCapabilityError);
-  setProject(conn, projectId);
+  await setProject(conn, projectId);
   return { o, warning: await workspace.sync(o) };
 }
 
@@ -108,53 +119,74 @@ export function png(svg: string, width: number): Buffer {
 // ---------------------------------------------------------------------------
 // jobs
 
+/**
+ * An export. It runs to the end inside the call that started it — on a serverless host the
+ * instance is frozen once the response is sent, so a job "in the background" would never
+ * finish. The record lives in sharedState so job_get works from any instance; the file's
+ * bytes stay on the instance that made it, and anywhere else are fetched back from storage.
+ */
 interface Job {
   id: string; userId: string; label: string; status: 'running' | 'done' | 'failed' | 'cancelled'; progress: number;
-  startedAt: string; finishedAt?: string; error?: string; cancelled?: boolean;
-  result?: { filename: string; mimeType: string; bytes: Buffer; url: string | null; warnings: string[]; info: Record<string, unknown> };
-  done: Promise<void>;
+  startedAt: string; finishedAt?: string; error?: string;
+  result?: { filename: string; mimeType: string; size: number; url: string | null; warnings: string[]; info: Record<string, unknown> };
 }
-const jobs = new Map<string, Job>();
-setInterval(() => { for (const [id, j] of jobs) if (Date.now() - Date.parse(j.startedAt) > 30 * 60_000) jobs.delete(id); }, 60_000).unref();
+type Made = Omit<NonNullable<Job['result']>, 'size' | 'url'> & { bytes: Buffer };
+const JOB_TTL = 30 * 60;
+const jobsKey = (userId: string) => `mcp:jobs:${userId}`;
+const files = new Map<string, { at: number; bytes: Buffer }>();
+setInterval(() => { for (const [id, f] of files) if (Date.now() - f.at > JOB_TTL * 1000) files.delete(id); }, 60_000).unref();
 
-function startJob(userId: string, label: string, work: (job: Job) => Promise<NonNullable<Job['result']>>): Job {
-  const job = { id: `job_${randomUUID().slice(0, 8)}`, userId, label, status: 'running', progress: 0, startedAt: new Date().toISOString() } as Job;
-  job.done = (async () => {
-    try {
-      const r = await work(job);
-      if (job.cancelled) return;
-      // the download link is a convenience: a storage hiccup must not lose the file itself
-      r.url = await putExport(userId, job.id, r.filename, r.bytes, r.mimeType).then((x) => x.url).catch(() => null);
-      Object.assign(job, { result: r, status: 'done', progress: 1 });
-    } catch (e) {
-      Object.assign(job, { status: 'failed', error: e instanceof Error ? e.message : String(e) });
-    } finally { job.finishedAt = new Date().toISOString(); }
-  })();
-  jobs.set(job.id, job);
+async function runJob(userId: string, label: string, work: (job: Job) => Promise<Made>): Promise<Job> {
+  const job: Job = { id: `job_${randomUUID().slice(0, 8)}`, userId, label, status: 'running', progress: 0, startedAt: new Date().toISOString() };
+  await sharedState.hset(jobsKey(userId), job.id, job, JOB_TTL);
+  try {
+    const { bytes, ...r } = await work(job);
+    // the download link is a convenience: a storage hiccup must not lose the file itself
+    const url = await putExport(userId, job.id, r.filename, bytes, r.mimeType).then((x) => x.url).catch(() => null);
+    files.set(job.id, { at: Date.now(), bytes });
+    Object.assign(job, { result: { ...r, size: bytes.length, url }, status: 'done', progress: 1 });
+  } catch (e) {
+    Object.assign(job, { status: 'failed', error: e instanceof Error ? e.message : String(e) });
+  }
+  job.finishedAt = new Date().toISOString();
+  // cancelled from another call while it ran: that word stands
+  if ((await sharedState.hget<Job>(jobsKey(userId), job.id))?.status === 'cancelled') job.status = 'cancelled';
+  await sharedState.hset(jobsKey(userId), job.id, job, JOB_TTL);
   return job;
 }
 
-const jobOf = (conn: Conn, id: unknown) => {
-  const j = jobs.get(String(id));
-  if (!j || j.userId !== conn.principal.userId) throw new CapabilityError('NOT_FOUND', `No job "${id}".`, { suggestion: 'job_list shows your recent jobs.' });
+async function jobOf(conn: Conn, id: unknown) {
+  const j = await sharedState.hget<Job>(jobsKey(conn.principal.userId), String(id));
+  if (!j) throw new CapabilityError('NOT_FOUND', `No job "${id}".`, { suggestion: 'job_list shows your recent jobs.' });
   return j;
-};
+}
 const jobView = (j: Job) => ({
   jobId: j.id, label: j.label, status: j.status, progress: j.progress, startedAt: j.startedAt, finishedAt: j.finishedAt ?? null, error: j.error ?? null,
-  ...(j.result ? { file: { filename: j.result.filename, mimeType: j.result.mimeType, bytes: j.result.bytes.length, downloadUrl: j.result.url, warnings: j.result.warnings, ...j.result.info } } : {}),
+  ...(j.result ? { file: { filename: j.result.filename, mimeType: j.result.mimeType, bytes: j.result.size, downloadUrl: j.result.url, warnings: j.result.warnings, ...j.result.info } } : {}),
 });
-function jobResources(j: Job): HostResult['resources'] {
+/** A finished job's file: from this instance if it made it, else from storage. Null when neither has it. */
+async function bytesOf(j: Job): Promise<Buffer | null> {
+  const here = files.get(j.id)?.bytes;
+  if (here) return here;
+  if (!j.result?.url) return null;
+  const res = await fetch(j.result.url).catch(() => null);
+  return res?.ok ? Buffer.from(await res.arrayBuffer()) : null;
+}
+async function jobResources(j: Job): Promise<HostResult['resources']> {
   const r = j.result!;   // only ever asked of a finished job
   const uri = `blooby://exports/${j.id}/${r.filename}`;
   const text = r.mimeType === 'application/json' || r.mimeType.startsWith('image/svg');
-  if (text && r.bytes.length <= 200_000) return [{ uri, mimeType: r.mimeType, text: r.bytes.toString('utf8') }];
-  if (!text && r.bytes.length <= 1_500_000) return [{ uri, mimeType: r.mimeType, blob: r.bytes.toString('base64') }];
-  return [];
+  if (r.size > (text ? 200_000 : 1_500_000)) return [];
+  const bytes = await bytesOf(j);
+  if (!bytes) return [];
+  return [text ? { uri, mimeType: r.mimeType, text: bytes.toString('utf8') } : { uri, mimeType: r.mimeType, blob: bytes.toString('base64') }];
 }
-export const readExport = (userId: string, jobId: string) => {
-  const j = jobs.get(jobId);
-  return j && j.userId === userId ? j : undefined;
-};
+/** The file of one of this person's finished exports, for the blooby://exports resource. */
+export async function readExport(userId: string, jobId: string) {
+  const j = await sharedState.hget<Job>(jobsKey(userId), jobId);
+  const bytes = j?.result ? await bytesOf(j) : null;
+  return j?.result && bytes ? { mimeType: j.result.mimeType, bytes } : undefined;
+}
 
 // ---------------------------------------------------------------------------
 // presets, from every source
@@ -227,7 +259,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       }
       if (!id) throw new CapabilityError('MISSING_ARGUMENT', 'Give projectId or name.', { field: 'projectId' });
       const o = await workspace.open(conn.principal.userId, id).catch(asCapabilityError);
-      setProject(conn, id);
+      await setProject(conn, id);
       const state = (await o.session.invoke('editor_get_state', { level: 'standard' })).result;
       return { summary: `Opened “${o.name}”`, data: { projectId: id, name: o.name, url: editorUrl(id), canEdit: o.canEdit, state, next: 'render_frame to see it; guide_get { topic: "workflow" } for how to work. `url` is where the person opens it — give it to them when they want to watch it play or export a GIF.' } };
     },
@@ -241,12 +273,16 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
         .then((p) => p.items.find((x) => x.name.toLowerCase() === String(a.name).toLowerCase())).catch(() => undefined);
       const row = await projectsService.create(conn.principal.userId, { name: String(a.name).slice(0, 120), project: {} }).catch(asCapabilityError);
       const o = await workspace.open(conn.principal.userId, row.id);
-      setProject(conn, row.id);
-      workspace.scheduleSave(o);   // write the full default document, not the `{}` seed
+      await setProject(conn, row.id);
+      // write the full default document, not the `{}` seed
+      const unsaved = await workspace.persist(o, true);
       return {
         summary: `Created “${row.name}”`,
         data: { projectId: row.id, name: row.name, url: editorUrl(row.id), state: (await o.session.invoke('editor_get_state', { level: 'standard' })).result },
-        warnings: twin ? [`You already had a project called “${twin.name}” (${twin.id}); this is a second one. project_delete removes either.`] : [],
+        warnings: [
+          ...(twin ? [`You already had a project called “${twin.name}” (${twin.id}); this is a second one. project_delete removes either.`] : []),
+          ...(unsaved ? [unsaved] : []),
+        ],
       };
     },
   },
@@ -262,7 +298,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
   },
   {
     id: 'project_save', title: 'Save', category: 'project', mutates: true, scope: 'project:write',
-    description: 'Saves to the cloud now (edits also autosave a few seconds after they stop). If the project was saved from the editor in between, this is a REVISION_CONFLICT; force: true overwrites it.',
+    description: 'Saves to the cloud now (every edit already saves as it is made — this retries one that failed). If the project was saved from the editor in between, this is a REVISION_CONFLICT; force: true overwrites it.',
     inputSchema: obj({ force: bool }),
     handler: async (conn, a) => {
       const { o } = await current(conn);
@@ -290,8 +326,8 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       await projectsService.update(o.projectId, conn.principal.userId, { name: String(a.name).slice(0, 120) }).catch(asCapabilityError);
       o.name = String(a.name);
       await o.session.rename(String(a.name));
-      workspace.scheduleSave(o);
-      return { summary: `Renamed to “${a.name}”` };
+      const unsaved = await workspace.persist(o, true);   // a rename is not an edit the session counts
+      return { summary: `Renamed to “${a.name}”`, ...(unsaved ? { warnings: [unsaved] } : {}) };
     },
   },
   {
@@ -302,10 +338,10 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       const source = (a.projectId as string | undefined) ?? conn.projectId;
       if (!source) throw new CapabilityError('NO_PROJECT', 'Open a project or give projectId.');
       const o = workspace.get(conn.principal.userId, source);
-      if (o?.session.dirty && o.canEdit) await workspace.save(o);
+      if (o) await workspace.persist(o);
       const copy = await projectsService.duplicate(source, conn.principal.userId, a.name as string | undefined).catch(asCapabilityError);
       await workspace.open(conn.principal.userId, copy.id);
-      setProject(conn, copy.id);
+      await setProject(conn, copy.id);
       return { summary: `Duplicated as “${copy.name}” and opened it`, data: { projectId: copy.id, name: copy.name, url: editorUrl(copy.id) } };
     },
   },
@@ -314,11 +350,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     description: 'Saves anything unsaved and closes the project on this connection.',
     inputSchema: obj({}),
     handler: async (conn) => {
-      if (conn.projectId) {
-        const o = workspace.get(conn.principal.userId, conn.projectId);
-        if (o?.session.dirty && o.canEdit) await workspace.save(o).catch(() => undefined);
-      }
-      if (conn.projectId) workspace.close(conn.principal.userId, conn.projectId);
+      if (conn.projectId) await workspace.close(conn.principal.userId, conn.projectId);
       conn.projectId = null;
       return { summary: 'Closed' };
     },
@@ -330,7 +362,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     handler: async (conn, a) => {
       if (a.confirm !== true) throw new CapabilityError('CONFIRMATION_REQUIRED', 'Deleting is permanent: pass confirm: true once the person has asked for it.', { field: 'confirm' });
       await projectsService.remove(String(a.projectId), conn.principal.userId).catch(asCapabilityError);
-      workspace.close(conn.principal.userId, String(a.projectId));
+      await workspace.close(conn.principal.userId, String(a.projectId));
       if (conn.projectId === a.projectId) conn.projectId = null;
       return { summary: 'Deleted' };
     },
@@ -533,7 +565,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
   },
   {
     id: 'export_start', title: 'Export', category: 'export', mutates: false, scope: 'export:write', async: true,
-    description: 'Exports the open project as a job. With wait (default true) it returns the file when ready — inline, plus a one-hour download link to give the person. Otherwise it returns a jobId for job_get / job_result. Save first if you want the cloud copy to match.',
+    description: 'Exports the open project and returns the file when it is ready — inline, plus a one-hour download link to give the person — with a jobId that job_get / job_result answer again later. (wait is accepted for older clients; the export always finishes within the call.)',
     inputSchema: obj({ format: { type: 'string', enum: ['lottie', 'dotlottie', 'runtime', 'png', 'svg'] }, fromMs: num, toMs: num, atMs: num, background: str, wait: bool }, ['format']),
     examples: [{ format: 'lottie' }, { format: 'dotlottie' }],
     handler: async (conn, a) => {
@@ -543,33 +575,32 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
       const base = (project.name || 'blooby').replace(/[^\w-]+/g, '-').toLowerCase();
       const background = (a.background as string | undefined) ?? null;
       const svgAt = () => o.session.frameSvg(at, { background });
-      const job = startJob(conn.principal.userId, `${a.format} of “${o.name}”`, async (j) => {
+      const job = await runJob(conn.principal.userId, `${a.format} of “${o.name}”`, async (j) => {
         switch (a.format) {
           case 'lottie': {
             const r = bakeLottie(project, { background, name: base, ...(typeof a.fromMs === 'number' ? { from: a.fromMs } : {}), ...(typeof a.toMs === 'number' ? { to: a.toMs } : {}) });
             j.progress = 0.9;
-            return { filename: `${base}.json`, mimeType: 'application/json', bytes: Buffer.from(JSON.stringify(r.json)), url: null, warnings: [...r.warnings, ...r.skipped.map((s) => `skipped: ${s}`)], info: { frames: r.frames, keyframes: r.keyframeCount } };
+            return { filename: `${base}.json`, mimeType: 'application/json', bytes: Buffer.from(JSON.stringify(r.json)), warnings: [...r.warnings, ...r.skipped.map((s) => `skipped: ${s}`)], info: { frames: r.frames, keyframes: r.keyframeCount } };
           }
           case 'dotlottie': {
             const r = await buildDotLottie(project, { background });
-            return { filename: `${base}.lottie`, mimeType: 'application/zip', bytes: Buffer.from(await r.blob.arrayBuffer()), url: null, warnings: [], info: { animations: r.animations, states: project.timelines.map((t) => t.name) } };
+            return { filename: `${base}.lottie`, mimeType: 'application/zip', bytes: Buffer.from(await r.blob.arrayBuffer()), warnings: [], info: { animations: r.animations, states: project.timelines.map((t) => t.name) } };
           }
           case 'runtime': {
             const r = await buildRuntimePack(project, { background });
-            return { filename: `${base}-react-native.zip`, mimeType: 'application/zip', bytes: Buffer.from(await r.blob.arrayBuffer()), url: null, warnings: [], info: {} };
+            return { filename: `${base}-react-native.zip`, mimeType: 'application/zip', bytes: Buffer.from(await r.blob.arrayBuffer()), warnings: [], info: {} };
           }
           case 'png': {
             const comp = compOf(project);
-            return { filename: `${base}-${Math.round(at)}ms.png`, mimeType: 'image/png', bytes: png(await svgAt(), comp.width * 2), url: null, warnings: [], info: { atMs: at } };
+            return { filename: `${base}-${Math.round(at)}ms.png`, mimeType: 'image/png', bytes: png(await svgAt(), comp.width * 2), warnings: [], info: { atMs: at } };
           }
-          case 'svg': return { filename: `${base}-${Math.round(at)}ms.svg`, mimeType: 'image/svg+xml', bytes: Buffer.from(await svgAt()), url: null, warnings: [], info: { atMs: at } };
+          case 'svg': return { filename: `${base}-${Math.round(at)}ms.svg`, mimeType: 'image/svg+xml', bytes: Buffer.from(await svgAt()), warnings: [], info: { atMs: at } };
           default: throw new CapabilityError('INVALID_VALUE', `Unknown format "${a.format}".`);
         }
       });
-      if (a.wait !== false) await Promise.race([job.done, new Promise((r) => setTimeout(r, 25_000))]);
       return {
         summary: job.status === 'done' ? `Exported ${job.result!.filename}` : `Export ${job.status}`,
-        data: jobView(job), resources: job.status === 'done' ? jobResources(job) : [],
+        data: jobView(job), resources: job.status === 'done' ? await jobResources(job) : [],
         ...(job.status === 'failed' ? { warnings: [job.error!] } : {}),
       };
     },
@@ -578,16 +609,16 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     id: 'job_get', title: 'Job status', category: 'job', mutates: false, scope: 'export:write',
     description: 'A job\'s status, progress, and when done its file (name, size, download link).',
     inputSchema: obj({ jobId: str }, ['jobId']),
-    handler: async (conn, a) => { const j = jobOf(conn, a.jobId); return { summary: `${j.label}: ${j.status}`, data: jobView(j) }; },
+    handler: async (conn, a) => { const j = await jobOf(conn, a.jobId); return { summary: `${j.label}: ${j.status}`, data: jobView(j) }; },
   },
   {
     id: 'job_result', title: 'Job result', category: 'job', mutates: false, scope: 'export:write',
     description: 'A finished job\'s file, inline (as an embedded resource) with its download link.',
     inputSchema: obj({ jobId: str }, ['jobId']),
     handler: async (conn, a) => {
-      const j = jobOf(conn, a.jobId);
+      const j = await jobOf(conn, a.jobId);
       if (j.status !== 'done') throw new CapabilityError('JOB_NOT_DONE', `The job is ${j.status}.`, { suggestion: j.status === 'running' ? 'job_get until done.' : j.error ?? '' });
-      return { summary: j.result!.filename, data: jobView(j), resources: jobResources(j) };
+      return { summary: j.result!.filename, data: jobView(j), resources: await jobResources(j) };
     },
   },
   {
@@ -595,8 +626,11 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     description: 'Cancels a running job.',
     inputSchema: obj({ jobId: str }, ['jobId']),
     handler: async (conn, a) => {
-      const j = jobOf(conn, a.jobId);
-      if (j.status === 'running') Object.assign(j, { cancelled: true, status: 'cancelled' });
+      const j = await jobOf(conn, a.jobId);
+      if (j.status === 'running') {
+        j.status = 'cancelled';
+        await sharedState.hset(jobsKey(conn.principal.userId), j.id, j, JOB_TTL);
+      }
       return { summary: `Job ${j.status}`, data: jobView(j) };
     },
   },
@@ -604,13 +638,13 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     id: 'job_list', title: 'Recent jobs', category: 'job', mutates: false, scope: 'export:write',
     description: 'Your jobs from the last half hour.',
     inputSchema: obj({}),
-    handler: async (conn) => ({ summary: 'Jobs', data: [...jobs.values()].filter((j) => j.userId === conn.principal.userId).map(jobView) }),
+    handler: async (conn) => ({ summary: 'Jobs', data: (await sharedState.hvals<Job>(jobsKey(conn.principal.userId))).map(jobView) }),
   },
 
   // --- the run, and who you are ---------------------------------------------------------
   {
     id: 'run_start', title: 'Start a run', category: 'agent', mutates: false, scope: 'project:read',
-    description: 'Starts a new agent run with a goal — the record of what this piece of work did (run_get). A run starts on its own at connect; call this per task.',
+    description: 'Starts a new agent run with a goal — the record of what this piece of work did (run_get). Without one, calls join this client\'s current run (kept for a day); call this per task.',
     inputSchema: obj({ goal: str }, ['goal']),
     handler: async (conn, a) => { conn.run = newRun(String(a.goal)); return { summary: `Run ${conn.run.runId}`, data: { runId: conn.run.runId } }; },
   },
@@ -629,7 +663,7 @@ const HOST: (Omit<Capability, 'kind' | 'since' | 'requires' | 'reversible'> & { 
     description: 'In "ask me first" mode every change waits for the person to approve it in the editor. This says whether it was applied (with its result), rejected, or is still pending.',
     inputSchema: obj({ proposalId: str }, ['proposalId']),
     handler: async (conn, a) => {
-      const p = workspace.proposal(conn.principal.userId, String(a.proposalId));
+      const p = await workspace.proposal(conn.principal.userId, String(a.proposalId));
       if (!p) throw new CapabilityError('NOT_FOUND', `No proposal "${a.proposalId}".`);
       return { summary: p.status, data: { proposalId: p.id, status: p.status, capability: p.capability, summary: p.summary, result: p.result ?? null, error: p.error ?? null } };
     },

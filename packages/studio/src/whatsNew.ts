@@ -38,6 +38,18 @@ const step = (element: string, title: string, description: string): DriveStep =>
 
 export const RELEASES: Release[] = [
   {
+    version: '2026.10.26',
+    date: '26 October 2026',
+    title: 'AI edits land the moment they are made',
+    items: [
+      {
+        id: 'mcp-save-per-edit', surface: 'editor',
+        title: 'Claude and ChatGPT edits show up straight away',
+        body: 'When an AI app is working on your project, each change it makes is saved as it makes it, so it appears in your editor without the old few-second pause — and nothing it did is lost if the connection drops halfway through. If you edit at the same moment, it is told to take your version or keep its own instead of quietly overwriting yours.',
+      },
+    ],
+  },
+  {
     version: '2026.09.29',
     date: '29 September 2026',
     title: 'A fresh new look, and a much faster editor',

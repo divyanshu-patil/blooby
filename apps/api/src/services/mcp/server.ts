@@ -1,7 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema,
-  ListToolsRequestSchema, ReadResourceRequestSchema, SubscribeRequestSchema, UnsubscribeRequestSchema,
+  ListToolsRequestSchema, ReadResourceRequestSchema,
   type CallToolResult, type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
@@ -10,8 +10,8 @@ import {
 } from '@blooby/studio/engine';
 import { mcpRepository } from '../../repositories/mcp.repository.js';
 import { projectsService } from '../projects.service.js';
-import { current, DESTRUCTIVE, HOST_HANDLERS, readExport, scratchSession, type Conn, type HostResult } from './host.js';
-import { libraryFor, openProjectOf, workspace } from './workspace.js';
+import { current, DESTRUCTIVE, HOST_HANDLERS, readExport, saveRun, scratchSession, type Conn, type HostResult } from './host.js';
+import { libraryFor, workspace } from './workspace.js';
 import { PROMPTS } from './prompts.js';
 
 /**
@@ -110,7 +110,7 @@ setInterval(() => {
 const INSTRUCTIONS = `Blooby is a motion-design editor for mascot animation that exports Lottie. You are operating it as the signed-in person.
 Start with project_list / project_open (or project_create), then editor_get_state and render_frame to SEE the project.
 Before animating, read guide_get { topic: "craft" } and study a similar preset (preset_search → preset_get): match its timing and easing.
-Edits autosave to the person's cloud project and appear in their editor; every edit is undoable (history_undo).
+Every edit saves to the person's cloud project as it is made and appears in their editor; every edit is undoable (history_undo).
 Check your work visually with render_frame / render_sequence and with critique, then export_start for Lottie or dotLottie.
 Every project capability returns a "url" — where the person opens it in Blooby. Give it to them when they want to watch
 it play, or export a GIF or MP4, which are encoded in their browser rather than here.
@@ -176,7 +176,7 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
       if (cap.mutates && conn.principal.mode === 'suggest' && cap.kind !== 'server') out = await propose(conn, id, args);
       else if (cap.mutates && conn.principal.mode === 'suggest' && DESTRUCTIVE.has(id)) throw new CapabilityError('NOT_IN_SUGGEST_MODE', 'Deleting is not available in "ask me first" mode.');
       else if (HOST_HANDLERS.has(id)) out = await HOST_HANDLERS.get(id)!(conn, args);
-      else if (!cap.requires.includes('project') && !conn.projectId && !openProjectOf(userId)) {
+      else if (!cap.requires.includes('project') && !conn.projectId) {
         // discovery and the guides answer before anything is open
         const r = await (await scratchSession()).invoke(id, args);
         out = { summary: r.summary, data: r.result };
@@ -184,16 +184,16 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
         const { o, warning } = await current(conn);
         const before = o.session.revision;
         const r = await o.session.invoke(id, args);
-        if (o.session.revision !== before) workspace.scheduleSave(o);
+        const unsaved = o.session.revision !== before ? await workspace.persist(o) : null;
         conn.run.created += r.created.length;
         conn.run.changed += r.changed.length;
         const { summary, result, warnings, ok: _ok, ...meta } = r;
-        out = { summary, data: result, meta, warnings: warning ? [warning, ...warnings] : warnings };
+        out = { summary, data: result, meta, warnings: [...(warning ? [warning] : []), ...warnings, ...(unsaved ? [unsaved] : [])] };
       }
     } finally { inFlight.set(userId, inFlight.get(userId)! - 1); }
 
     projectId = conn.projectId;
-    record(conn, id, true, out.summary, Date.now() - started, projectId);
+    await record(conn, id, true, out.summary, Date.now() - started, projectId);
     // told while it can still act on it: a client that only learns the limit by hitting it
     // has already lost the call it cared about
     const b = budget(userId, id);
@@ -211,8 +211,8 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
     };
   } catch (e) {
     const code = e instanceof CapabilityError ? e.code : 'INTERNAL';
-    record(conn, id || name, false, '', Date.now() - started, projectId, code);
     conn.run.errors++;
+    await record(conn, id || name, false, '', Date.now() - started, projectId, code);
     return failure(e);
   }
 }
@@ -221,7 +221,7 @@ export async function callTool(conn: Conn, name: string, rawArgs: Record<string,
 async function propose(conn: Conn, id: string, args: Record<string, unknown>): Promise<HostResult> {
   const { o } = await current(conn);
   const preview = await o.session.invoke(id, { ...args, dryRun: true });
-  const p = workspace.propose({
+  const p = await workspace.propose({
     userId: conn.principal.userId, projectId: o.projectId, client: conn.principal.clientName, capability: id, args,
     summary: preview.summary, preview: { created: preview.created, deleted: preview.deleted, changed: preview.changed },
   });
@@ -231,17 +231,24 @@ async function propose(conn: Conn, id: string, args: Record<string, unknown>): P
   };
 }
 
-function record(conn: Conn, capability: string, ok: boolean, summary: string, ms: number, projectId: string | null, error?: string) {
+/**
+ * The call's traces — the run, the editor's live feed, the audit row. Awaited, all of them:
+ * on a serverless host nothing is guaranteed to run once the response has gone.
+ */
+async function record(conn: Conn, capability: string, ok: boolean, summary: string, ms: number, projectId: string | null, error?: string) {
   const at = new Date().toISOString();
   conn.run.ops.push({ at, capability, ok, summary, ...(error ? { error } : {}) });
-  if (conn.run.ops.length > 1000) conn.run.ops.shift();
+  if (conn.run.ops.length > 200) conn.run.ops.shift();
   const o = projectId ? workspace.get(conn.principal.userId, projectId) : undefined;
-  if (o) workspace.record(o, { at, client: conn.principal.clientName, capability, summary, ok, ...(error ? { error } : {}) });
-  // names and ids only: never arguments, tokens or project content
-  void mcpRepository.audit({
-    userId: conn.principal.userId, clientId: conn.principal.clientId.startsWith('pat:') ? null : conn.principal.clientId, tokenId: conn.principal.tokenId,
-    operation: capability.slice(0, 80), projectId, ok, errorCode: error ?? null, runId: conn.run.runId, durationMs: ms,
-  }).catch(() => {});
+  await Promise.all([
+    saveRun(conn),
+    o && workspace.record(o, { at, client: conn.principal.clientName, capability, summary, ok, ...(error ? { error } : {}) }),
+    // names and ids only: never arguments, tokens or project content
+    mcpRepository.audit({
+      userId: conn.principal.userId, clientId: conn.principal.clientId.startsWith('pat:') ? null : conn.principal.clientId, tokenId: conn.principal.tokenId,
+      operation: capability.slice(0, 80), projectId, ok, errorCode: error ?? null, runId: conn.run.runId, durationMs: ms,
+    }).catch(() => {}),
+  ]);
   if (process.env.NODE_ENV !== 'test') console.info(JSON.stringify({ mcp: capability, ok, ms, ...(error ? { error } : {}), user: conn.principal.userId.slice(0, 8), client: conn.principal.clientName }));
 }
 
@@ -298,10 +305,10 @@ async function readResource(conn: Conn, uri: string) {
   }
   const exp = /^blooby:\/\/exports\/([^/]+)/.exec(uri);
   if (exp) {
-    const j = readExport(conn.principal.userId, exp[1]);
-    if (!j?.result) throw new CapabilityError('NOT_FOUND', 'No such export (they last 30 minutes).');
-    const isText = j.result.mimeType === 'application/json' || j.result.mimeType.startsWith('image/svg');
-    return { contents: [isText ? { uri, mimeType: j.result.mimeType, text: j.result.bytes.toString('utf8') } : { uri, mimeType: j.result.mimeType, blob: j.result.bytes.toString('base64') }] };
+    const f = await readExport(conn.principal.userId, exp[1]);
+    if (!f) throw new CapabilityError('NOT_FOUND', 'No such export (they last 30 minutes).');
+    const isText = f.mimeType === 'application/json' || f.mimeType.startsWith('image/svg');
+    return { contents: [isText ? { uri, mimeType: f.mimeType, text: f.bytes.toString('utf8') } : { uri, mimeType: f.mimeType, blob: f.bytes.toString('base64') }] };
   }
   throw new CapabilityError('NOT_FOUND', `No resource ${uri}.`);
 }
@@ -311,36 +318,16 @@ async function readResource(conn: Conn, uri: string) {
 export function createMcpServer(conn: Conn, profile: Profile): Server {
   const server = new Server(
     { name: 'blooby', title: 'Blooby Studio', version: CAPABILITY_VERSION },
-    { capabilities: { tools: {}, resources: { subscribe: true }, prompts: {}, logging: {} }, instructions: INSTRUCTIONS },
+    // no resource subscriptions: telling a client about a change needs a stream held open
+    // between calls, which a stateless server (routes/mcp.routes.ts) does not have
+    { capabilities: { tools: {}, resources: {}, prompts: {}, logging: {} }, instructions: INSTRUCTIONS },
   );
 
-  // tell a subscribed client when the open project changes, whoever changed it
-  let watching: { projectId: string; stop: () => void } | null = null;
-  const watch = () => {
-    if (watching?.projectId === conn.projectId) return;
-    watching?.stop();
-    watching = null;
-    const o = conn.projectId ? workspace.get(conn.principal.userId, conn.projectId) : undefined;
-    if (!o) return;
-    const stop = o.session.on((e) => {
-      if (e.type !== 'changed') return;
-      for (const uri of conn.subscriptions) if (uri.startsWith('blooby://project/current')) void server.sendResourceUpdated({ uri }).catch(() => {});
-    });
-    watching = { projectId: o.projectId, stop: () => { stop(); } };
-  };
-  server.onclose = () => watching?.stop();
-
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsFor(conn, profile) }));
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const r = await callTool(conn, req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>);
-    watch();
-    return r;
-  });
+  server.setRequestHandler(CallToolRequestSchema, async (req) => callTool(conn, req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>));
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: STATIC }));
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: TEMPLATES }));
   server.setRequestHandler(ReadResourceRequestSchema, async (req) => readResource(conn, req.params.uri));
-  server.setRequestHandler(SubscribeRequestSchema, async (req) => { conn.subscriptions.add(req.params.uri); watch(); return {}; });
-  server.setRequestHandler(UnsubscribeRequestSchema, async (req) => { conn.subscriptions.delete(req.params.uri); return {}; });
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS.map(({ build: _b, ...p }) => p) }));
   server.setRequestHandler(GetPromptRequestSchema, async (req) => {
     const p = PROMPTS.find((x) => x.name === req.params.name);

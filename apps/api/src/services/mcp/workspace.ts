@@ -4,20 +4,24 @@ import { prisma } from '../../config/prisma.js';
 import { projectsRepository } from '../../repositories/projects.repository.js';
 import { projectsService } from '../projects.service.js';
 import { HttpError } from '../../utils/httpError.js';
+import { sharedState } from '../../utils/sharedState.js';
 
 /**
  * The projects AI clients have open, one live EditorSession per (person, project).
  *
  * Shared by every MCP connection of that person, so Claude and Cursor working on the same
- * project see the same document. The cloud copy stays the single source of truth:
- *   - AI edits autosave to it (debounced), exactly as the editor's own autosave does,
- *     with the same compare-and-set on `currentVersion`;
- *   - before every call the stored version is checked; a newer save from the editor is
- *     loaded when the AI has nothing unsaved, and is a REVISION_CONFLICT when it has.
- * The editor polls `live()` for the other direction.
+ * project see the same document. The cloud copy is the single source of truth, and it is
+ * kept CURRENT: every call that changes the document saves before it answers. That is what
+ * lets any instance serve the next call — the session here is only a cache, rebuilt from the
+ * cloud copy by `sync` when another instance (or the editor) saved since.
+ *   - saves use the editor's compare-and-set on `currentVersion`;
+ *   - before every call the stored version is checked; a newer save is loaded when this
+ *     session has nothing unsaved, and is a REVISION_CONFLICT when it has.
+ * What does NOT cross instances: undo history, checkpoints and an open transaction live in
+ * the session, so a call served elsewhere starts them over (the document itself is intact).
  *
- * ponytail: in-process maps — one API instance. Several instances need these (and the MCP
- * transport sessions) pinned per user, or moved to Redis.
+ * Who has which project open, the proposals and the live feed the editor polls are small,
+ * and live in utils/sharedState (Redis, or this process without one).
  */
 
 export interface Activity { at: string; client: string; capability: string; summary: string; ok: boolean; error?: string }
@@ -30,32 +34,44 @@ export interface Proposal {
 export interface OpenProject {
   userId: string; projectId: string; name: string; canEdit: boolean;
   session: EditorSession; baseVersion: number;
-  activity: Activity[]; agents: Map<string, number>;
-  saveTimer?: ReturnType<typeof setTimeout>;
+  /** the save in flight: saves of one session run one after another, or the second's version check fails */
+  saving?: Promise<unknown>;
   lastSaveError?: string;
   lastUsed: number;
 }
 
-const AUTOSAVE_MS = 2500;
+/** What the editor's MCP tab shows for one open project, whichever instance served the call. */
+interface LiveEntry {
+  projectId: string; name: string; version: number; unsaved: boolean; saveError: string | null;
+  agents: Record<string, number>; activity: Activity[]; lastUsed: number;
+}
+
 const IDLE_MS = 30 * 60 * 1000;
+const DAY = 24 * 3600;
 const open = new Map<string, OpenProject>();
-/**
- * The project each person has open, by user rather than by MCP session.
- *
- * Some clients (ChatGPT connectors among them) do not keep the Mcp-Session-Id between calls,
- * so every tool call arrives on a fresh connection. Remembering the open project per PERSON
- * is what makes `project_open` stick for them — and it is what someone means anyway: the
- * project they opened, not the project one socket opened.
- */
-const lastOpened = new Map<string, string>();
-export const rememberOpen = (userId: string, projectId: string) => lastOpened.set(userId, projectId);
-export const forgetOpen = (userId: string, projectId?: string) => {
-  if (!projectId || lastOpened.get(userId) === projectId) lastOpened.delete(userId);
-};
-export const openProjectOf = (userId: string) => lastOpened.get(userId) ?? null;
 const opening = new Map<string, Promise<OpenProject>>();
-const proposals = new Map<string, Proposal>();
 const key = (userId: string, projectId: string) => `${userId}:${projectId}`;
+const keys = {
+  open: (userId: string) => `mcp:open:${userId}`,
+  live: (userId: string) => `mcp:live:${userId}`,
+  proposals: (userId: string) => `mcp:proposals:${userId}`,
+  /** the version the MCP itself last wrote — a newer stored version that IS this one is not news */
+  saved: (projectId: string) => `mcp:saved:${projectId}`,
+};
+
+/**
+ * The project each person has open, by user rather than by MCP connection.
+ *
+ * The transport is stateless (routes/mcp.routes.ts), so every call arrives on a fresh
+ * connection — and some clients (ChatGPT connectors among them) never kept a session anyway.
+ * Remembering the open project per PERSON is what makes `project_open` stick, and it is what
+ * someone means anyway: the project they opened, not the project one socket opened.
+ */
+export const rememberOpen = (userId: string, projectId: string) => sharedState.set(keys.open(userId), projectId, 7 * DAY);
+export const openProjectOf = async (userId: string) => (await sharedState.get<string>(keys.open(userId))) ?? null;
+export async function forgetOpen(userId: string, projectId?: string) {
+  if (!projectId || (await openProjectOf(userId)) === projectId) await sharedState.del(keys.open(userId));
+}
 
 /** The shared library as the editor's catalog: every published preset plus this person's own. */
 const libraryCache = new Map<string, { at: number; value: { presets: Preset[]; expressions: Expression[] } }>();
@@ -75,6 +91,39 @@ export async function libraryFor(userId: string) {
 }
 export const forgetLibrary = (userId: string) => libraryCache.delete(userId);
 
+async function doSave(o: OpenProject, force: boolean) {
+  if (!o.canEdit) throw new CapabilityError('READ_ONLY_PROJECT', 'This project is view-only for you.', { suggestion: 'project_duplicate makes your own copy you can edit and save.' });
+  const revision = o.session.revision;
+  try {
+    const res = await projectsService.save(o.projectId, o.userId, { project: o.session.project as unknown as Record<string, unknown>, ...(force ? {} : { expectedVersion: o.baseVersion }) });
+    const name = o.session.project.name?.trim();
+    if (name && name !== o.name && (await projectsRepository.findById(o.projectId))?.userId === o.userId) {
+      await projectsRepository.update(o.projectId, { name });
+      o.name = name;
+    }
+    o.baseVersion = res.version;
+    o.session.savedRevision = revision;
+    o.lastSaveError = undefined;
+    await sharedState.set(keys.saved(o.projectId), res.version, DAY);
+    return res;
+  } catch (e) {
+    if (e instanceof HttpError && e.status === 409) {
+      o.lastSaveError = 'conflict';
+      throw new CapabilityError('REVISION_CONFLICT', 'The project was saved from somewhere else since you opened it.', {
+        suggestion: 'project_reload takes the stored version; project_save { force: true } overwrites it with yours.',
+      });
+    }
+    o.lastSaveError = e instanceof Error ? e.message : String(e);
+    throw e;
+  }
+}
+
+/** Drop this instance's cached session (saving first if anything is somehow unsaved). */
+async function evict(o: OpenProject) {
+  if (o.session.dirty && o.canEdit) await workspace.save(o).catch(() => {});
+  open.delete(key(o.userId, o.projectId));
+}
+
 export const workspace = {
   /** Open (or return the already-open) session. Ownership and visibility come from projectsService. */
   async open(userId: string, projectId: string): Promise<OpenProject> {
@@ -85,7 +134,7 @@ export const workspace = {
       opening.set(k, (async () => {
         const { project, data, canEdit } = await projectsService.getData(projectId, userId);
         const session = await EditorSession.open({ ...(data as Project), name: project.name }, await libraryFor(userId));
-        const o: OpenProject = { userId, projectId, name: project.name, canEdit, session, baseVersion: project.currentVersion, activity: [], agents: new Map(), lastUsed: Date.now() };
+        const o: OpenProject = { userId, projectId, name: project.name, canEdit, session, baseVersion: project.currentVersion, lastUsed: Date.now() };
         open.set(k, o);
         return o;
       })().finally(() => opening.delete(k)));
@@ -97,7 +146,7 @@ export const workspace = {
 
   /**
    * Bring the session up to date with the stored project before a call. Returns a warning
-   * when it reloaded; throws REVISION_CONFLICT when both sides changed.
+   * when it reloaded someone else's save; throws REVISION_CONFLICT when both sides changed.
    */
   async sync(o: OpenProject): Promise<string | null> {
     const row = await projectsRepository.findById(o.projectId);
@@ -111,117 +160,106 @@ export const workspace = {
       });
     }
     await workspace.reload(o);
+    // the AI's own save, written by another instance: the same document, nothing to tell
+    if ((await sharedState.get<number>(keys.saved(o.projectId))) === row.currentVersion) return null;
     return `The project changed in the editor (version ${row.currentVersion}); you are now working on that version.`;
   },
 
   async reload(o: OpenProject) {
-    clearTimeout(o.saveTimer);
     const { project, data, canEdit } = await projectsService.getData(o.projectId, o.userId);
     await o.session.replace({ ...(data as Project), name: project.name }, await libraryFor(o.userId));
     Object.assign(o, { baseVersion: project.currentVersion, name: project.name, canEdit, lastSaveError: undefined });
   },
 
   /** Write the session to the cloud copy. `force` skips the version check — overwriting the other side. */
-  async save(o: OpenProject, force = false) {
-    clearTimeout(o.saveTimer);
-    if (!o.canEdit) throw new CapabilityError('READ_ONLY_PROJECT', 'This project is view-only for you.', { suggestion: 'project_duplicate makes your own copy you can edit and save.' });
-    const revision = o.session.revision;
-    try {
-      const res = await projectsService.save(o.projectId, o.userId, { project: o.session.project as unknown as Record<string, unknown>, ...(force ? {} : { expectedVersion: o.baseVersion }) });
-      const name = o.session.project.name?.trim();
-      if (name && name !== o.name && (await projectsRepository.findById(o.projectId))?.userId === o.userId) {
-        await projectsRepository.update(o.projectId, { name });
-        o.name = name;
-      }
-      o.baseVersion = res.version;
-      o.session.savedRevision = revision;
-      o.lastSaveError = undefined;
-      return res;
-    } catch (e) {
-      if (e instanceof HttpError && e.status === 409) {
-        o.lastSaveError = 'conflict';
-        throw new CapabilityError('REVISION_CONFLICT', 'The project was saved from somewhere else since you opened it.', {
-          suggestion: 'project_reload takes the stored version; project_save { force: true } overwrites it with yours.',
-        });
-      }
-      o.lastSaveError = e instanceof Error ? e.message : String(e);
-      throw e;
+  save(o: OpenProject, force = false) {
+    const run = (o.saving ?? Promise.resolve()).then(() => doSave(o, force));
+    o.saving = run.catch(() => {});
+    return run;
+  },
+
+  /**
+   * After an edit: save it now, before the call answers — the next call may be served by
+   * another instance, which only knows what is stored. A failure is the call's warning
+   * (and `lastSaveError`), not its error: the edit itself happened. `always` saves a session
+   * that does not count as dirty — a rename, or a new project's first full document.
+   */
+  async persist(o: OpenProject, always = false): Promise<string | null> {
+    if (!o.canEdit || (!always && !o.session.dirty)) return null;
+    try { await workspace.save(o); return null; } catch (e) {
+      return `Not saved: ${e instanceof Error ? e.message : String(e)} project_save retries; project_reload takes the stored version.`;
     }
   },
 
-  /** After an edit: save soon, the way the editor's autosave does. */
-  scheduleSave(o: OpenProject) {
-    if (!o.canEdit) return;
-    clearTimeout(o.saveTimer);
-    o.saveTimer = setTimeout(() => { void workspace.save(o).catch(() => { /* surfaced through lastSaveError and the next call */ }); }, AUTOSAVE_MS);
-    o.saveTimer.unref?.();
-  },
-
-  record(o: OpenProject, a: Activity) {
-    o.activity.unshift(a);
-    if (o.activity.length > 100) o.activity.pop();
-    o.agents.set(a.client, Date.now());
+  /** One call, for the editor's MCP tab: who is working, what they did, the version to adopt. */
+  async record(o: OpenProject, a: Activity) {
     o.lastUsed = Date.now();
+    const prev = await sharedState.hget<LiveEntry>(keys.live(o.userId), o.projectId);
+    const entry: LiveEntry = {
+      projectId: o.projectId, name: o.name, version: o.baseVersion, unsaved: o.session.dirty, saveError: o.lastSaveError ?? null,
+      agents: { ...prev?.agents, [a.client]: Date.now() }, activity: [a, ...(prev?.activity ?? [])].slice(0, 30), lastUsed: Date.now(),
+    };
+    await sharedState.hset(keys.live(o.userId), o.projectId, entry, IDLE_MS / 1000);
   },
 
-  close(userId: string, projectId: string) {
-    forgetOpen(userId, projectId);
+  /** The person closed it: forget it everywhere, not just in this instance's cache. */
+  async close(userId: string, projectId: string) {
+    await forgetOpen(userId, projectId);
+    await sharedState.hdel(keys.live(userId), projectId);
     const o = open.get(key(userId, projectId));
-    if (!o) return;
-    if (o.session.dirty && o.canEdit) void workspace.save(o).catch(() => {});
-    open.delete(key(userId, projectId));
+    if (o) await evict(o);
   },
 
   /** What the editor shows in its MCP tab and uses to pick up AI edits. */
-  live(userId: string, projectId?: string) {
+  async live(userId: string, projectId?: string) {
     const now = Date.now();
-    const mine = [...open.values()].filter((o) => o.userId === userId && (!projectId || o.projectId === projectId));
+    const [entries, proposals] = await Promise.all([sharedState.hvals<LiveEntry>(keys.live(userId)), sharedState.hvals<Proposal>(keys.proposals(userId))]);
     return {
-      projects: mine.map((o) => ({
-        projectId: o.projectId, name: o.name, version: o.baseVersion, unsaved: o.session.dirty, saveError: o.lastSaveError ?? null,
-        agents: [...o.agents].filter(([, at]) => now - at < 15_000).map(([client, at]) => ({ client, lastActiveAt: new Date(at).toISOString() })),
-        activity: o.activity.slice(0, 30),
+      projects: entries.filter((e) => now - e.lastUsed < IDLE_MS && (!projectId || e.projectId === projectId)).map((e) => ({
+        projectId: e.projectId, name: e.name, version: e.version, unsaved: e.unsaved, saveError: e.saveError,
+        agents: Object.entries(e.agents).filter(([, at]) => now - at < 15_000).map(([client, at]) => ({ client, lastActiveAt: new Date(at).toISOString() })),
+        activity: e.activity,
       })),
-      proposals: [...proposals.values()].filter((p) => p.userId === userId && (!projectId || p.projectId === projectId) && (p.status === 'pending' || now - Date.parse(p.decidedAt ?? p.createdAt) < 60_000)),
+      proposals: proposals.filter((p) => (!projectId || p.projectId === projectId) && (p.status === 'pending' || now - Date.parse(p.decidedAt ?? p.createdAt) < 60_000)),
     };
   },
 
   // --- suggest mode: a change the person approves in the editor before it happens ---------
 
-  propose(p: Omit<Proposal, 'id' | 'status' | 'createdAt'>): Proposal {
+  async propose(p: Omit<Proposal, 'id' | 'status' | 'createdAt'>): Promise<Proposal> {
     const proposal: Proposal = { ...p, id: `prop_${randomUUID().slice(0, 8)}`, status: 'pending', createdAt: new Date().toISOString() };
-    proposals.set(proposal.id, proposal);
+    await sharedState.hset(keys.proposals(p.userId), proposal.id, proposal, DAY);
     return proposal;
   },
 
-  proposal(userId: string, id: string) {
-    const p = proposals.get(id);
-    return p && p.userId === userId ? p : undefined;
-  },
+  proposal: (userId: string, id: string) => sharedState.hget<Proposal>(keys.proposals(userId), id),
 
   async decide(userId: string, id: string, approve: boolean) {
-    const p = workspace.proposal(userId, id);
+    const p = await workspace.proposal(userId, id);
     if (!p) throw HttpError.notFound('No such proposal');
     if (p.status !== 'pending') throw HttpError.conflict(`This change was already ${p.status}.`);
     p.decidedAt = new Date().toISOString();
-    if (!approve) { p.status = 'rejected'; return p; }
-    const o = await workspace.open(userId, p.projectId);
-    try {
-      await workspace.sync(o);
-      p.result = await o.session.invoke(p.capability, p.args);
-      p.status = 'applied';
-      workspace.record(o, { at: p.decidedAt, client: p.client, capability: p.capability, summary: `${p.result.summary} (approved)`, ok: true });
-      workspace.scheduleSave(o);
-    } catch (e) {
-      p.status = 'failed';
-      p.error = e instanceof CapabilityError ? e.toJSON() : String(e);
+    if (!approve) p.status = 'rejected';
+    else {
+      const o = await workspace.open(userId, p.projectId);
+      try {
+        await workspace.sync(o);
+        p.result = await o.session.invoke(p.capability, p.args);
+        p.status = 'applied';
+        await workspace.persist(o);
+        await workspace.record(o, { at: p.decidedAt, client: p.client, capability: p.capability, summary: `${p.result.summary} (approved)`, ok: true });
+      } catch (e) {
+        p.status = 'failed';
+        p.error = e instanceof CapabilityError ? e.toJSON() : String(e);
+      }
     }
+    await sharedState.hset(keys.proposals(userId), p.id, p, DAY);
     return p;
   },
 };
 
-// sessions nobody has touched for a while are saved and dropped
+// sessions this instance has not served for a while leave its cache — only its cache: the person
+// may be working through another instance. Proposals and the live feed expire by their own TTLs.
 setInterval(() => {
-  for (const o of open.values()) if (Date.now() - o.lastUsed > IDLE_MS) workspace.close(o.userId, o.projectId);
-  for (const [id, p] of proposals) if (Date.now() - Date.parse(p.createdAt) > 24 * 3600_000) proposals.delete(id);
+  for (const o of open.values()) if (Date.now() - o.lastUsed > IDLE_MS) void evict(o);
 }, 60_000).unref();

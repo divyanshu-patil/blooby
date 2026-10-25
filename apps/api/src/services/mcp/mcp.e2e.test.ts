@@ -319,11 +319,25 @@ it('runs a whole agent workflow through MCP alone', async () => {
   const p = await c.getPrompt({ name: 'create_animation', arguments: { request: 'wave hello' } });
   expect(JSON.stringify(p.messages)).toContain('preset_search');
 
-  // human edits in the editor meanwhile: the AI sees them, and a clash is a conflict, not an overwrite
+  // every edit is saved before the call answers — the next call may be served by another instance
+  const before = db.projects.get(projectId)!.currentVersion;
   await call(c, 'set_property', { nodeId: 'body', property: 'transform.rotation', value: 8 });
-  const row = db.projects.get(projectId)!;
-  await projectsService.save(projectId, ANN, { project: { ...stored, name: 'edited in the editor' }, expectedVersion: row.currentVersion });
-  const clash = await call(c, 'set_property', { nodeId: 'body', property: 'transform.rotation', value: 9 });
+  expect(db.projects.get(projectId)!.currentVersion).toBe(before + 1);
+  // a human edit in the editor meanwhile: the AI has nothing unsaved, so it simply takes it
+  await projectsService.save(projectId, ANN, { project: { ...stored, name: 'edited in the editor' }, expectedVersion: before + 1 });
+  const took = await call(c, 'set_property', { nodeId: 'body', property: 'transform.rotation', value: 9 });
+  expect(took.body.warnings.join(' ')).toMatch(/changed in the editor/);
+  // the editor saving between an AI edit and its save: a clash is a conflict, not an overwrite
+  const repo = (await import('../../repositories/projects.repository.js')).projectsRepository as unknown as Record<string, (...a: any[]) => Promise<number>>;
+  const real = repo.bumpVersionIfCurrent;
+  repo.bumpVersionIfCurrent = async (id: string, expected: number, data: Record<string, any>) => {
+    repo.bumpVersionIfCurrent = real;
+    await projectsService.save(projectId, ANN, { project: { ...stored, name: 'edited again' }, expectedVersion: expected });
+    return real(id, expected, data);
+  };
+  const lost = await call(c, 'set_property', { nodeId: 'body', property: 'transform.rotation', value: 10 });
+  expect(lost.body.warnings.join(' ')).toMatch(/Not saved/);
+  const clash = await call(c, 'set_property', { nodeId: 'body', property: 'transform.rotation', value: 11 });
   expect(clash.r.isError).toBe(true);
   expect(clash.body.error.code).toBe('REVISION_CONFLICT');
   expect((await call(c, 'project_reload')).body.ok).toBe(true);
@@ -343,16 +357,21 @@ it('never lets one person reach another person\'s project', async () => {
   await c.close();
 });
 
-it('a session cannot be taken over with someone else\'s token', async () => {
+it('there is no session to take over: every call acts for the person whose token it carries', async () => {
   const ann = await tokensService.createPat(ANN, { name: 'a' });
   const bob = await tokensService.createPat(BOB, { name: 'b' });
   const c = await connect(ann.token);
-  const sid = (c as unknown as { _transport: { sessionId: string } })._transport.sessionId;
+  await call(c, 'project_create', { name: 'Ann only' });
+  // a session header from someone else's connection means nothing: stateless, keyed on the token
   const res = await fetch(`${base}/mcp`, {
-    method: 'POST', headers: { Authorization: `Bearer ${bob.token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-session-id': sid },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list' }),
+    method: 'POST', headers: { Authorization: `Bearer ${bob.token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-session-id': 'anns-session' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'project_current', arguments: {} } }),
   });
-  expect(res.status).toBe(404);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('mcp-session-id')).toBeNull();
+  const text = await res.text();
+  expect(text).toContain('No project open');
+  expect(text).not.toContain('Ann only');
   await c.close();
 });
 
@@ -762,17 +781,10 @@ it('resources: the whole catalogue reads, scopes are enforced, and unknown ones 
     await expect(narrow.readResource({ uri }), uri).rejects.toThrow(/needs/);
   await narrow.close();
 
-  // subscribing: a change to the open project is announced, and unsubscribing stops it
-  const updates: string[] = [];
-  const { ResourceUpdatedNotificationSchema } = await import('@modelcontextprotocol/sdk/types.js');
-  c.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => { updates.push(n.params.uri); });
-  await c.subscribeResource({ uri: 'blooby://project/current' });
-  await c.subscribeResource({ uri: 'blooby://projects' });
-  await call(c, 'set_property', { nodeId: 'body', property: 'transform.rotation', value: 3 });
-  await new Promise((r) => setTimeout(r, 100));
-  expect(updates).toContain('blooby://project/current');
-  expect(updates).not.toContain('blooby://projects');
-  await c.unsubscribeResource({ uri: 'blooby://project/current' });
+  // no subscriptions: announcing a change needs a stream held open between calls, and a
+  // stateless server has none — the capability is not offered, so a client does not try
+  expect(c.getServerCapabilities()?.resources?.subscribe).toBeFalsy();
+  await expect(c.subscribeResource({ uri: 'blooby://project/current' })).rejects.toThrow();
   await c.close();
 }, 60_000);
 
@@ -789,7 +801,7 @@ async function pipeline() {
   };
   const conn = (userId: string, over: Record<string, unknown> = {}) => ({
     principal: { userId, clientId: 'pat:unit', clientName: 'unit', tokenId: randomUUID(), scopes: ALL_SCOPES, mode: 'full', ...over },
-    projectId: null as string | null, run: host.newRun(), subscriptions: new Set<string>(),
+    projectId: null as string | null, run: host.newRun(),
   });
   const run = async (c: ReturnType<typeof conn>, name: string, args: Record<string, unknown> = {}) => {
     const r = await callTool(c as never, name, args);
@@ -810,7 +822,7 @@ it('throttles a flood with advice, warns as the budget runs down, and keeps the 
   }
   expect(refused).toBeGreaterThan(600);
   expect(warned.some((w) => /used this minute/.test(w))).toBe(true);
-  expect(c.run.ops).toHaveLength(1000);
+  expect(c.run.ops).toHaveLength(200);
 });
 
 it('refuses a thirteenth call at once, survives a handler that throws anything, and cuts and encodes replies', async () => {
@@ -968,9 +980,14 @@ it('a view-only project can be read and rendered but not saved, and the workspac
   expect((await call(c, 'project_save')).body.error.code).toBe('READ_ONLY_PROJECT');
   const { workspace } = await import('./workspace.js');
   const o = workspace.get(IDA, pub.id)!;
-  workspace.scheduleSave(o);               // no autosave is armed for a project you cannot save
-  expect(o.saveTimer).toBeUndefined();
+  const version = db.projects.get(pub.id)!.currentVersion;
+  await o.session.invoke('add_layer', { type: 'shape', shape: 'star', name: 'mine only' });
+  expect(await workspace.persist(o)).toBeNull();    // nothing is saved for a project you cannot save
+  expect(db.projects.get(pub.id)!.currentVersion).toBe(version);
   expect((await call(c, 'project_close')).body.ok).toBe(true);
+  // duplicating by id what this instance does not have open copies the stored version
+  expect((await call(c, 'project_duplicate', { projectId: pub.id, name: 'My copy' })).body.result.name).toBe('My copy');
+  await call(c, 'project_close');
   await c.close();
 });
 
@@ -1004,19 +1021,33 @@ it('workspace: concurrent opens share one load, saves report conflicts and failu
   save.mockRestore();
   void HttpError;
 
-  // activity is capped, and presence is only for the last few seconds
-  for (let i = 0; i < 120; i++) workspace.record(one, { at: new Date().toISOString(), client: 'unit', capability: 'x', summary: 's', ok: true });
-  expect(one.activity).toHaveLength(100);
-  const live = workspace.live(IDA, mine.id);
+  // saves of one session queue up: the second waits for the first's version instead of conflicting
+  await one.session.invoke('add_layer', { type: 'shape', shape: 'star', name: 'queued' });
+  await expect(Promise.all([workspace.save(one), workspace.save(one)])).resolves.toHaveLength(2);
+  // persisting: nothing to do when clean, and a failure is a warning, not an error
+  expect(await workspace.persist(one)).toBeNull();
+  await one.session.invoke('add_layer', { type: 'shape', shape: 'star', name: 'unlucky' });
+  const failing = vi.spyOn(projectsService, 'save').mockRejectedValueOnce(new Error('bucket down'));
+  expect(await workspace.persist(one)).toMatch(/^Not saved: bucket down/);
+  failing.mockRejectedValueOnce('odd');
+  expect(await workspace.persist(one)).toMatch(/^Not saved: odd/);
+  failing.mockRestore();
+
+  // the live feed is shared: capped activity, and presence only for the last few seconds
+  for (let i = 0; i < 40; i++) await workspace.record(one, { at: new Date().toISOString(), client: 'unit', capability: 'x', summary: 's', ok: true });
+  const live = await workspace.live(IDA, mine.id);
+  expect(live.projects[0]!.activity).toHaveLength(30);
   expect(live.projects[0]!.agents).toHaveLength(1);
-  expect(workspace.live(IDA, 'other-project').projects).toHaveLength(0);
+  expect((await workspace.live(IDA, 'other-project')).projects).toHaveLength(0);
 
   // closing something that is not open is a no-op; closing a dirty one saves it
-  workspace.close(IDA, 'never-opened');
+  await workspace.close(IDA, 'never-opened');
   await one.session.invoke('add_layer', { type: 'shape', shape: 'star', name: 'late' });
-  workspace.close(IDA, mine.id);
-  await new Promise((r) => setTimeout(r, 50));
+  const v = db.projects.get(mine.id)!.currentVersion;
+  await workspace.close(IDA, mine.id);
+  expect(db.projects.get(mine.id)!.currentVersion).toBe(v + 1);
   expect(workspace.get(IDA, mine.id)).toBeUndefined();
+  expect((await workspace.live(IDA, mine.id)).projects).toHaveLength(0);
 });
 
 it('proposals: only the owner sees them, each is decided once, and a failing change is recorded as failed', async () => {
@@ -1026,30 +1057,31 @@ it('proposals: only the owner sees them, each is decided once, and a failing cha
   const mk = (capability: string, userId = IDA) => workspace.propose({ userId, projectId: mine.id, client: 'unit', capability, args: {}, summary: 's', preview: { created: [], deleted: [], changed: [] } });
   const status = async (p: Promise<unknown>) => p.then(() => 0, (e: { status?: number }) => e.status ?? -1);
 
-  const rejected = mk('add_layer');
+  const rejected = await mk('add_layer');
   expect((await workspace.decide(IDA, rejected.id, false)).status).toBe('rejected');
+  expect((await workspace.proposal(IDA, rejected.id))?.status).toBe('rejected');   // the decision is stored, not just returned
   expect(await status(workspace.decide(IDA, rejected.id, true))).toBe(409);
   expect(await status(workspace.decide(IDA, 'prop_missing', true))).toBe(404);
-  const theirs = mk('add_layer', ZED);
-  expect(workspace.proposal(IDA, theirs.id)).toBeUndefined();
+  const theirs = await mk('add_layer', ZED);
+  expect(await workspace.proposal(IDA, theirs.id)).toBeUndefined();
   expect(await status(workspace.decide(IDA, theirs.id, true))).toBe(404);
 
-  const failedCap = mk('not_a_capability');
-  expect((await workspace.decide(IDA, failedCap.id, true)).status).toBe('failed');
+  const failedCap = await workspace.decide(IDA, (await mk('not_a_capability')).id, true);
+  expect(failedCap.status).toBe('failed');
   expect(typeof failedCap.error).toBe('object');
-  const failedPlain = mk('add_layer');
   const inv = vi.spyOn(o.session, 'invoke').mockRejectedValueOnce(new Error('session broke'));
-  expect((await workspace.decide(IDA, failedPlain.id, true)).status).toBe('failed');
+  const failedPlain = await workspace.decide(IDA, (await mk('add_layer')).id, true);
+  expect(failedPlain.status).toBe('failed');
   expect(failedPlain.error).toContain('session broke');
   inv.mockRestore();
 
   // pending ones and recently decided ones are shown, for this person and project only
-  const pending = mk('add_layer');
-  const shown = workspace.live(IDA, mine.id).proposals.map((p) => p.id);
+  const pending = await mk('add_layer');
+  const shown = (await workspace.live(IDA, mine.id)).proposals.map((p) => p.id);
   expect(shown).toContain(pending.id);
   expect(shown).not.toContain(theirs.id);
-  expect(workspace.live(IDA).proposals.length).toBeGreaterThan(0);
-  workspace.close(IDA, mine.id);
+  expect((await workspace.live(IDA)).proposals.length).toBeGreaterThan(0);
+  await workspace.close(IDA, mine.id);
 });
 
 it('presets: where they come from, how they are placed, saved, edited, published and deleted', async () => {
@@ -1146,11 +1178,23 @@ it('rendering and exporting: every option, every format, and the job lifecycle',
   expect(broken.body.result.status).toBe('failed');
   expect(broken.body.warnings[0]).toContain('Unknown format');
 
-  // jobs: running → cancelled before it lands, a failed one, a finished one, and a stranger's
-  const slow = await ok('export_start', { format: 'dotlottie', wait: false });
-  const slowId = slow.body.result.jobId as string;
+  // jobs: one cancelled from another call while it runs, a failed one, a finished one, a stranger's.
+  // An export runs to the end inside its own call (wait: false is accepted, and finishes too)
+  const { workspace } = await import('./workspace.js');
+  const pid = (await ok('project_current')).body.result.projectId as string;
+  const o = workspace.get(IDA, pid)!;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const real = o.session.frameSvg.bind(o.session);
+  const held = vi.spyOn(o.session, 'frameSvg').mockImplementationOnce(async (...a) => { await gate; return real(...a); });
+  const slow = call(c, 'export_start', { format: 'svg', wait: false });
+  await vi.waitFor(async () => expect((await ok('job_list')).body.result.some((j: { status: string }) => j.status === 'running')).toBe(true));
+  const slowId = (await ok('job_list')).body.result.find((j: { status: string }) => j.status === 'running').jobId as string;
+  expect((await bad('job_result', { jobId: slowId }, 'JOB_NOT_DONE')).error.suggestion).toBe('job_get until done.');
   expect((await ok('job_cancel', { jobId: slowId })).body.result.status).toBe('cancelled');
-  await new Promise((r) => setTimeout(r, 300));
+  release();
+  expect((await slow).body.result.status).toBe('cancelled');     // the word "cancelled" stands
+  held.mockRestore();
   expect((await ok('job_get', { jobId: slowId })).body.result.status).toBe('cancelled');
   expect((await bad('job_result', { jobId: slowId }, 'JOB_NOT_DONE')).error.suggestion).toBe('');
   const failedId = broken.body.result.jobId as string;
@@ -1159,8 +1203,26 @@ it('rendering and exporting: every option, every format, and the job lifecycle',
   expect((await ok('job_cancel', { jobId: doneId })).body.result.status).toBe('done');
   expect((await ok('job_result', { jobId: doneId })).resource?.mimeType).toBe('image/svg+xml');
   expect((await ok('job_list')).body.result.length).toBeGreaterThan(5);
-  const running = await ok('export_start', { format: 'runtime', wait: false });
-  expect((await bad('job_result', { jobId: running.body.result.jobId }, 'JOB_NOT_DONE')).error.suggestion).toBe('job_get until done.');
+  // made by another instance: this one never held the bytes, so they come back from storage —
+  // and when storage cannot give them (no link, a failed fetch), the job still answers, uninlined
+  const { sharedState } = await import('../../utils/sharedState.js');
+  const elsewhere = (id: string, url: string | null) => sharedState.hset(`mcp:jobs:${IDA}`, id, {
+    id, userId: IDA, label: 'elsewhere', status: 'done', progress: 1, startedAt: new Date().toISOString(),
+    result: { filename: 'x.svg', mimeType: 'image/svg+xml', size: 30, url, warnings: [], info: {} },
+  }, 60);
+  await elsewhere('job_elsewhere', 'https://s3.test/elsewhere.svg');
+  await elsewhere('job_nolink', null);
+  const realFetch = globalThis.fetch;
+  const storage = vi.spyOn(globalThis, 'fetch').mockImplementation(async (u, init) =>
+    String(u).startsWith('https://s3.test/') ? new Response(String(u).includes('elsewhere') ? '<svg>from storage</svg>' : 'gone', { status: String(u).includes('elsewhere') ? 200 : 404 }) : realFetch(u, init));
+  expect((await ok('job_result', { jobId: 'job_elsewhere' })).resource?.text).toBe('<svg>from storage</svg>');
+  expect((await c.readResource({ uri: 'blooby://exports/job_elsewhere/x.svg' })).contents[0]).toMatchObject({ text: '<svg>from storage</svg>' });
+  expect((await ok('job_result', { jobId: 'job_nolink' })).resource).toBeUndefined();
+  await elsewhere('job_gone', 'https://s3.test/gone.svg');
+  expect((await ok('job_result', { jobId: 'job_gone' })).resource).toBeUndefined();
+  storage.mockImplementation(async (u, init) => (String(u).startsWith('https://s3.test/') ? Promise.reject(new Error('offline')) : realFetch(u, init)));
+  expect((await ok('job_result', { jobId: 'job_elsewhere' })).resource).toBeUndefined();
+  storage.mockRestore();
   await bad('job_get', { jobId: 'job_missing' }, 'NOT_FOUND');
   const stranger = await connect((await tokensService.createPat(ZED, { name: 'stranger' })).token);
   expect((await call(stranger, 'job_get', { jobId: doneId })).body.error.code).toBe('NOT_FOUND');
@@ -1175,15 +1237,18 @@ it('rendering and exporting: every option, every format, and the job lifecycle',
   await c.close();
 }, 90_000);
 
-it('the endpoint refuses a first request that is not an initialize, and a stream for a session that is not yours', async () => {
+it('the endpoint is stateless: any POST is answered on its own, and there is no stream to open or end', async () => {
   const { token } = await tokensService.createPat(IDA, { name: 'endpoint' });
   const auth = { Authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
-  const noSession = await fetch(`${base}/mcp`, { method: 'POST', headers: auth, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
-  expect(noSession.status).toBe(400);
-  const unknownPost = await fetch(`${base}/mcp`, { method: 'POST', headers: { ...auth, 'mcp-session-id': 'nope' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
-  expect(unknownPost.status).toBe(404);
-  expect((await fetch(`${base}/mcp`, { headers: auth })).status).toBe(404);                      // GET with no session id at all
-  expect((await fetch(`${base}/mcp`, { method: 'DELETE', headers: { ...auth, 'mcp-session-id': 'nope' } })).status).toBe(404);
+  // no initialize first, no session id: how a call reaches a fresh instance — and it is answered
+  const bare = await fetch(`${base}/mcp`, { method: 'POST', headers: auth, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+  expect(bare.status).toBe(200);
+  expect(await bare.text()).toContain('project_open');
+  for (const method of ['GET', 'DELETE']) {
+    const res = await fetch(`${base}/mcp`, { method, headers: auth });
+    expect(res.status, method).toBe(405);
+    expect(res.headers.get('allow')).toBe('POST');
+  }
 });
 
 /**
@@ -1198,30 +1263,29 @@ it('sweeps: nothing fresh is dropped, and everything stale is', async () => {
   const pid = db.projects.get([...db.projects.keys()].at(-1)!)!.id as string;
   const exported = await call(c, 'export_start', { format: 'svg' });  // a job
   const jobId = exported.body.result.jobId as string;
-  const prop = workspace.propose({ userId: IDA, projectId: pid, client: 'unit', capability: 'add_layer', args: {}, summary: 's', preview: { created: [], deleted: [], changed: [] } });
+  const prop = await workspace.propose({ userId: IDA, projectId: pid, client: 'unit', capability: 'add_layer', args: {}, summary: 's', preview: { created: [], deleted: [], changed: [] } });
 
   sweeps.forEach((f) => f());                                       // fresh: all of it survives
   expect(workspace.get(IDA, pid)).toBeDefined();
-  expect(workspace.proposal(IDA, prop.id)).toBeDefined();
+  expect(await workspace.proposal(IDA, prop.id)).toBeDefined();
   expect((await call(c, 'job_get', { jobId })).body.ok).toBe(true);
 
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(Date.now() + 25 * 3600_000);
   try {
     sweeps.forEach((f) => f());                                     // a day on: all of it goes
-    expect(workspace.get(IDA, pid)).toBeUndefined();
-    expect(workspace.proposal(IDA, prop.id)).toBeUndefined();
+    await vi.waitFor(() => expect(workspace.get(IDA, pid)).toBeUndefined());
+    expect(await workspace.proposal(IDA, prop.id)).toBeUndefined();
+    // the idle sweep drops only this instance's copy: which project is open is the person's, not the cache's
+    expect(await (await import('./workspace.js')).openProjectOf(IDA)).toBe(pid);
+    expect((await call(c, 'job_get', { jobId })).body.error.code).toBe('NOT_FOUND');
   } finally { vi.useRealTimers(); }
-  await c.close().catch(() => {});            // its session was swept with everything else
-  const again = await connect(token);
-  expect((await call(again, 'job_get', { jobId })).body.error.code).toBe('NOT_FOUND');
-  await again.close();
+  await c.close();
 });
 
 
-it('survives the small failures around a call: audit and notification writes, a missing arguments object', async () => {
+it('survives the small failures around a call: the audit write, a missing arguments object', async () => {
   const { mcpRepository } = await import('../../repositories/mcp.repository.js');
-  const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
   const { token } = await tokensService.createPat(GUS, { name: 'small failures' });
   const c = await connect(token);
   // a call with no arguments at all
@@ -1231,14 +1295,6 @@ it('survives the small failures around a call: audit and notification writes, a 
   const audit = vi.spyOn(mcpRepository, 'audit').mockRejectedValue(new Error('audit down'));
   expect((await call(c, 'account_whoami')).body.ok).toBe(true);
   audit.mockRestore();
-  // a notification that cannot be delivered is dropped
-  await call(c, 'project_create', { name: 'Notify' });
-  const send = vi.spyOn(Server.prototype, 'sendResourceUpdated').mockRejectedValue(new Error('closed'));
-  await c.subscribeResource({ uri: 'blooby://project/current' });
-  expect((await call(c, 'set_property', { nodeId: 'body', property: 'transform.rotation', value: 4 })).body.ok).toBe(true);
-  await new Promise((r) => setTimeout(r, 50));
-  expect(send).toHaveBeenCalled();
-  send.mockRestore();
   await c.close();
 });
 
@@ -1256,6 +1312,11 @@ it('a stale project says so on the first call after the editor saved, whichever 
   expect((await call(c, 'project_current')).body.warnings?.[0]).toContain('changed in the editor');
   await bump();
   expect((await call(c, 'render_frame')).body.warnings?.[0]).toContain('changed in the editor');
+  // newer, but written by this same AI through another instance: the same document, no news
+  await bump();
+  const { sharedState } = await import('../../utils/sharedState.js');
+  await sharedState.set(`mcp:saved:${pid}`, db.projects.get(pid)!.currentVersion, 60);
+  expect((await call(c, 'project_current')).body.warnings ?? []).toEqual([]);
   await c.close();
 });
 
@@ -1282,6 +1343,15 @@ it('the small corners of the server capabilities', async () => {
   c.projectId = 'not-open-any-more';
   expect((await run(c, 'preset_list', { offset: 1 })).body.ok).toBe(true);
   c.projectId = null;
+
+  // a create or rename whose save fails still happens — it says so, and project_save retries
+  const down = vi.spyOn(projectsService, 'save').mockRejectedValueOnce(new Error('bucket down'));
+  const unsavedMade = await run(c, 'project_create', { name: 'Unsaved at birth' });
+  expect(unsavedMade.body.warnings.join(' ')).toMatch(/Not saved: bucket down/);
+  down.mockRejectedValueOnce(new Error('bucket down'));
+  expect((await run(c, 'project_rename', { name: 'Renamed unsaved' })).body.warnings.join(' ')).toMatch(/Not saved: bucket down/);
+  down.mockRestore();
+  expect((await run(c, 'project_save')).body.ok).toBe(true);
 
   // a project with no name exports under a default one; a huge export is not inlined
   const made = await run(c, 'project_create', { name: 'Named' });
@@ -1315,9 +1385,9 @@ it('the small corners of the server capabilities', async () => {
 
   // proposals, as the agent reads them back: pending, and failed with a message
   const mk = (capability: string) => workspace.propose({ userId: user, projectId: pid, client: 'unit', capability, args: {}, summary: 's', preview: { created: [], deleted: [], changed: [] } });
-  const pending = mk('add_layer');
+  const pending = await mk('add_layer');
   expect((await run(c, 'proposal_get', { proposalId: pending.id })).body.result).toMatchObject({ status: 'pending', result: null, error: null });
-  const doomed = mk('not_a_capability');
+  const doomed = await mk('not_a_capability');
   await workspace.decide(user, doomed.id, true);
   expect((await run(c, 'proposal_get', { proposalId: doomed.id })).body.result.error).toBeTruthy();
 
@@ -1325,8 +1395,7 @@ it('the small corners of the server capabilities', async () => {
   await o.session.invoke('add_layer', { type: 'shape', shape: 'star', name: 'unsaved' });
   const { projectsService: ps } = { projectsService };
   const save = vi.spyOn(ps, 'save').mockRejectedValue(new Error('nope'));
-  workspace.close(user, pid);
-  await new Promise((r) => setTimeout(r, 20));
+  await workspace.close(user, pid);
   save.mockRestore();
 });
 
@@ -1341,6 +1410,7 @@ it('smaller rules in projects, users and traffic that only show up with real-loo
   const pub = await projectsService.create(ZED, { name: 'Shared edit', project: {} });
   await projectsService.update(pub.id, ZED, { visibility: 'public', access: 'edit' });
   await expect(projectsService.save(pub.id, IDA, { project: {}, expectedVersion: 999 })).rejects.toMatchObject({ status: 409 });
+  await expect(projectsService.save(randomUUID(), IDA, { project: {} })).rejects.toMatchObject({ status: 404 });
   // bookkeeping failures never fail the request that triggered them
   const { projectsRepository } = await import('../../repositories/projects.repository.js');
   const countView = vi.spyOn(projectsRepository, 'countView').mockRejectedValue(new Error('x'));

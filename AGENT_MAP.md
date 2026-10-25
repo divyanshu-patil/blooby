@@ -133,9 +133,11 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
   `registerCapabilities`. `EditorSession.invoke(id, args)` swaps the session's store snapshot into `useEditor` under a
   global lock → validate (schema, then `normaliseCall`/`validateBatch` for edit tools) → apply → `diffProjects` → OpResult.
   Transactions/checkpoints/idempotency/dryRun/expectedRevision live there.
-- API: `routes/mcp.routes.ts` (`/mcp` Streamable HTTP + SDK `mcpAuthRouter` + `/api/mcp/*`), `services/mcp/server.ts`
+- API: `routes/mcp.routes.ts` (`/mcp` STATELESS Streamable HTTP — a server per POST — + SDK `mcpAuthRouter` + `/api/mcp/*`), `services/mcp/server.ts`
   (tool list per scope/mode/profile, `callTool`, resources, audit, limits), `host.ts` (project/preset/render/export/job
-  caps), `workspace.ts` (session per user+project, autosave 2.5s, `sync` vs stored version, proposals), `auth.service.ts`.
+  caps), `workspace.ts` (cached session per user+project, saved before every mutating call answers, `sync` vs stored version,
+  proposals), `auth.service.ts`. Open project/run/jobs/proposals/live feed are in `utils/sharedState.ts` (Redis or memory), so
+  any instance serves any call — same code on Render and Vercel. Undo/checkpoints/transactions stay per instance.
 - Editor: `useMcpLive` polls `/api/mcp/live`; CloudEditor adopts a newer AI save via `useAutosave().adoptRemote`.
 
 ## Latency (why the API is shaped this way)
@@ -156,7 +158,7 @@ SceneItem[] ─► ui/Mascot.tsx <Shapes>   stage, thumbs, admin splash, raster 
 - An owner's autosave is ONE query: `writeAndBump` puts the object, then compare-and-sets the
   version. Order is load-bearing — a failed upload must leave the row on the whole object.
 - `config/redis.ts` is optional everywhere. It backs the HTTP rate limiters (so "60 a minute"
-  is not 60 per instance) and the invalidation channel. The MCP throttle stays in memory.
+  is not 60 per instance), the invalidation channel and `utils/sharedState.ts` (MCP state). The MCP throttle stays in memory.
 
 ## Sharing (Open Graph)
 - `/og/card.png` and `/og/projects/:id.png` (api `routes/og.routes.ts` + `services/og.service.ts`)

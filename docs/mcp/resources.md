@@ -2,7 +2,7 @@
 
 ## Resources
 
-Read-only context an app can pull in without a tool call. Resources under `blooby://project/current` support **subscriptions**: a subscribed client is sent `notifications/resources/updated` whenever the open project changes, whoever changed it.
+Read-only context an app can pull in without a tool call. There are no subscriptions: the server is stateless, so there is no stream held open between calls to announce a change on. Read the resource again (or call `project_current`) to see the latest.
 
 | URI | Type | Contents |
 |---|---|---|

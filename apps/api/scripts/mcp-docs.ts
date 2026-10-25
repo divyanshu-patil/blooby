@@ -104,3 +104,6 @@ const md = [
 ].join('\n');
 writeFileSync(join(out, 'tools.md'), `${md}\n`);
 console.log(`wrote docs/mcp/tools.md and parity.json — ${list.length} capabilities, ${parity.summary.tested} named in tests, ${parity.notExposed.length} store actions excluded with reasons`);
+// the capability registry imports the MCP host, which holds a Redis connection open when
+// REDIS_URL is set — that would keep this one-shot script running forever
+process.exit(0);
