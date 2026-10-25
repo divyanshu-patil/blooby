@@ -9,7 +9,7 @@ export * from './engine/registry';
 export * from './engine/diff';
 export { EditorSession, CapabilityError, MCP_WORKFLOW, GUIDE_TOPICS, guide, type OpResult, type OpLog, type Checkpoint, type SessionEvent } from './engine/session';
 export { frameSvg, contactSheetSvg, sceneToSvg, type FrameWindow } from './export/frame';
-export { sceneAt, type SceneItem } from './core/scene';
+export { sceneAt, evaluateRig, type SceneItem } from './core/scene';
 /** bounds of what a scene actually draws — how a card or a thumbnail frames the mascot
  *  rather than the whole composition it sits in */
 export { sceneBounds, unionBounds, type Bounds } from './ui/Mascot';
@@ -23,8 +23,9 @@ export { catalogFromRows } from './core/catalog';
 export { compOf } from './core/comp';
 export { migrateProject, SCHEMA_VERSION } from './core/migrate';
 export { packProject, unpackPresets } from './core/presetRefs';
-export { defaultProject, builtinPresets } from './core/defaults';
+export { defaultProject, builtinPresets, presetPreviewProject } from './core/defaults';
 export { SAILORS_PROJECTS, sailorsProject } from './core/sailorsPresets';
+export { mascotKitPresets } from './core/mascotKit';
 export { activeTimeline, type Project, type Preset, type Expression } from './core/types';
 /** core/types.ts as text — the whole data model with the reasoning in its comments */
 export { default as PROJECT_TYPES_SOURCE } from './core/types.ts?raw';

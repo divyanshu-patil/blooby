@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "mcp:docs": "tsx --import ./src/loaders/register.mjs scripts/mcp-docs.ts",
+    "readme:hero": "tsx --import ./src/loaders/register.mjs scripts/readme-hero.ts",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:migrate:status": "tsx scripts/db-migrate.ts --status",
     "db:migrate:baseline": "tsx scripts/db-migrate.ts --baseline"
