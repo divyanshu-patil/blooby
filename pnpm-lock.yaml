@@ -157,6 +157,9 @@ importers:
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       prisma:
         specifier: ^6.3.0
         version: 6.19.3(typescript@6.0.3)

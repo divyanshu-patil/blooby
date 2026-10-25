@@ -22,6 +22,7 @@ export default defineConfig({
         'src/**/*.test.ts',
         'src/types/**',
         'src/index.ts',
+        'src/serverless.ts',
         // Prisma delegation with no branching of our own — a test here would assert that
         // Prisma was called, which is a test of Prisma
         'src/repositories/**',
